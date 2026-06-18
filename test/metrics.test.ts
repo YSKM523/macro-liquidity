@@ -4,6 +4,7 @@ import {
   percentileRank, scoreNetliqTrend, scoreQeQt, scoreCredit, scoreFunding,
   scoreRates, scoreVol, weightedScore,
 } from '../src/metrics';
+import { verdictFromScore, buildReason, computeSnapshot } from '../src/metrics';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
 
@@ -92,5 +93,41 @@ describe('factor scores', () => {
     const f = { netliqTrend:80, qeqt:70, credit:60, funding:90, rates:40, dollar:55, vol:75 };
     const s = weightedScore(f);
     expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('verdict + snapshot', () => {
+  it('verdict bands with dead-zone hysteresis', () => {
+    expect(verdictFromScore(60)).toBe('BULLISH');
+    expect(verdictFromScore(40)).toBe('BEARISH');
+    expect(verdictFromScore(50)).toBe('NEUTRAL');
+    // inside dead-zone, keep previous
+    expect(verdictFromScore(50, 'BULLISH')).toBe('BULLISH');
+  });
+  it('buildReason surfaces the QT-but-liquidity-up divergence', () => {
+    const r = buildReason('QT', 'UP', 'BULLISH');
+    expect(r).toContain('缩表');
+    expect(r).toContain('净流动性');
+  });
+  it('computeSnapshot produces a full snapshot from a SeriesMap', () => {
+    const wk = (start: number, step: number) =>
+      Array.from({ length: 30 }, (_, i) => ({
+        date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
+        value: start + i * step,
+      }));
+    const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+    const m = {
+      WALCL: wk(6000, 15), WTREGEN: wk(700, 0), RRPONTSYD: wk(500, -5),
+      RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
+      BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
+      DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10), value: 120 })),
+      SP500: daily(5000),
+    };
+    const snap = computeSnapshot(m, '2024-07-31');
+    expect(snap.score).toBeGreaterThanOrEqual(0);
+    expect(snap.score).toBeLessThanOrEqual(100);
+    expect(['QE','QT','NEUTRAL']).toContain(snap.qeQtRegime);
+    expect(snap.netliq).toBeCloseTo(snap.walcl! - snap.tga! - snap.rrp!);
+    expect(typeof snap.reason).toBe('string');
   });
 });

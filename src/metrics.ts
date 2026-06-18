@@ -2,7 +2,7 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, VERDICT_BANDS } from './config';
 
 export type Regime = 'QE' | 'QT' | 'NEUTRAL';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
@@ -134,4 +134,81 @@ export function weightedScore(f: Factors): number {
     f.credit * WEIGHTS.credit + f.funding * WEIGHTS.funding +
     f.rates * WEIGHTS.rates + f.dollar * WEIGHTS.dollar + f.vol * WEIGHTS.vol;
   return clamp(s);
+}
+
+// ── Part 4: verdict + reason + computeSnapshot ────────────────────────────────
+
+export type Verdict = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+
+export interface Snapshot {
+  date: string;
+  walcl: number | null; tga: number | null; rrp: number | null; repo: number | null;
+  netliq: number | null; netliqTrend: number | null;
+  sofrIorb: number | null; hyOas: number | null; dgs10: number | null;
+  dxy: number | null; vix: number | null;
+  qeQtRegime: Regime; netliqDir: Direction; verdict: Verdict; score: number;
+  factors: Factors; p0: boolean; p1: boolean; p2: boolean; p3: boolean; reason: string;
+}
+
+export function verdictFromScore(score: number, prev?: Verdict): Verdict {
+  if (score > VERDICT_BANDS.bull) return 'BULLISH';
+  if (score < VERDICT_BANDS.bear) return 'BEARISH';
+  return prev ?? 'NEUTRAL'; // dead-zone keeps previous verdict (hysteresis)
+}
+
+const REGIME_CN: Record<Regime, string> = { QE: '扩表', QT: '缩表', NEUTRAL: '横住' };
+const DIR_CN: Record<Direction, string> = { UP: '在升', DOWN: '在收', FLAT: '走平' };
+const VERDICT_CN: Record<Verdict, string> = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
+
+export function buildReason(regime: Regime, dir: Direction, verdict: Verdict): string {
+  const divergence =
+    (regime === 'QT' && dir === 'UP') ? '(缩表却放水,留意背离)' :
+    (regime === 'QE' && dir === 'DOWN') ? '(扩表却收水,留意背离)' : '';
+  return `Fed ${REGIME_CN[regime]}、净流动性${DIR_CN[dir]} → 环境${VERDICT_CN[verdict]}${divergence}`;
+}
+
+export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Snapshot {
+  const walclWeekly = (m.WALCL ?? []).filter(o => o.date <= date).map(o => o.value);
+  const netliqWeekly = buildWeeklyNetliq(m, date);
+
+  const walcl = asOf(m.WALCL ?? [], date);
+  const tga = asOf(m.WTREGEN ?? [], date);
+  const rrp = asOf(m.RRPONTSYD ?? [], date);
+  const repo = asOf(m.RPONTSYD ?? [], date);
+  const netliq = (walcl != null && tga != null && rrp != null) ? walcl - tga - rrp : null;
+
+  const sofr = asOf(m.SOFR ?? [], date);
+  const iorb = asOf(m.IORB ?? [], date);
+  const sofrIorb = (sofr != null && iorb != null) ? sofr - iorb : null;
+  const hyOas = asOf(m.BAMLH0A0HYM2 ?? [], date);
+  const hyHistory = (m.BAMLH0A0HYM2 ?? []).filter(o => o.date <= date).map(o => o.value);
+  const dgs10 = asOf(m.DGS10 ?? [], date);
+  const delta10y = changeOverDays(m.DGS10 ?? [], date, RATES_LOOKBACK_DAYS);
+  const dxy = asOf(m.DTWEXBGS ?? [], date);
+  const vix = asOf(m.VIXCLS ?? [], date);
+
+  const qeQtRegime = classifyQeQt(walclWeekly);
+  const netliqDir = netliqDirection(netliqWeekly);
+
+  const factors: Factors = {
+    netliqTrend: scoreNetliqTrend(netliqWeekly),
+    qeqt: scoreQeQt(qeQtRegime),
+    credit: hyOas != null ? scoreCredit(hyOas, hyHistory) : 50,
+    funding: sofrIorb != null ? scoreFunding(sofrIorb) : 50,
+    rates: scoreRates(delta10y),
+    dollar: scoreDollar(m.DTWEXBGS ?? [], date),
+    vol: scoreVol(vix),
+  };
+  const score = weightedScore(factors);
+  const verdict = verdictFromScore(score, prev);
+
+  return {
+    date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),
+    sofrIorb, hyOas, dgs10, dxy, vix, qeQtRegime, netliqDir, verdict, score, factors,
+    p0: factors.rates >= 50 && factors.funding >= 50 && factors.credit >= 50,
+    p1: factors.netliqTrend >= 50 || factors.qeqt >= 50,
+    p2: factors.dollar >= 50,
+    p3: factors.vol >= 50,
+    reason: buildReason(qeQtRegime, netliqDir, verdict),
+  };
 }
