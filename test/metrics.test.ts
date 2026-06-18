@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays } from '../src/metrics';
+import { clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, classifyQeQt, netliqDirection } from '../src/metrics';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
 
@@ -33,5 +33,26 @@ describe('primitives', () => {
   it('changeOverDays returns latest minus value ~days ago', () => {
     const s = obs([['2024-01-01', 4.0], ['2024-01-29', 4.5]]);
     expect(changeOverDays(s, '2024-01-29', 20)).toBeCloseTo(0.5);
+  });
+});
+
+describe('regime + direction', () => {
+  it('QE when WALCL rose >epsilon over 13 weeks', () => {
+    const w = Array.from({ length: 14 }, (_, i) => 6000 + i * 20); // +260 over 13
+    expect(classifyQeQt(w)).toBe('QE');
+  });
+  it('QT when WALCL fell >epsilon over 13 weeks', () => {
+    const w = Array.from({ length: 14 }, (_, i) => 7000 - i * 20);
+    expect(classifyQeQt(w)).toBe('QT');
+  });
+  it('NEUTRAL inside dead-band', () => {
+    const w = Array.from({ length: 14 }, () => 6000);
+    expect(classifyQeQt(w)).toBe('NEUTRAL');
+  });
+  it('netliqDirection UP when latest above its SMA and rising', () => {
+    const up = Array.from({ length: 20 }, (_, i) => 4000 + i * 30);
+    expect(netliqDirection(up)).toBe('UP');
+    const down = Array.from({ length: 20 }, (_, i) => 5000 - i * 30);
+    expect(netliqDirection(down)).toBe('DOWN');
   });
 });

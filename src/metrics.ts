@@ -2,6 +2,11 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS } from './config';
+
+export type Regime = 'QE' | 'QT' | 'NEUTRAL';
+export type Direction = 'UP' | 'DOWN' | 'FLAT';
+
 export const clamp = (x: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
 export const linMap = (x: number, a: number, b: number) => clamp(((x - a) / (b - a)) * 100);
 
@@ -37,4 +42,25 @@ export function changeOverDays(series: Obs[], date: string, days: number): numbe
   d.setUTCDate(d.getUTCDate() - days);
   const past = asOf(series, d.toISOString().slice(0, 10));
   return past == null ? null : latest - past;
+}
+
+export function classifyQeQt(walclWeekly: number[]): Regime {
+  if (walclWeekly.length < 14) return 'NEUTRAL';
+  const latest = walclWeekly[walclWeekly.length - 1];
+  const past = walclWeekly[walclWeekly.length - 14]; // 13 weeks back
+  const d = latest - past;
+  if (d > QEQT_EPSILON_B) return 'QE';
+  if (d < -QEQT_EPSILON_B) return 'QT';
+  return 'NEUTRAL';
+}
+
+export function netliqDirection(netliqWeekly: number[]): Direction {
+  const n = NETLIQ_TREND_WEEKS;
+  const ma = sma(netliqWeekly, n);
+  if (ma == null) return 'FLAT';
+  const latest = netliqWeekly[netliqWeekly.length - 1];
+  const rel = (latest - ma) / Math.max(1, Math.abs(ma)); // relative gap
+  if (rel > 0.002) return 'UP';
+  if (rel < -0.002) return 'DOWN';
+  return 'FLAT';
 }
