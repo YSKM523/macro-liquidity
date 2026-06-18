@@ -4,6 +4,7 @@ const FACTOR_LABELS = {
 };
 const VERDICT_CN = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
 const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral' };
+const REGIME_CN = { QE: '扩表 (QE)', QT: '缩表 (QT)', NEUTRAL: '横住' };
 const fmt = (x, d = 2) => (x == null ? '—' : Number(x).toFixed(d));
 
 async function main() {
@@ -30,7 +31,7 @@ function renderVerdict(res) {
   document.getElementById('verdict-label').textContent = VERDICT_CN[v] || '—';
   document.getElementById('verdict-reason').textContent = s.reason || '';
   document.getElementById('regime-sub').innerHTML =
-    `QE/QT:&nbsp;<b>${s.qe_qt_regime || '—'}</b><br>净流动性:&nbsp;<b>${dirCn(s.netliq_dir)}</b>`;
+    `QE/QT:&nbsp;<b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b><br>净流动性:&nbsp;<b>${dirCn(s.netliq_dir)}</b>`;
   const live = res.live || {};
   document.getElementById('asof').textContent =
     `SPX ${fmt(live.spx)} · VIX ${fmt(live.vix)} · DXY ${fmt(live.dxy)} · 10Y ${fmt(live.us10y)}%`;
