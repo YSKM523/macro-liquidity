@@ -1,1 +1,49 @@
-<!doctype html><meta charset="utf-8"><title>Macro Liquidity</title><h1>ok</h1>
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>美股流动性看板</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="topbar">
+      <h1>美股流动性看板</h1>
+      <span class="asof" id="asof">—</span>
+    </header>
+
+    <section class="card verdict" id="verdict-card">
+      <div class="verdict-main">
+        <div class="verdict-label" id="verdict-label">—</div>
+        <div class="verdict-reason" id="verdict-reason">加载中…</div>
+      </div>
+      <div class="verdict-sub" id="regime-sub"></div>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h2>顺风指数</h2>
+        <div class="gauge"><div class="gauge-fill" id="score-gauge"></div></div>
+        <div class="score-num" id="score-num">—</div>
+        <div class="factor-bars" id="factor-bars"></div>
+      </section>
+      <section class="card chart-card">
+        <h2>净流动性 vs 标普500</h2>
+        <div id="chart"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>因子明细</h2>
+      <table class="factor-table" id="factor-table">
+        <thead><tr><th>因子</th><th>读数</th><th>状态</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/vendor/lightweight-charts.standalone.production.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

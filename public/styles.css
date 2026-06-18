@@ -1,0 +1,37 @@
+:root{
+  --bg:#FFFFFF; --surface:#F6F8FA; --ink:#1A1F36; --muted:#697386;
+  --line:#E3E8EE; --accent:#635BFF; --green:#1A7F4B; --red:#C0392B; --amber:#B7791F;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface);color:var(--ink);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
+.container{max-width:1080px;margin:0 auto;padding:24px}
+.topbar{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:20px}
+.topbar h1{font-size:20px;margin:0}
+.asof{color:var(--muted);font-size:13px}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}
+.card h2{font-size:14px;color:var(--muted);margin:0 0 16px;font-weight:600}
+.verdict{display:flex;justify-content:space-between;align-items:center}
+.verdict-label{font-size:34px;font-weight:700}
+.verdict-reason{color:var(--muted);margin-top:6px;font-size:14px}
+.verdict-sub{color:var(--ink);font-size:14px;text-align:right;line-height:1.7}
+.verdict.bull{border-left:4px solid var(--green)}
+.verdict.bear{border-left:4px solid var(--red)}
+.verdict.neutral{border-left:4px solid var(--amber)}
+.grid{display:grid;grid-template-columns:1fr 1.4fr;gap:20px}
+.grid .card{margin-bottom:0}
+.gauge{height:10px;background:var(--surface);border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.gauge-fill{height:100%;width:0;background:var(--accent)}
+.score-num{font-size:40px;font-weight:700;margin:12px 0 16px}
+.factor-bars{display:flex;flex-direction:column;gap:8px}
+.fb{display:grid;grid-template-columns:96px 1fr 32px;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.fb .track{height:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.fb .bar{height:100%;background:var(--accent)}
+#chart{height:320px}
+.factor-table{width:100%;border-collapse:collapse;font-size:14px}
+.factor-table th,.factor-table td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line)}
+.factor-table th{color:var(--muted);font-weight:600}
+.tag{font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+.tag.ok{color:var(--green)} .tag.bad{color:var(--red)}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
