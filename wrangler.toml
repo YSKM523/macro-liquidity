@@ -1,0 +1,18 @@
+name = "macro-liquidity-dashboard"
+main = "src/worker.ts"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "macro_liquidity"
+database_id = "REPLACE_AFTER_d1_create"
+
+[triggers]
+crons = ["30 22 * * *"]
+
+[vars]
+START_DATE = "2003-01-01"

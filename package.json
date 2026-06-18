@@ -1,0 +1,19 @@
+{
+  "name": "macro-liquidity-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 execute macro_liquidity --local --file=./migrations/0001_init.sql",
+    "migrate:remote": "wrangler d1 execute macro_liquidity --remote --file=./migrations/0001_init.sql"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "wrangler": "^3.80.0",
+    "@cloudflare/workers-types": "^4.20240909.0"
+  }
+}
