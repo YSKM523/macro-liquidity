@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, classifyQeQt, netliqDirection } from '../src/metrics';
+import {
+  clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, classifyQeQt, netliqDirection,
+  percentileRank, scoreNetliqTrend, scoreQeQt, scoreCredit, scoreFunding,
+  scoreRates, scoreVol, weightedScore,
+} from '../src/metrics';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
 
@@ -54,5 +58,39 @@ describe('regime + direction', () => {
     expect(netliqDirection(up)).toBe('UP');
     const down = Array.from({ length: 20 }, (_, i) => 5000 - i * 30);
     expect(netliqDirection(down)).toBe('DOWN');
+  });
+});
+
+describe('factor scores', () => {
+  it('percentileRank ranks within history', () => {
+    expect(percentileRank(5, [1,2,3,4,5,6,7,8,9,10])).toBeCloseTo(0.5, 1);
+  });
+  it('rising net liquidity scores higher than falling, all within [0,100]', () => {
+    const rising = Array.from({ length: 20 }, (_, i) => 4000 + i * 30);
+    const falling = Array.from({ length: 20 }, (_, i) => 5000 - i * 30);
+    const r = scoreNetliqTrend(rising), f = scoreNetliqTrend(falling);
+    expect(r).toBeGreaterThan(f);
+    for (const s of [r, f]) { expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100); }
+  });
+  it('QE scores higher than QT', () => {
+    expect(scoreQeQt('QE')).toBeGreaterThan(scoreQeQt('QT'));
+  });
+  it('tight credit (low OAS) scores higher than wide', () => {
+    const hist = Array.from({ length: 50 }, (_, i) => 3 + i * 0.1); // 3..~8
+    expect(scoreCredit(3.2, hist)).toBeGreaterThan(scoreCredit(7.5, hist));
+  });
+  it('funding stress (sofr-iorb>0) penalized', () => {
+    expect(scoreFunding(-0.02)).toBeGreaterThan(scoreFunding(0.10));
+  });
+  it('fast-rising yields = headwind (lower score)', () => {
+    expect(scoreRates(0.5)).toBeLessThan(scoreRates(-0.5));
+  });
+  it('low VIX scores higher than high VIX', () => {
+    expect(scoreVol(14)).toBeGreaterThan(scoreVol(35));
+  });
+  it('weightedScore stays in [0,100]', () => {
+    const f = { netliqTrend:80, qeqt:70, credit:60, funding:90, rates:40, dollar:55, vol:75 };
+    const s = weightedScore(f);
+    expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
   });
 });
