@@ -31,8 +31,12 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
   if (!lastWalcl) return { updated, snapshots: 0 };
 
   const lastDate = lastWalcl;
+  // Full rebuild samples at the weekly WALCL cadence the macro data actually moves on:
+  // net liquidity only changes weekly, so computing a snapshot for every calendar day
+  // over many years is O(N^2) and pointless. The daily cron (rebuildAll=false) keeps the
+  // most recent 14 days at daily granularity.
   const dates = rebuildAll
-    ? eachDay((m.WALCL ?? [])[0]?.date ?? env.START_DATE, lastDate)
+    ? (m.WALCL ?? []).map(o => o.date).filter(d => d <= lastDate)
     : eachDay(addDays(lastDate, -14), lastDate);
 
   let prev: Verdict | undefined;
