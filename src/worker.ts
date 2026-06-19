@@ -1,8 +1,9 @@
 import type { Env } from './service';
 import { runIngest } from './service';
 import { latestSnapshot, snapshotHistory, loadBacktestRows } from './db';
-import { fetchLivePrices } from './prices';
-import { policyRegime } from './metrics';
+import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
+import { policyRegime, downgradeVerdict } from './metrics';
+import { STRESS_SCORE_CEILING } from './config';
 import { runBacktest } from './backtest';
 
 const json = (data: unknown, status = 200) =>
@@ -15,8 +16,17 @@ export default {
 
     if (p === '/api/snapshot') {
       const row: any = await latestSnapshot(env.DB);
-      const snap = row ? { ...row, policy_regime: policyRegime(row.qe_qt_regime, row.date) } : null;
-      const live = await fetchLivePrices(new Date().toISOString());
+      const [live, stress] = await Promise.all([
+        fetchLivePrices(new Date().toISOString()),
+        fetchStressSeries().then(s => evaluateLiveStress(s)),
+      ]);
+      let snap: any = null;
+      if (row) {
+        const display_verdict = (stress.stressed && row.score < STRESS_SCORE_CEILING)
+          ? downgradeVerdict(row.verdict)
+          : row.verdict;
+        snap = { ...row, policy_regime: policyRegime(row.qe_qt_regime, row.date), display_verdict, live_stress: stress };
+      }
       return json({ snapshot: snap, live });
     }
     if (p === '/api/history') {

@@ -28,3 +28,11 @@ export const QEQT_EPSILON_B = 50;        // ΔWALCL 13w dead-band (billions), in
 export const NETLIQ_TREND_WEEKS = 13;    // ~1 quarter
 export const RATES_LOOKBACK_DAYS = 20;   // ~4 weeks for Δ10Y
 export const VERDICT_BANDS = { bull: 55, bear: 45 } as const;
+
+export const STRESS = {
+  vix: 28,       // VIX absolute level
+  spxDd: -0.04,  // SPX 5-day return < -4%
+  y10: 0.25,     // 10Y 5-day change > +0.25pp
+  dxy: 0.02,     // DXY 5-day return > +2%
+} as const;
+export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade (strong regime beats short noise)

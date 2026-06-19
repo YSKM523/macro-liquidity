@@ -27,10 +27,29 @@ function threeYearsAgo() {
 function renderVerdict(res) {
   const s = res.snapshot || {};
   const card = document.getElementById('verdict-card');
-  const v = s.verdict || 'NEUTRAL';
-  card.classList.add(VERDICT_CLASS[v]);
-  document.getElementById('verdict-label').textContent = VERDICT_CN[v] || '—';
+  const macroV = s.verdict || 'NEUTRAL';
+  const displayV = s.display_verdict || macroV;
+  card.classList.add(VERDICT_CLASS[displayV]);
+  document.getElementById('verdict-label').textContent = VERDICT_CN[displayV] || '—';
   document.getElementById('verdict-reason').textContent = s.reason || '';
+
+  // Live stress overlay
+  const stress = s.live_stress;
+  const banner = document.getElementById('stress-banner');
+  const note = document.getElementById('stress-note');
+  if (stress && stress.stressed) {
+    banner.textContent = '⚠️ 实时风险覆盖:' + stress.reasons.join('、');
+    banner.style.display = '';
+    if (displayV !== macroV) {
+      note.textContent = `(宏观判断 ${VERDICT_CN[macroV]},因实时风险下调一级)`;
+      note.style.display = '';
+    } else {
+      note.style.display = 'none';
+    }
+  } else {
+    banner.style.display = 'none';
+    note.style.display = 'none';
+  }
   const policy = s.policy_regime ? (POLICY_CN[s.policy_regime] || s.policy_regime) : '—';
   document.getElementById('regime-sub').innerHTML =
     `资产负债表:&nbsp;<b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b><br>净流动性:&nbsp;<b>${dirCn(s.netliq_dir)}</b><br>政策阶段:&nbsp;<b>${policy}</b>`;

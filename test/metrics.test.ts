@@ -4,7 +4,7 @@ import {
   percentileRank, scoreNetliqTrend, scoreImpulse, scoreCredit, scoreFunding,
   scoreRates, scoreVol, weightedScore,
 } from '../src/metrics';
-import { verdictFromScore, buildReason, computeSnapshot, policyRegime } from '../src/metrics';
+import { verdictFromScore, buildReason, computeSnapshot, policyRegime, downgradeVerdict } from '../src/metrics';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
 
@@ -156,6 +156,18 @@ describe('computeSnapshot coverage', () => {
     const partialMap = { ...fullMap, VIXCLS: [], BAMLH0A0HYM2: [] };
     const snap = computeSnapshot(partialMap, '2024-07-31');
     expect(snap.coverage).toBeCloseTo(5 / 7);
+  });
+});
+
+describe('downgradeVerdict', () => {
+  it('BULLISH → NEUTRAL', () => {
+    expect(downgradeVerdict('BULLISH')).toBe('NEUTRAL');
+  });
+  it('NEUTRAL → BEARISH', () => {
+    expect(downgradeVerdict('NEUTRAL')).toBe('BEARISH');
+  });
+  it('BEARISH stays BEARISH', () => {
+    expect(downgradeVerdict('BEARISH')).toBe('BEARISH');
   });
 });
 

@@ -157,6 +157,10 @@ export function verdictFromScore(score: number, prev?: Verdict): Verdict {
   return prev ?? 'NEUTRAL'; // dead-zone keeps previous verdict (hysteresis)
 }
 
+export function downgradeVerdict(v: Verdict): Verdict {
+  return v === 'BULLISH' ? 'NEUTRAL' : v === 'NEUTRAL' ? 'BEARISH' : 'BEARISH';
+}
+
 const IMPULSE_CN: Record<Impulse, string> = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住' };
 const DIR_CN: Record<Direction, string> = { UP: '在升', DOWN: '在收', FLAT: '走平' };
 const VERDICT_CN: Record<Verdict, string> = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
