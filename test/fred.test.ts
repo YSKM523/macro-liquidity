@@ -21,4 +21,10 @@ describe('parseFredJson', () => {
     const json = { observations: [{ date: '2024-01-03', value: '550.5' }] };
     expect(parseFredJson('RRPONTSYD', json)[0].value).toBeCloseTo(550.5);
   });
+
+  it('converts WTREGEN (TGA) millions to billions', () => {
+    // FRED reports WTREGEN in millions (H.4.1), like WALCL — e.g. 880713 → $880.7B
+    const json = { observations: [{ date: '2024-01-03', value: '880713' }] };
+    expect(parseFredJson('WTREGEN', json)[0].value).toBeCloseTo(880.713);
+  });
 });

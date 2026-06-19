@@ -1,7 +1,7 @@
 // unit: 'M' millions→/1000 billions; 'B' billions; 'P' percent; 'I' index
 export const SERIES = {
   WALCL:        { id: 'WALCL',        unit: 'M' },
-  WTREGEN:      { id: 'WTREGEN',      unit: 'B' },
+  WTREGEN:      { id: 'WTREGEN',      unit: 'M' },
   RRPONTSYD:    { id: 'RRPONTSYD',    unit: 'B' },
   RPONTSYD:     { id: 'RPONTSYD',     unit: 'B' },
   SOFR:         { id: 'SOFR',         unit: 'P' },
