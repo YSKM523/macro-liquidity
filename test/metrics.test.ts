@@ -30,7 +30,7 @@ describe('primitives', () => {
   it('buildWeeklyNetliq = WALCL - TGA - RRP at WALCL weekly dates', () => {
     const m = {
       WALCL: obs([['2024-01-03', 6000], ['2024-01-10', 6100]]),
-      WTREGEN: obs([['2024-01-03', 700], ['2024-01-10', 700]]),
+      WDTGAL: obs([['2024-01-03', 700], ['2024-01-10', 700]]),
       RRPONTSYD: obs([['2024-01-02', 500], ['2024-01-09', 400]]),
     };
     expect(buildWeeklyNetliq(m, '2024-01-10')).toEqual([4800, 5000]);
@@ -117,7 +117,7 @@ describe('verdict + snapshot', () => {
       }));
     const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
     const m = {
-      WALCL: wk(6000, 15), WTREGEN: wk(700, 0), RRPONTSYD: wk(500, -5),
+      WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
       RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
       BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
       DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10), value: 120 })),

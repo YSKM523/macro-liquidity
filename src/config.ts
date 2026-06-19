@@ -2,6 +2,7 @@
 export const SERIES = {
   WALCL:        { id: 'WALCL',        unit: 'M' },
   WTREGEN:      { id: 'WTREGEN',      unit: 'M' },
+  WDTGAL:       { id: 'WDTGAL',       unit: 'M' },
   RRPONTSYD:    { id: 'RRPONTSYD',    unit: 'B' },
   RPONTSYD:     { id: 'RPONTSYD',     unit: 'B' },
   SOFR:         { id: 'SOFR',         unit: 'P' },

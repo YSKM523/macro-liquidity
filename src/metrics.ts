@@ -27,7 +27,7 @@ export function buildWeeklyNetliq(m: SeriesMap, upTo: string): number[] {
   const out: number[] = [];
   for (const w of walcl) {
     if (w.date > upTo) break;
-    const tga = asOf(m.WTREGEN ?? [], w.date);
+    const tga = asOf(m.WDTGAL ?? [], w.date);
     const rrp = asOf(m.RRPONTSYD ?? [], w.date);
     if (tga == null || rrp == null) continue;
     out.push(w.value - tga - rrp);
@@ -172,7 +172,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const netliqWeekly = buildWeeklyNetliq(m, date);
 
   const walcl = asOf(m.WALCL ?? [], date);
-  const tga = asOf(m.WTREGEN ?? [], date);
+  const tga = asOf(m.WDTGAL ?? [], date);
   const rrp = asOf(m.RRPONTSYD ?? [], date);
   const repo = asOf(m.RPONTSYD ?? [], date);
   const netliq = (walcl != null && tga != null && rrp != null) ? walcl - tga - rrp : null;

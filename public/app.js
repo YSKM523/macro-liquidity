@@ -66,7 +66,7 @@ function renderFactorTable(res) {
     ['10Y 收益率', fmt(live.us10y) + '%', null],
     ['SOFR−IORB', fmt(s.sofr_iorb, 3), (s.sofr_iorb ?? 1) <= 0.05],
     ['HY OAS', fmt(s.hy_oas, 2), null],
-    ['美元 (DXY live)', fmt(live.dxy), null],
+    ['美元 (ICE DXY,实时仅展示)', fmt(live.dxy), null],
     ['VIX', fmt(live.vix), (live.vix ?? 99) < 25],
   ];
   tbody.innerHTML = rows.map(([k, v, ok]) =>
