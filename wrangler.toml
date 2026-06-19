@@ -15,4 +15,4 @@ database_id = "5ee92b9b-eb8e-4c34-9479-b0838fa113fb"
 crons = ["0 */3 * * *"]
 
 [vars]
-START_DATE = "2020-01-01"
+START_DATE = "2016-01-01"
