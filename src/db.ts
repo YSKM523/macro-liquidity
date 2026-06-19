@@ -65,3 +65,10 @@ export async function distinctSnapshotDates(db: D1Database, lastN: number): Prom
     .bind(lastN).all<{ date: string }>();
   return (rs.results ?? []).map(r => r.date).reverse();
 }
+
+export async function loadBacktestRows(db: D1Database): Promise<any[]> {
+  const rs = await db.prepare(
+    'SELECT date, score, spx, verdict, factors_json FROM daily_snapshot WHERE spx IS NOT NULL ORDER BY date'
+  ).all();
+  return rs.results ?? [];
+}

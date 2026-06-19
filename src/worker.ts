@@ -1,8 +1,9 @@
 import type { Env } from './service';
 import { runIngest } from './service';
-import { latestSnapshot, snapshotHistory } from './db';
+import { latestSnapshot, snapshotHistory, loadBacktestRows } from './db';
 import { fetchLivePrices } from './prices';
 import { policyRegime } from './metrics';
+import { runBacktest } from './backtest';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -25,6 +26,13 @@ export default {
     }
     if (p === '/api/prices') {
       return json(await fetchLivePrices(new Date().toISOString()));
+    }
+    if (p === '/api/backtest') {
+      const rows = await loadBacktestRows(env.DB);
+      const snaps = rows
+        .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
+        .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
+      return json(runBacktest(snaps));
     }
     if (p === '/api/admin/refresh' && req.method === 'POST') {
       const auth = req.headers.get('authorization') ?? '';
