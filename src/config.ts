@@ -27,6 +27,7 @@ export const WEIGHTS = { netliqTrend: 0.50, impulse: 0.05, credit: 0.15, funding
 export const QEQT_EPSILON_B = 50;        // ΔWALCL 13w dead-band (billions), initial
 export const NETLIQ_TREND_WEEKS = 13;    // ~1 quarter
 export const RATES_LOOKBACK_DAYS = 20;   // ~4 weeks for Δ10Y
+export const CREDIT_LOOKBACK_DAYS = 20;  // ΔHY OAS 动量窗口(~4 周)
 export const VERDICT_BANDS = { bull: 55, bear: 45 } as const;
 
 export const STRESS = {

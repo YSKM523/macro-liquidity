@@ -76,9 +76,37 @@ describe('factor scores', () => {
   it('EXPANDING scores higher than CONTRACTING', () => {
     expect(scoreImpulse('EXPANDING')).toBeGreaterThan(scoreImpulse('CONTRACTING'));
   });
-  it('tight credit (low OAS) scores higher than wide', () => {
+  it('tight credit (low OAS, falling spreads) scores higher than wide', () => {
     const hist = Array.from({ length: 50 }, (_, i) => 3 + i * 0.1); // 3..~8
-    expect(scoreCredit(3.2, hist)).toBeGreaterThan(scoreCredit(7.5, hist));
+    // low OAS falling (delta=-0.30): bullish
+    expect(scoreCredit(3.2, hist, -0.30)).toBeGreaterThan(scoreCredit(7.5, hist, -0.30));
+  });
+  it('low-and-rising spreads score meaningfully lower than low-and-falling', () => {
+    const h = [3, 4, 5, 6, 7, 8];
+    const fallingScore = scoreCredit(3.2, h, -0.30);  // low OAS, tightening → bullish
+    const risingScore  = scoreCredit(3.2, h, +0.30);  // low OAS, widening → fragility trigger
+    expect(fallingScore).toBeGreaterThan(risingScore);
+  });
+  it('fragility penalty: low-pct + delta>0.20 scores lower than low-pct + delta=+0.10', () => {
+    const h = [3, 4, 5, 6, 7, 8];
+    // both have low momentum, but +0.30 triggers fragility (-15), +0.10 does not
+    const withFragility    = scoreCredit(3.2, h, +0.30);
+    const withoutFragility = scoreCredit(3.2, h, +0.10);
+    expect(withFragility).toBeLessThan(withoutFragility);
+  });
+  it('delta20=null falls back to momentum=50, does not crash', () => {
+    const h = [3, 4, 5, 6, 7, 8];
+    const score = scoreCredit(3.2, h, null);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(100);
+  });
+  it('scoreCredit output stays in [0,100]', () => {
+    const h = Array.from({ length: 50 }, (_, i) => 3 + i * 0.1);
+    for (const delta of [-2, -0.30, 0, +0.30, +2, null] as (number | null)[]) {
+      const s = scoreCredit(3.2, h, delta);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThanOrEqual(100);
+    }
   });
   it('funding stress (sofr-iorb>0) penalized', () => {
     expect(scoreFunding(-0.02)).toBeGreaterThan(scoreFunding(0.10));

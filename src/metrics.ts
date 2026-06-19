@@ -2,7 +2,7 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE } from './config';
 
 export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
@@ -91,10 +91,13 @@ export function scoreImpulse(impulse: Impulse): number {
   return impulse === 'EXPANDING' ? 80 : impulse === 'CONTRACTING' ? 30 : 55;
 }
 
-export function scoreCredit(hyLatest: number, hyHistory: number[]): number {
-  // low OAS percentile = calm credit = bullish → invert percentile
-  const pct = percentileRank(hyLatest, hyHistory); // 0 low .. 1 high
-  return clamp((1 - pct) * 100);
+export function scoreCredit(hyLatest: number, hyHistory: number[], delta20: number | null): number {
+  const pct      = percentileRank(hyLatest, hyHistory);            // 0 low .. 1 high
+  const calm     = clamp((1 - pct) * 100);                         // level: low OAS → high (original logic)
+  const momentum = delta20 == null ? 50 : linMap(delta20, 1.00, -0.25); // spread tightening (Δ<0) → high; widening (Δ>0) → low
+  // fragility: spread at historical extreme low (<15th pct) but starting to widen (Δ>0.20pp) = complacency cracking
+  const fragility = (pct < 0.15 && delta20 != null && delta20 > 0.20) ? 15 : 0;
+  return clamp(0.55 * calm + 0.45 * momentum - fragility);
 }
 
 export function scoreFunding(sofrIorb: number): number {
@@ -196,6 +199,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const sofrIorb = (sofr != null && iorb != null) ? sofr - iorb : null;
   const hyOas = asOf(m.BAMLH0A0HYM2 ?? [], date);
   const hyHistory = (m.BAMLH0A0HYM2 ?? []).filter(o => o.date <= date).map(o => o.value);
+  const creditDelta = changeOverDays(m.BAMLH0A0HYM2 ?? [], date, CREDIT_LOOKBACK_DAYS);
   const dgs10 = asOf(m.DGS10 ?? [], date);
   const delta10y = changeOverDays(m.DGS10 ?? [], date, RATES_LOOKBACK_DAYS);
   const dxy = asOf(m.DTWEXBGS ?? [], date);
@@ -207,7 +211,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const factors: Factors = {
     netliqTrend: scoreNetliqTrend(netliqWeekly),
     impulse: scoreImpulse(bsImpulse),
-    credit: hyOas != null ? scoreCredit(hyOas, hyHistory) : 50,
+    credit: hyOas != null ? scoreCredit(hyOas, hyHistory, creditDelta) : 50,
     funding: sofrIorb != null ? scoreFunding(sofrIorb) : 50,
     rates: scoreRates(delta10y),
     dollar: scoreDollar(m.DTWEXBGS ?? [], date),
