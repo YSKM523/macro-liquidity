@@ -9,7 +9,7 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "macro_liquidity"
-database_id = "REPLACE_AFTER_d1_create"
+database_id = "5ee92b9b-eb8e-4c34-9479-b0838fa113fb"
 
 [triggers]
 crons = ["30 22 * * *"]
