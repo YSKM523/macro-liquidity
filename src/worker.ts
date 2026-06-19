@@ -2,6 +2,7 @@ import type { Env } from './service';
 import { runIngest } from './service';
 import { latestSnapshot, snapshotHistory } from './db';
 import { fetchLivePrices } from './prices';
+import { policyRegime } from './metrics';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -12,7 +13,8 @@ export default {
     const p = url.pathname;
 
     if (p === '/api/snapshot') {
-      const snap = await latestSnapshot(env.DB);
+      const row: any = await latestSnapshot(env.DB);
+      const snap = row ? { ...row, policy_regime: policyRegime(row.qe_qt_regime, row.date) } : null;
       const live = await fetchLivePrices(new Date().toISOString());
       return json({ snapshot: snap, live });
     }

@@ -1,10 +1,11 @@
 const FACTOR_LABELS = {
-  netliqTrend: '净流动性', qeqt: 'QE/QT', credit: '信用', funding: '资金面',
+  netliqTrend: '净流动性', impulse: '资产负债表', credit: '信用', funding: '资金面',
   rates: '利率冲量', dollar: '美元', vol: '波动',
 };
 const VERDICT_CN = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
 const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral' };
-const REGIME_CN = { QE: '扩表 (QE)', QT: '缩表 (QT)', NEUTRAL: '横住' };
+const REGIME_CN = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住' };
+const POLICY_CN = { QE: 'QE(宽松)', QT: 'QT(紧缩)', RESERVE_MGMT: '准备金管理(QT已结束)', NEUTRAL: '中性' };
 const fmt = (x, d = 2) => (x == null ? '—' : Number(x).toFixed(d));
 
 async function main() {
@@ -30,8 +31,9 @@ function renderVerdict(res) {
   card.classList.add(VERDICT_CLASS[v]);
   document.getElementById('verdict-label').textContent = VERDICT_CN[v] || '—';
   document.getElementById('verdict-reason').textContent = s.reason || '';
+  const policy = s.policy_regime ? (POLICY_CN[s.policy_regime] || s.policy_regime) : '—';
   document.getElementById('regime-sub').innerHTML =
-    `QE/QT:&nbsp;<b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b><br>净流动性:&nbsp;<b>${dirCn(s.netliq_dir)}</b>`;
+    `资产负债表:&nbsp;<b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b><br>净流动性:&nbsp;<b>${dirCn(s.netliq_dir)}</b><br>政策阶段:&nbsp;<b>${policy}</b>`;
   const live = res.live || {};
   document.getElementById('asof').textContent =
     `SPX ${fmt(live.spx)} · VIX ${fmt(live.vix)} · DXY ${fmt(live.dxy)} · 10Y ${fmt(live.us10y)}%`;

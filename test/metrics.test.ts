@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, classifyQeQt, netliqDirection,
-  percentileRank, scoreNetliqTrend, scoreQeQt, scoreCredit, scoreFunding,
+  clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, balanceSheetImpulse, netliqDirection,
+  percentileRank, scoreNetliqTrend, scoreImpulse, scoreCredit, scoreFunding,
   scoreRates, scoreVol, weightedScore,
 } from '../src/metrics';
-import { verdictFromScore, buildReason, computeSnapshot } from '../src/metrics';
+import { verdictFromScore, buildReason, computeSnapshot, policyRegime } from '../src/metrics';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
 
@@ -41,18 +41,18 @@ describe('primitives', () => {
   });
 });
 
-describe('regime + direction', () => {
-  it('QE when WALCL rose >epsilon over 13 weeks', () => {
+describe('balanceSheetImpulse + direction', () => {
+  it('EXPANDING when WALCL rose >epsilon over 13 weeks', () => {
     const w = Array.from({ length: 14 }, (_, i) => 6000 + i * 20); // +260 over 13
-    expect(classifyQeQt(w)).toBe('QE');
+    expect(balanceSheetImpulse(w)).toBe('EXPANDING');
   });
-  it('QT when WALCL fell >epsilon over 13 weeks', () => {
+  it('CONTRACTING when WALCL fell >epsilon over 13 weeks', () => {
     const w = Array.from({ length: 14 }, (_, i) => 7000 - i * 20);
-    expect(classifyQeQt(w)).toBe('QT');
+    expect(balanceSheetImpulse(w)).toBe('CONTRACTING');
   });
-  it('NEUTRAL inside dead-band', () => {
+  it('FLAT inside dead-band', () => {
     const w = Array.from({ length: 14 }, () => 6000);
-    expect(classifyQeQt(w)).toBe('NEUTRAL');
+    expect(balanceSheetImpulse(w)).toBe('FLAT');
   });
   it('netliqDirection UP when latest above its SMA and rising', () => {
     const up = Array.from({ length: 20 }, (_, i) => 4000 + i * 30);
@@ -73,8 +73,8 @@ describe('factor scores', () => {
     expect(r).toBeGreaterThan(f);
     for (const s of [r, f]) { expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100); }
   });
-  it('QE scores higher than QT', () => {
-    expect(scoreQeQt('QE')).toBeGreaterThan(scoreQeQt('QT'));
+  it('EXPANDING scores higher than CONTRACTING', () => {
+    expect(scoreImpulse('EXPANDING')).toBeGreaterThan(scoreImpulse('CONTRACTING'));
   });
   it('tight credit (low OAS) scores higher than wide', () => {
     const hist = Array.from({ length: 50 }, (_, i) => 3 + i * 0.1); // 3..~8
@@ -90,7 +90,7 @@ describe('factor scores', () => {
     expect(scoreVol(14)).toBeGreaterThan(scoreVol(35));
   });
   it('weightedScore stays in [0,100]', () => {
-    const f = { netliqTrend:80, qeqt:70, credit:60, funding:90, rates:40, dollar:55, vol:75 };
+    const f = { netliqTrend:80, impulse:70, credit:60, funding:90, rates:40, dollar:55, vol:75 };
     const s = weightedScore(f);
     expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
   });
@@ -104,8 +104,8 @@ describe('verdict + snapshot', () => {
     // inside dead-zone, keep previous
     expect(verdictFromScore(50, 'BULLISH')).toBe('BULLISH');
   });
-  it('buildReason surfaces the QT-but-liquidity-up divergence', () => {
-    const r = buildReason('QT', 'UP', 'BULLISH');
+  it('buildReason surfaces the CONTRACTING-but-liquidity-up divergence', () => {
+    const r = buildReason('CONTRACTING', 'UP', 'BULLISH');
     expect(r).toContain('缩表');
     expect(r).toContain('净流动性');
   });
@@ -126,8 +126,25 @@ describe('verdict + snapshot', () => {
     const snap = computeSnapshot(m, '2024-07-31');
     expect(snap.score).toBeGreaterThanOrEqual(0);
     expect(snap.score).toBeLessThanOrEqual(100);
-    expect(['QE','QT','NEUTRAL']).toContain(snap.qeQtRegime);
+    expect(['EXPANDING','CONTRACTING','FLAT']).toContain(snap.bsImpulse);
     expect(snap.netliq).toBeCloseTo(snap.walcl! - snap.tga! - snap.rrp!);
     expect(typeof snap.reason).toBe('string');
+  });
+});
+
+describe('policyRegime', () => {
+  it('returns RESERVE_MGMT for any date >= QT_END_DATE', () => {
+    expect(policyRegime('EXPANDING', '2026-06-17')).toBe('RESERVE_MGMT');
+    expect(policyRegime('CONTRACTING', '2025-12-01')).toBe('RESERVE_MGMT');
+    expect(policyRegime('FLAT', '2025-12-15')).toBe('RESERVE_MGMT');
+  });
+  it('returns QE for EXPANDING before QT_END_DATE', () => {
+    expect(policyRegime('EXPANDING', '2021-01-01')).toBe('QE');
+  });
+  it('returns QT for CONTRACTING before QT_END_DATE', () => {
+    expect(policyRegime('CONTRACTING', '2023-01-01')).toBe('QT');
+  });
+  it('returns NEUTRAL for FLAT before QT_END_DATE', () => {
+    expect(policyRegime('FLAT', '2024-06-01')).toBe('NEUTRAL');
   });
 });

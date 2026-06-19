@@ -42,7 +42,7 @@ export async function upsertSnapshot(db: D1Database, s: Snapshot, spx: number | 
        spx=excluded.spx, reason=excluded.reason, factors_json=excluded.factors_json`
   ).bind(
     s.date, s.walcl, s.tga, s.rrp, s.repo, s.netliq, s.netliqTrend, s.sofrIorb, s.hyOas, s.dgs10,
-    s.dxy, s.vix, s.qeQtRegime, s.netliqDir, s.verdict, s.score,
+    s.dxy, s.vix, s.bsImpulse, s.netliqDir, s.verdict, s.score,
     s.p0 ? 1 : 0, s.p1 ? 1 : 0, s.p2 ? 1 : 0, s.p3 ? 1 : 0,
     spx, s.reason, JSON.stringify(s.factors)
   ).run();

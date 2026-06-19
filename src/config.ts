@@ -19,7 +19,9 @@ export const UNIT_BY_ID: Record<string, string> =
   Object.fromEntries(Object.values(SERIES).map(s => [s.id, s.unit]));
 
 export const START_DATE = '2003-01-01';
-export const WEIGHTS = { netliqTrend: 0.35, qeqt: 0.15, credit: 0.15, funding: 0.10, rates: 0.10, dollar: 0.08, vol: 0.07 } as const;
+// Fed 在 2025-10-29 FOMC 宣布证券持仓缩减于 2025-12-01 结束(分析师引用,如有变更改此处)
+export const QT_END_DATE = '2025-12-01';
+export const WEIGHTS = { netliqTrend: 0.45, impulse: 0.05, credit: 0.15, funding: 0.10, rates: 0.10, dollar: 0.08, vol: 0.07 } as const;
 export const QEQT_EPSILON_B = 50;        // ΔWALCL 13w dead-band (billions), initial
 export const NETLIQ_TREND_WEEKS = 13;    // ~1 quarter
 export const RATES_LOOKBACK_DAYS = 20;   // ~4 weeks for Δ10Y

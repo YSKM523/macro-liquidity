@@ -2,9 +2,9 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, VERDICT_BANDS } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE } from './config';
 
-export type Regime = 'QE' | 'QT' | 'NEUTRAL';
+export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
 
 export const clamp = (x: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
@@ -44,14 +44,14 @@ export function changeOverDays(series: Obs[], date: string, days: number): numbe
   return past == null ? null : latest - past;
 }
 
-export function classifyQeQt(walclWeekly: number[]): Regime {
-  if (walclWeekly.length < 14) return 'NEUTRAL';
+export function balanceSheetImpulse(walclWeekly: number[]): Impulse {
+  if (walclWeekly.length < 14) return 'FLAT';
   const latest = walclWeekly[walclWeekly.length - 1];
   const past = walclWeekly[walclWeekly.length - 14]; // 13 weeks back
   const d = latest - past;
-  if (d > QEQT_EPSILON_B) return 'QE';
-  if (d < -QEQT_EPSILON_B) return 'QT';
-  return 'NEUTRAL';
+  if (d > QEQT_EPSILON_B) return 'EXPANDING';
+  if (d < -QEQT_EPSILON_B) return 'CONTRACTING';
+  return 'FLAT';
 }
 
 export function netliqDirection(netliqWeekly: number[]): Direction {
@@ -66,7 +66,7 @@ export function netliqDirection(netliqWeekly: number[]): Direction {
 }
 
 export interface Factors {
-  netliqTrend: number; qeqt: number; credit: number; funding: number;
+  netliqTrend: number; impulse: number; credit: number; funding: number;
   rates: number; dollar: number; vol: number;
 }
 
@@ -87,8 +87,8 @@ export function scoreNetliqTrend(netliqWeekly: number[], n = NETLIQ_TREND_WEEKS)
   return clamp(0.5 * aboveMa + 0.5 * slopeScore);
 }
 
-export function scoreQeQt(regime: Regime): number {
-  return regime === 'QE' ? 80 : regime === 'QT' ? 30 : 55;
+export function scoreImpulse(impulse: Impulse): number {
+  return impulse === 'EXPANDING' ? 80 : impulse === 'CONTRACTING' ? 30 : 55;
 }
 
 export function scoreCredit(hyLatest: number, hyHistory: number[]): number {
@@ -130,7 +130,7 @@ export function scoreVol(vix: number | null): number {
 
 export function weightedScore(f: Factors): number {
   const s =
-    f.netliqTrend * WEIGHTS.netliqTrend + f.qeqt * WEIGHTS.qeqt +
+    f.netliqTrend * WEIGHTS.netliqTrend + f.impulse * WEIGHTS.impulse +
     f.credit * WEIGHTS.credit + f.funding * WEIGHTS.funding +
     f.rates * WEIGHTS.rates + f.dollar * WEIGHTS.dollar + f.vol * WEIGHTS.vol;
   return clamp(s);
@@ -146,7 +146,7 @@ export interface Snapshot {
   netliq: number | null; netliqTrend: number | null;
   sofrIorb: number | null; hyOas: number | null; dgs10: number | null;
   dxy: number | null; vix: number | null;
-  qeQtRegime: Regime; netliqDir: Direction; verdict: Verdict; score: number;
+  bsImpulse: Impulse; netliqDir: Direction; verdict: Verdict; score: number;
   factors: Factors; p0: boolean; p1: boolean; p2: boolean; p3: boolean; reason: string;
 }
 
@@ -156,15 +156,24 @@ export function verdictFromScore(score: number, prev?: Verdict): Verdict {
   return prev ?? 'NEUTRAL'; // dead-zone keeps previous verdict (hysteresis)
 }
 
-const REGIME_CN: Record<Regime, string> = { QE: '扩表', QT: '缩表', NEUTRAL: '横住' };
+const IMPULSE_CN: Record<Impulse, string> = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住' };
 const DIR_CN: Record<Direction, string> = { UP: '在升', DOWN: '在收', FLAT: '走平' };
 const VERDICT_CN: Record<Verdict, string> = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
 
-export function buildReason(regime: Regime, dir: Direction, verdict: Verdict): string {
+export function buildReason(impulse: Impulse, dir: Direction, verdict: Verdict): string {
   const divergence =
-    (regime === 'QT' && dir === 'UP') ? '(缩表却放水,留意背离)' :
-    (regime === 'QE' && dir === 'DOWN') ? '(扩表却收水,留意背离)' : '';
-  return `Fed ${REGIME_CN[regime]}、净流动性${DIR_CN[dir]} → 环境${VERDICT_CN[verdict]}${divergence}`;
+    (impulse === 'CONTRACTING' && dir === 'UP') ? '(缩表却放水,留意背离)' :
+    (impulse === 'EXPANDING' && dir === 'DOWN') ? '(扩表却收水,留意背离)' : '';
+  return `Fed ${IMPULSE_CN[impulse]}、净流动性${DIR_CN[dir]} → 环境${VERDICT_CN[verdict]}${divergence}`;
+}
+
+export type PolicyRegime = 'QE' | 'QT' | 'RESERVE_MGMT' | 'NEUTRAL';
+
+export function policyRegime(impulse: Impulse, date: string): PolicyRegime {
+  if (date >= QT_END_DATE) return 'RESERVE_MGMT';   // QT 已结束 → 资产负债表变动是准备金管理/T-bill 再投资,不是 QE/QT
+  if (impulse === 'EXPANDING') return 'QE';
+  if (impulse === 'CONTRACTING') return 'QT';
+  return 'NEUTRAL';
 }
 
 export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Snapshot {
@@ -187,12 +196,12 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const dxy = asOf(m.DTWEXBGS ?? [], date);
   const vix = asOf(m.VIXCLS ?? [], date);
 
-  const qeQtRegime = classifyQeQt(walclWeekly);
+  const bsImpulse = balanceSheetImpulse(walclWeekly);
   const netliqDir = netliqDirection(netliqWeekly);
 
   const factors: Factors = {
     netliqTrend: scoreNetliqTrend(netliqWeekly),
-    qeqt: scoreQeQt(qeQtRegime),
+    impulse: scoreImpulse(bsImpulse),
     credit: hyOas != null ? scoreCredit(hyOas, hyHistory) : 50,
     funding: sofrIorb != null ? scoreFunding(sofrIorb) : 50,
     rates: scoreRates(delta10y),
@@ -204,11 +213,11 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
 
   return {
     date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),
-    sofrIorb, hyOas, dgs10, dxy, vix, qeQtRegime, netliqDir, verdict, score, factors,
+    sofrIorb, hyOas, dgs10, dxy, vix, bsImpulse, netliqDir, verdict, score, factors,
     p0: factors.rates >= 50 && factors.funding >= 50 && factors.credit >= 50,
-    p1: factors.netliqTrend >= 50 || factors.qeqt >= 50,
+    p1: factors.netliqTrend >= 50 || factors.impulse >= 50,
     p2: factors.dollar >= 50,
     p3: factors.vol >= 50,
-    reason: buildReason(qeQtRegime, netliqDir, verdict),
+    reason: buildReason(bsImpulse, netliqDir, verdict),
   };
 }
