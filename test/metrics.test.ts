@@ -132,6 +132,33 @@ describe('verdict + snapshot', () => {
   });
 });
 
+describe('computeSnapshot coverage', () => {
+  const wk = (start: number, step: number) =>
+    Array.from({ length: 30 }, (_, i) => ({
+      date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
+      value: start + i * step,
+    }));
+  const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+  const fullMap = {
+    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+    RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
+    BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
+    DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10), value: 120 })),
+    SP500: daily(5000),
+  };
+
+  it('coverage === 1 when all 7 series have real data', () => {
+    const snap = computeSnapshot(fullMap, '2024-07-31');
+    expect(snap.coverage).toBeCloseTo(1);
+  });
+
+  it('coverage ≈ 5/7 when VIXCLS and BAMLH0A0HYM2 are missing', () => {
+    const partialMap = { ...fullMap, VIXCLS: [], BAMLH0A0HYM2: [] };
+    const snap = computeSnapshot(partialMap, '2024-07-31');
+    expect(snap.coverage).toBeCloseTo(5 / 7);
+  });
+});
+
 describe('policyRegime', () => {
   it('returns RESERVE_MGMT for any date >= QT_END_DATE', () => {
     expect(policyRegime('EXPANDING', '2026-06-17')).toBe('RESERVE_MGMT');

@@ -37,6 +37,28 @@ function renderVerdict(res) {
   const live = res.live || {};
   document.getElementById('asof').textContent =
     `SPX ${fmt(live.spx)} · VIX ${fmt(live.vix)} · DXY ${fmt(live.dxy)} · 10Y ${fmt(live.us10y)}%`;
+
+  // Staleness: days since snapshot.date
+  const snapshotDate = s.date || '';
+  if (snapshotDate) {
+    const today = new Date();
+    const snap = new Date(snapshotDate + 'T00:00:00Z');
+    const diffDays = Math.round((today.getTime() - snap.getTime()) / 86400000);
+    const staleEl = document.getElementById('data-staleness');
+    if (staleEl) {
+      staleEl.textContent = `数据截至 ${snapshotDate}(${diffDays} 天前)`;
+      staleEl.style.color = diffDays > 8 ? '#B7791F' : '';
+    }
+  }
+
+  // Coverage: N/7 factors with real data
+  const coverage = s.coverage;
+  const coverageEl = document.getElementById('data-coverage');
+  if (coverageEl && coverage != null) {
+    const n = Math.round(coverage * 7);
+    coverageEl.textContent = `${n}/7 因子有真实数据`;
+    coverageEl.style.color = n < 7 ? '#B7791F' : '';
+  }
 }
 
 function dirCn(d) { return { UP: '在升', DOWN: '在收', FLAT: '走平' }[d] || '—'; }

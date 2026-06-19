@@ -148,6 +148,7 @@ export interface Snapshot {
   dxy: number | null; vix: number | null;
   bsImpulse: Impulse; netliqDir: Direction; verdict: Verdict; score: number;
   factors: Factors; p0: boolean; p1: boolean; p2: boolean; p3: boolean; reason: string;
+  coverage: number;
 }
 
 export function verdictFromScore(score: number, prev?: Verdict): Verdict {
@@ -211,6 +212,17 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const score = weightedScore(factors);
   const verdict = verdictFromScore(score, prev);
 
+  const adequacy = [
+    netliqWeekly.length >= NETLIQ_TREND_WEEKS + 1,                        // netliqTrend
+    walclWeekly.length >= 14,                                              // impulse
+    hyOas != null,                                                         // credit
+    sofrIorb != null,                                                      // funding
+    delta10y != null,                                                      // rates
+    (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200,          // dollar
+    vix != null,                                                           // vol
+  ];
+  const coverage = adequacy.filter(Boolean).length / 7;
+
   return {
     date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),
     sofrIorb, hyOas, dgs10, dxy, vix, bsImpulse, netliqDir, verdict, score, factors,
@@ -219,5 +231,6 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     p2: factors.dollar >= 50,
     p3: factors.vol >= 50,
     reason: buildReason(bsImpulse, netliqDir, verdict),
+    coverage,
   };
 }
