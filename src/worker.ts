@@ -70,6 +70,6 @@ export default {
   },
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runIngest(env, false).then(() => undefined));
+    ctx.waitUntil(runIngest(env, false).then(() => undefined).catch(() => undefined));
   },
 };
