@@ -7,8 +7,9 @@
     "test:watch": "vitest",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "migrate:local": "wrangler d1 execute macro_liquidity --local --file=./migrations/0001_init.sql",
-    "migrate:remote": "wrangler d1 execute macro_liquidity --remote --file=./migrations/0001_init.sql"
+    "migrate:local": "wrangler d1 migrations apply macro_liquidity --local",
+    "migrate:remote": "wrangler d1 migrations apply macro_liquidity --remote",
+    "migrate:list": "wrangler d1 migrations list macro_liquidity --remote"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

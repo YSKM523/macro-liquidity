@@ -10,6 +10,7 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "macro_liquidity"
 database_id = "5ee92b9b-eb8e-4c34-9479-b0838fa113fb"
+migrations_dir = "migrations"
 
 [triggers]
 crons = ["0 */3 * * *"]

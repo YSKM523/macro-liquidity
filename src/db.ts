@@ -72,3 +72,21 @@ export async function loadBacktestRows(db: D1Database): Promise<any[]> {
   ).all();
   return rs.results ?? [];
 }
+
+export async function setMeta(db: D1Database, key: string, value: string): Promise<void> {
+  await db.prepare(
+    'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).bind(key, value).run();
+}
+
+export async function getAllMeta(db: D1Database): Promise<Record<string, string>> {
+  const rs = await db.prepare('SELECT key, value FROM meta').all<{ key: string; value: string }>();
+  const m: Record<string, string> = {};
+  for (const r of rs.results ?? []) m[r.key] = r.value;
+  return m;
+}
+
+export async function countSnapshots(db: D1Database): Promise<number> {
+  const row = await db.prepare('SELECT COUNT(*) AS n FROM daily_snapshot').first<{ n: number }>();
+  return row?.n ?? 0;
+}
