@@ -124,7 +124,8 @@ async function main() {
   console.log('Fetching FRED series (WALCL, ECBASSETSW, JPNASSETS, DEXUSEU, DEXJPUS)...');
   let walcl, ecb, dexuseu, boj, dexjpus, spx;
   try {
-    [walcl, ecb, dexuseu, boj, dexjpus, spx] = await Promise.all([
+    // order MUST match the fetch list below: WALCL, ECBASSETSW, JPNASSETS, DEXUSEU, DEXJPUS, SPX
+    [walcl, ecb, boj, dexuseu, dexjpus, spx] = await Promise.all([
       fetchFred('WALCL', '2002-01-01'),
       fetchFred('ECBASSETSW', '2002-01-01'),
       fetchFred('JPNASSETS', '2002-01-01'),
