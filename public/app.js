@@ -157,10 +157,29 @@ function renderChart(rows) {
   });
   const spx = chart.addLineSeries({ color: '#1A1F36', priceScaleId: 'right', lineWidth: 2 });
   const nl = chart.addLineSeries({ color: '#635BFF', priceScaleId: 'left', lineWidth: 2 });
-  spx.setData(rows.filter(r => r.spx != null).map(r => ({ time: r.date, value: r.spx })));
-  nl.setData(rows.filter(r => r.netliq != null).map(r => ({ time: r.date, value: r.netliq })));
+  const spxData = rows.filter(r => r.spx != null).map(r => ({ time: r.date, value: r.spx }));
+  const nlData = rows.filter(r => r.netliq != null).map(r => ({ time: r.date, value: r.netliq }));
+  spx.setData(spxData);
+  nl.setData(nlData);
   chart.timeScale().fitContent();
   new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+
+  // Legend values: latest by default, hovered value on crosshair move
+  const legNl = document.getElementById('leg-nl');
+  const legSpx = document.getElementById('leg-spx');
+  const lastNl = nlData.length ? nlData[nlData.length - 1].value : null;
+  const lastSpx = spxData.length ? spxData[spxData.length - 1].value : null;
+  const setLeg = (nlv, spxv) => {
+    if (legNl) legNl.textContent = nlv == null ? '' : ' $' + Math.round(nlv).toLocaleString() + 'B';
+    if (legSpx) legSpx.textContent = spxv == null ? '' : ' ' + Math.round(spxv).toLocaleString();
+  };
+  setLeg(lastNl, lastSpx);
+  chart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time) { setLeg(lastNl, lastSpx); return; }
+    const nlv = param.seriesData.get(nl);
+    const spxv = param.seriesData.get(spx);
+    setLeg(nlv ? nlv.value : null, spxv ? spxv.value : null);
+  });
 }
 
 main().catch(e => { document.getElementById('verdict-reason').textContent = '加载失败: ' + e.message; });
