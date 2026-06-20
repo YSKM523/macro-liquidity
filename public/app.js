@@ -10,15 +10,44 @@ const POLICY_CN = { QE: 'QE(宽松)', QT: 'QT(紧缩)', RESERVE_MGMT: '准备金
 const fmt = (x, d = 2) => (x == null ? '—' : Number(x).toFixed(d));
 
 async function main() {
-  const [snapRes, histRes] = await Promise.all([
-    fetch('/api/snapshot').then(r => r.json()),
-    fetch('/api/history?from=' + threeYearsAgo()).then(r => r.json()),
-  ]);
+  let snapRes, histRes;
+  try {
+    [snapRes, histRes] = await Promise.all([
+      fetch('/api/snapshot').then(r => r.json()),
+      fetch('/api/history?from=' + threeYearsAgo()).then(r => r.json()),
+    ]);
+  } catch (e) {
+    showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）');
+    return;
+  }
+  if (!snapRes || !snapRes.snapshot || snapRes.error === 'no_data') {
+    showBanner('暂无数据（数据库为空或正在初始化）');
+    renderIngest(snapRes && snapRes.ingest);
+    return;
+  }
   renderVerdict(snapRes);
   renderGuidance(snapRes.snapshot);
   renderScore(snapRes.snapshot);
   renderFactorTable(snapRes);
-  renderChart(histRes.rows || []);
+  renderChart((histRes && histRes.rows) || []);
+  renderIngest(snapRes.ingest);
+}
+
+function showBanner(text) {
+  const banner = document.getElementById('stress-banner');
+  if (banner) { banner.textContent = text; banner.style.display = ''; }
+}
+
+// 摄取异常(cron 停了/FRED 失败)才报红；正常周线数据滞后不报。
+function renderIngest(ingest) {
+  const el = document.getElementById('data-staleness');
+  if (!el || !ingest) return;
+  const age = ingest.ingest_age_hours;
+  if (ingest.ingest_status === 'error' || (age != null && age > 6)) {
+    const hrs = age != null ? Math.round(age) : '?';
+    el.textContent += `　⚠️ 数据更新异常（上次成功 ${hrs} 小时前）`;
+    el.style.color = '#C53030';
+  }
 }
 
 function threeYearsAgo() {
@@ -183,4 +212,4 @@ function renderChart(rows) {
   });
 }
 
-main().catch(e => { document.getElementById('verdict-reason').textContent = '加载失败: ' + e.message; });
+main().catch(e => { showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）'); });
