@@ -1,9 +1,10 @@
 import type { Env } from './service';
 import { runIngest } from './service';
-import { latestSnapshot, snapshotHistory, loadBacktestRows } from './db';
+import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots } from './db';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
 import { policyRegime, downgradeVerdict, buildGuidance } from './metrics';
-import { STRESS_SCORE_CEILING } from './config';
+import { STRESS_SCORE_CEILING, INGEST_STALE_HOURS } from './config';
+import { assessHealth } from './health';
 import { runBacktest } from './backtest';
 import { runWalkForward } from './walkforward';
 
@@ -15,6 +16,28 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname;
 
+    if (p === '/api/health' || p === '/health') {
+      try {
+        const [row, meta, count] = await Promise.all([
+          latestSnapshot(env.DB),
+          getAllMeta(env.DB),
+          countSnapshots(env.DB),
+        ]);
+        const h = assessHealth({
+          dataDate: (row as any)?.date ?? null,
+          snapshots: count,
+          coverage: (row as any)?.coverage ?? null,
+          lastIngestAt: meta.last_ingest_at ?? null,
+          lastStatus: meta.last_status ?? null,
+          lastError: meta.last_error ?? null,
+          now: new Date().toISOString(),
+          staleHours: INGEST_STALE_HOURS,
+        });
+        return json(h, h.ok ? 200 : 503);
+      } catch (e) {
+        return json({ ok: false, stale: true, error: 'db_unreachable', message: String((e as any)?.message ?? e) }, 503);
+      }
+    }
     if (p === '/api/snapshot') {
       const row: any = await latestSnapshot(env.DB);
       const [live, stress] = await Promise.all([

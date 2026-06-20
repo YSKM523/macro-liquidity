@@ -50,3 +50,6 @@ export const STRESS = {
   dxy: 0.02,     // DXY 5-day return > +2%
 } as const;
 export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade (strong regime beats short noise)
+
+// cron 每 3h 跑一次；上次成功摄取超过这个小时数 → 判为不健康(容忍漏 1 拍)。
+export const INGEST_STALE_HOURS = 6;
