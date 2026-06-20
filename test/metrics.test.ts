@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, balanceSheetImpulse, netliqDirection,
   percentileRank, scoreNetliqTrend, scoreImpulse, scoreCredit, scoreFunding,
-  scoreRates, scoreVol, weightedScore,
+  scoreRates, scoreVol, weightedScore, scoreReserveAdequacy,
 } from '../src/metrics';
 import { verdictFromScore, buildReason, computeSnapshot, policyRegime, downgradeVerdict } from '../src/metrics';
+import { WEIGHTS } from '../src/config';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
 
@@ -118,7 +119,7 @@ describe('factor scores', () => {
     expect(scoreVol(14)).toBeGreaterThan(scoreVol(35));
   });
   it('weightedScore stays in [0,100]', () => {
-    const f = { netliqTrend:80, impulse:70, credit:60, funding:90, rates:40, dollar:55, vol:75 };
+    const f = { netliqTrend:80, impulse:70, credit:60, funding:90, rates:40, dollar:55, vol:75, reserveAdequacy:50 };
     const s = weightedScore(f);
     expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
   });
@@ -213,5 +214,85 @@ describe('policyRegime', () => {
   });
   it('returns NEUTRAL for FLAT before QT_END_DATE', () => {
     expect(policyRegime('FLAT', '2024-06-01')).toBe('NEUTRAL');
+  });
+});
+
+describe('scoreReserveAdequacy', () => {
+  it('high reserves + rising + calm funding → high score (>70)', () => {
+    // reservesLevel=3800 ($B, at RESERVE_HIGH) → lvl=100
+    // deltaReserves13w=+400 (well above +300 cap) → mom=100
+    // sofrIorb=-0.02 (below 0, calm) → fund=100
+    // weighted: 0.5*100 + 0.3*100 + 0.2*100 = 100
+    const s = scoreReserveAdequacy(3800, 400, -0.02);
+    expect(s).toBeGreaterThan(70);
+    expect(s).toBeLessThanOrEqual(100);
+  });
+
+  it('low reserves + falling + stressed funding → low score (<30)', () => {
+    // reservesLevel=2800 ($B, at RESERVE_LOW) → lvl=0
+    // deltaReserves13w=-400 (below -300 floor) → mom=0
+    // sofrIorb=+0.10 (at stressed end) → fund=0
+    // weighted: 0.5*0 + 0.3*0 + 0.2*0 = 0
+    const s = scoreReserveAdequacy(2800, -400, 0.10);
+    expect(s).toBeLessThan(30);
+    expect(s).toBeGreaterThanOrEqual(0);
+  });
+
+  it('all null inputs → score = 50 (neutral fallback)', () => {
+    // Each component falls back to 50; weighted: 0.5*50 + 0.3*50 + 0.2*50 = 50
+    expect(scoreReserveAdequacy(null, null, null)).toBeCloseTo(50);
+  });
+
+  it('output stays within [0, 100] boundary', () => {
+    // extremes
+    expect(scoreReserveAdequacy(0, -9999, 999)).toBeGreaterThanOrEqual(0);
+    expect(scoreReserveAdequacy(0, -9999, 999)).toBeLessThanOrEqual(100);
+    expect(scoreReserveAdequacy(9999, 9999, -999)).toBeGreaterThanOrEqual(0);
+    expect(scoreReserveAdequacy(9999, 9999, -999)).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('reserveAdequacy integration', () => {
+  const wk = (start: number, step: number) =>
+    Array.from({ length: 30 }, (_, i) => ({
+      date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
+      value: start + i * step,
+    }));
+  const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+  const wkReserves = Array.from({ length: 30 }, (_, i) => ({
+    date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
+    value: 3300 + i * 5,  // gently rising reserves around mid-range
+  }));
+
+  const baseMap = {
+    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+    RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
+    BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
+    DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: 120 })),
+    SP500: daily(5000),
+  };
+
+  it('computeSnapshot includes reserveAdequacy in factors, within [0,100]', () => {
+    const m = { ...baseMap, WRBWFRBL: wkReserves };
+    const snap = computeSnapshot(m, '2024-07-31');
+    expect(typeof snap.factors.reserveAdequacy).toBe('number');
+    expect(snap.factors.reserveAdequacy).toBeGreaterThanOrEqual(0);
+    expect(snap.factors.reserveAdequacy).toBeLessThanOrEqual(100);
+  });
+
+  it('score is unaffected by WRBWFRBL (weight=0)', () => {
+    const snapWithout = computeSnapshot(baseMap, '2024-07-31');
+    const snapWith = computeSnapshot({ ...baseMap, WRBWFRBL: wkReserves }, '2024-07-31');
+    // reserveAdequacy weight is 0 so total score must be identical
+    expect(snapWith.score).toBeCloseTo(snapWithout.score);
+  });
+
+  it('reserveAdequacy weight is exactly 0', () => {
+    expect(WEIGHTS.reserveAdequacy).toBe(0);
+  });
+
+  it('all 8 WEIGHTS sum to exactly 1.00', () => {
+    const sum = (Object.values(WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
+    expect(sum).toBeCloseTo(1.00, 10);
   });
 });

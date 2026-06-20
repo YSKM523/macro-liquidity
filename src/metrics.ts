@@ -2,7 +2,7 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH } from './config';
 
 export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
@@ -67,7 +67,7 @@ export function netliqDirection(netliqWeekly: number[]): Direction {
 
 export interface Factors {
   netliqTrend: number; impulse: number; credit: number; funding: number;
-  rates: number; dollar: number; vol: number;
+  rates: number; dollar: number; vol: number; reserveAdequacy: number;
 }
 
 export function percentileRank(value: number, history: number[]): number {
@@ -131,11 +131,29 @@ export function scoreVol(vix: number | null): number {
   return linMap(vix, 30, 12);
 }
 
+/**
+ * Reserve Adequacy score (0–100).
+ * @param reservesLevel  Bank reserve balances at Fed ($B, from WRBWFRBL /1000)
+ * @param deltaReserves13w  13-week change in reserves ($B); positive = building
+ * @param sofrIorb  SOFR − IORB spread (pp); approximates funding stress (simplified from 20d p95)
+ */
+export function scoreReserveAdequacy(
+  reservesLevel: number | null,
+  deltaReserves13w: number | null,
+  sofrIorb: number | null,
+): number {
+  const lvl  = reservesLevel    == null ? 50 : linMap(reservesLevel,    RESERVE_LOW,  RESERVE_HIGH); // abundant → high
+  const mom  = deltaReserves13w == null ? 50 : linMap(deltaReserves13w, -300,          300);           // rising → high
+  const fund = sofrIorb         == null ? 50 : linMap(sofrIorb,          0.10,         0.00);          // calm → high
+  return clamp(0.5 * lvl + 0.3 * mom + 0.2 * fund);
+}
+
 export function weightedScore(f: Factors): number {
   const s =
     f.netliqTrend * WEIGHTS.netliqTrend + f.impulse * WEIGHTS.impulse +
     f.credit * WEIGHTS.credit + f.funding * WEIGHTS.funding +
-    f.rates * WEIGHTS.rates + f.dollar * WEIGHTS.dollar + f.vol * WEIGHTS.vol;
+    f.rates * WEIGHTS.rates + f.dollar * WEIGHTS.dollar + f.vol * WEIGHTS.vol +
+    f.reserveAdequacy * WEIGHTS.reserveAdequacy;
   return clamp(s);
 }
 
@@ -208,6 +226,9 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const bsImpulse = balanceSheetImpulse(walclWeekly);
   const netliqDir = netliqDirection(netliqWeekly);
 
+  const reservesLevel = asOf(m.WRBWFRBL ?? [], date);
+  const deltaReserves13w = changeOverDays(m.WRBWFRBL ?? [], date, 91); // ~13 weeks
+
   const factors: Factors = {
     netliqTrend: scoreNetliqTrend(netliqWeekly),
     impulse: scoreImpulse(bsImpulse),
@@ -216,6 +237,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     rates: scoreRates(delta10y),
     dollar: scoreDollar(m.DTWEXBGS ?? [], date),
     vol: scoreVol(vix),
+    reserveAdequacy: scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb),
   };
   const score = weightedScore(factors);
   const verdict = verdictFromScore(score, prev);
