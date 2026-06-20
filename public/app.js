@@ -72,13 +72,14 @@ function renderVerdict(res) {
     }
   }
 
-  // Coverage: N/7 factors with real data
+  // Coverage: N/total scoring factors with real data
   const coverage = s.coverage;
+  const total = s.coverage_total ?? 8;
   const coverageEl = document.getElementById('data-coverage');
   if (coverageEl && coverage != null) {
-    const n = Math.round(coverage * 7);
-    coverageEl.textContent = `${n}/7 因子有真实数据`;
-    coverageEl.style.color = n < 7 ? '#B7791F' : '';
+    const n = Math.round(coverage * total);
+    coverageEl.textContent = `${n}/${total} 因子有真实数据`;
+    coverageEl.style.color = n < total ? '#B7791F' : '';
   }
 }
 

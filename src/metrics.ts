@@ -2,7 +2,7 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, COVERAGE_FACTORS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH } from './config';
 
 export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
@@ -369,9 +369,10 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     sofrIorb != null,                                                      // funding
     delta10y != null,                                                      // rates
     (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200,          // dollar
-    vix != null,                                                           // vol
+    reservesLevel != null,                                                 // reserveAdequacy
+    curveSlope != null,                                                    // curve
   ];
-  const coverage = adequacy.filter(Boolean).length / 7;
+  const coverage = adequacy.filter(Boolean).length / COVERAGE_FACTORS.length;
 
   return {
     date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),

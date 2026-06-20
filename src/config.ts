@@ -31,6 +31,10 @@ export const QT_END_DATE = '2025-12-01';
 // the edge is the factor SET, not precise weights, so this is a modest IC-direction tilt, not an IC-proportional fit.
 // sum check: 0.35+0.05+0.06+0.04+0.05+0.18+0.00+0.12+0.15 = 1.00
 export const WEIGHTS = { netliqTrend: 0.35, impulse: 0.05, credit: 0.06, funding: 0.04, rates: 0.05, dollar: 0.18, vol: 0.00, reserveAdequacy: 0.12, curve: 0.15 } as const;
+// coverage = 真正参与评分(权重>0)的因子里，有真实数据的比例。vol 权重为 0(已移入 live-stress overlay)，不计入。
+export const COVERAGE_FACTORS = [
+  'netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve',
+] as const;
 export const RESERVE_LOW  = 2800;  // bank reserves ($B) tight end (~LCLOR zone) → adequacy low
 export const RESERVE_HIGH = 3800;  // abundant end → adequacy high
 export const QEQT_EPSILON_B = 50;        // ΔWALCL 13w dead-band (billions), initial

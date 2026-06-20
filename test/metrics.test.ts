@@ -175,17 +175,33 @@ describe('computeSnapshot coverage', () => {
     BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
     DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10), value: 120 })),
     SP500: daily(5000),
+    WRBWFRBL: wk(3000, 0),   // reserveAdequacy 数据源
+    T10Y2Y: daily(0.5),       // curve 数据源
   };
 
-  it('coverage === 1 when all 7 series have real data', () => {
+  it('coverage === 1 when all 8 scoring factors have real data', () => {
     const snap = computeSnapshot(fullMap, '2024-07-31');
     expect(snap.coverage).toBeCloseTo(1);
   });
 
-  it('coverage ≈ 5/7 when VIXCLS and BAMLH0A0HYM2 are missing', () => {
-    const partialMap = { ...fullMap, VIXCLS: [], BAMLH0A0HYM2: [] };
-    const snap = computeSnapshot(partialMap, '2024-07-31');
-    expect(snap.coverage).toBeCloseTo(5 / 7);
+  it('removing VIXCLS (vol, weight 0) does NOT reduce coverage', () => {
+    const snap = computeSnapshot({ ...fullMap, VIXCLS: [] }, '2024-07-31');
+    expect(snap.coverage).toBeCloseTo(1);
+  });
+
+  it('coverage === 7/8 when credit (BAMLH0A0HYM2) is missing', () => {
+    const snap = computeSnapshot({ ...fullMap, BAMLH0A0HYM2: [] }, '2024-07-31');
+    expect(snap.coverage).toBeCloseTo(7 / 8);
+  });
+
+  it('coverage === 7/8 when curve (T10Y2Y) is missing', () => {
+    const snap = computeSnapshot({ ...fullMap, T10Y2Y: [] }, '2024-07-31');
+    expect(snap.coverage).toBeCloseTo(7 / 8);
+  });
+
+  it('coverage === 7/8 when reserveAdequacy (WRBWFRBL) is missing', () => {
+    const snap = computeSnapshot({ ...fullMap, WRBWFRBL: [] }, '2024-07-31');
+    expect(snap.coverage).toBeCloseTo(7 / 8);
   });
 });
 
