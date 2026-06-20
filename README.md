@@ -199,3 +199,9 @@ npx wrangler dev    # 本地起 Worker
 本项目仅作**研究与教育**用途,**不构成任何投资建议**。模型是弱信号宏观仪表盘,请勿据其单次信号 all-in / all-out,并结合你自己的风险管理与判断。
 
 **作者:[YSKM523](https://github.com/YSKM523)**
+
+---
+
+## 许可 License
+
+[MIT](LICENSE) © 2026 YSKM523
