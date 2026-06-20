@@ -50,3 +50,31 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .g-triggers li{font-size:13px;color:var(--muted);padding:4px 0}
 .g-triggers li.armed{font-weight:700;color:var(--ink);border-left:3px solid var(--amber);padding-left:8px}
 .g-note{font-size:0.75rem;color:var(--muted);margin:0}
+
+/* ── Algorithm subpage (markdown prose) ─────────────────────────────────── */
+.nav-link{color:var(--accent);text-decoration:none;font-size:14px;font-weight:600}
+.nav-link:hover{text-decoration:underline}
+.prose{line-height:1.7;color:var(--ink);font-size:15px}
+.prose h1{font-size:24px;margin:0 0 16px}
+.prose h2{font-size:19px;font-weight:700;margin:28px 0 12px;padding-top:18px;border-top:1px solid var(--line)}
+.prose h3{font-size:16px;font-weight:700;margin:20px 0 10px}
+.prose>:first-child{margin-top:0;padding-top:0;border-top:none}
+.prose p{margin:10px 0}
+.prose strong{color:var(--ink);font-weight:700}
+.prose a{color:var(--accent);text-decoration:none}
+.prose a:hover{text-decoration:underline}
+.prose ul,.prose ol{margin:10px 0;padding-left:22px}
+.prose li{margin:4px 0}
+.prose hr{border:none;border-top:1px solid var(--line);margin:24px 0}
+.prose blockquote{margin:14px 0;padding:8px 16px;border-left:3px solid var(--amber);
+  background:var(--surface);border-radius:0 6px 6px 0}
+.prose blockquote p{margin:6px 0}
+.prose code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;
+  background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+.prose pre{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;margin:14px 0}
+.prose pre code{background:none;border:none;padding:0;font-size:13px;line-height:1.6}
+.prose table{border-collapse:collapse;font-size:14px;margin:14px 0;display:block;overflow-x:auto;max-width:100%}
+.prose th,.prose td{padding:8px 10px;border:1px solid var(--line);text-align:left;vertical-align:top}
+.prose th{background:var(--surface);color:var(--muted);font-weight:600}
+.prose th[align=right],.prose td[align=right]{text-align:right}
