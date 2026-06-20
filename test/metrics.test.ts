@@ -280,15 +280,15 @@ describe('reserveAdequacy integration', () => {
     expect(snap.factors.reserveAdequacy).toBeLessThanOrEqual(100);
   });
 
-  it('score is unaffected by WRBWFRBL (weight=0)', () => {
+  it('reserveAdequacy is weighted (P2-4), so WRBWFRBL moves the score', () => {
     const snapWithout = computeSnapshot(baseMap, '2024-07-31');
     const snapWith = computeSnapshot({ ...baseMap, WRBWFRBL: wkReserves }, '2024-07-31');
-    // reserveAdequacy weight is 0 so total score must be identical
-    expect(snapWith.score).toBeCloseTo(snapWithout.score);
+    // reserveAdequacy now carries weight, so adding reserves data changes the total score
+    expect(snapWith.score).not.toBeCloseTo(snapWithout.score);
   });
 
-  it('reserveAdequacy weight is exactly 0', () => {
-    expect(WEIGHTS.reserveAdequacy).toBe(0);
+  it('reserveAdequacy carries a positive weight (P2-4)', () => {
+    expect(WEIGHTS.reserveAdequacy).toBeGreaterThan(0);
   });
 
   it('all 8 WEIGHTS sum to exactly 1.00', () => {
