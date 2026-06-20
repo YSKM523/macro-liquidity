@@ -293,3 +293,113 @@ function findAsOfIndex(series, date) {
   }
   return result;
 }
+
+// ---------- buildGlobalGrowthLC ----------
+
+/**
+ * FX-neutral "global central-bank expansion rate" signal.
+ *
+ * For each WALCL weekly date t:
+ *   Local-currency growth rates (weeks back):
+ *     fedG = pctChangeWeeks(walcl, t, weeks)
+ *     ecbG = pctChangeWeeks(ecb,   t, weeks)   (ECB assets in EUR)
+ *     bojG = pctChangeWeeks(boj,   t, weeks)   (BOJ assets in 億円)
+ *
+ *   USD weights (instantaneous snapshot at t, for weighting only):
+ *     wFed = asOf(walcl,   t) / 1000                                     (million USD → billion USD)
+ *     wEcb = asOf(ecb,     t) × asOf(dexuseu, t) / 1000                 (million EUR × USD/EUR → billion USD)
+ *     wBoj = asOf(boj,     t) × 100 / asOf(dexjpus, t) / 1000           (億円 × 100 = million JPY → billion USD)
+ *
+ *   globalG = (wFed×fedG + wEcb×ecbG + wBoj×bojG) / (wFed + wEcb + wBoj)
+ *
+ * Any null component (growth or weight) → skip that t.
+ * Returns [{date, value: globalG}] ascending.
+ *
+ * @param {Array<{date:string,value:number}>} walcl    weekly, million USD
+ * @param {Array<{date:string,value:number}>} ecb      million EUR
+ * @param {Array<{date:string,value:number}>} boj      億円 (100M JPY units)
+ * @param {Array<{date:string,value:number}>} dexuseu  USD per EUR
+ * @param {Array<{date:string,value:number}>} dexjpus  JPY per USD
+ * @param {number} [weeks=13]  lookback for growth rate
+ * @returns {Array<{date:string, value:number}>}  ascending
+ */
+export function buildGlobalGrowthLC(walcl, ecb, boj, dexuseu, dexjpus, weeks = 13) {
+  const result = [];
+
+  for (const { date } of walcl) {
+    // Local-currency growth rates
+    const fedG = pctChangeWeeks(walcl, date, weeks);
+    const ecbG = pctChangeWeeks(ecb,   date, weeks);
+    const bojG = pctChangeWeeks(boj,   date, weeks);
+
+    if (fedG === null || ecbG === null || bojG === null) continue;
+
+    // USD snapshot weights
+    const walclVal = asOf(walcl,   date);
+    const ecbVal   = asOf(ecb,     date);
+    const eurusd   = asOf(dexuseu, date);
+    const bojVal   = asOf(boj,     date);
+    const jpyusd   = asOf(dexjpus, date);
+
+    if (
+      walclVal === null || ecbVal === null || eurusd === null ||
+      bojVal === null || jpyusd === null || jpyusd === 0
+    ) continue;
+
+    const wFed = walclVal / 1000;
+    const wEcb = (ecbVal * eurusd) / 1000;
+    const wBoj = (bojVal * 100) / jpyusd / 1000;
+    const totalW = wFed + wEcb + wBoj;
+
+    if (totalW === 0) continue;
+
+    const globalG = (wFed * fedG + wEcb * ecbG + wBoj * bojG) / totalW;
+    result.push({ date, value: globalG });
+  }
+
+  return result;
+}
+
+// ---------- leadLagICSignal ----------
+
+/**
+ * Lead/lag IC for a signal that is ALREADY a predictor (not a level series).
+ *
+ * For each signal point {date, value}:
+ *   x = signal.value
+ *   y = SPX % change from (t + leadWeeks*7 days) to (t + (leadWeeks+fwdWeeks)*7 days)
+ *       both SPX dates found via asOfWithTolerance(±10 days)
+ *
+ * Returns {ic: Spearman(xs, ys), n}.
+ *
+ * @param {Array<{date:string,value:number}>} signal    ascending
+ * @param {Array<{date:string,value:number}>} spxSeries ascending
+ * @param {number} leadWeeks
+ * @param {number} [fwdWeeks=13]
+ * @returns {{ic:number, n:number}}
+ */
+export function leadLagICSignal(signal, spxSeries, leadWeeks, fwdWeeks = 13) {
+  const xs = [];
+  const ys = [];
+
+  for (const { date, value: sigVal } of signal) {
+    // SPX window start: t + leadWeeks * 7 days
+    const startMs  = new Date(date).getTime() + leadWeeks * 7 * 86400000;
+    const startDate = new Date(startMs).toISOString().slice(0, 10);
+
+    // SPX window end: t + (leadWeeks + fwdWeeks) * 7 days
+    const endMs  = startMs + fwdWeeks * 7 * 86400000;
+    const endDate = new Date(endMs).toISOString().slice(0, 10);
+
+    const spxStart = asOfWithTolerance(spxSeries, startDate, 10);
+    const spxEnd   = asOfWithTolerance(spxSeries, endDate,   10);
+
+    if (spxStart === null || spxEnd === null || spxStart === 0) continue;
+
+    xs.push(sigVal);
+    ys.push((spxEnd - spxStart) / spxStart);
+  }
+
+  if (xs.length < 3) return { ic: 0, n: xs.length };
+  return { ic: spearman(xs, ys), n: xs.length };
+}

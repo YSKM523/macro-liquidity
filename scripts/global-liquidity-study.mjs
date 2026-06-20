@@ -19,9 +19,11 @@
 
 import {
   buildGlobalLiquidity,
+  buildGlobalGrowthLC,
   asOf,
   pctChangeWeeks,
   leadLagIC,
+  leadLagICSignal,
   spearman,
 } from './global-lib.mjs';
 
@@ -320,6 +322,144 @@ async function main() {
   console.log('='.repeat(70));
   console.log('  Study complete.');
   console.log('='.repeat(70));
+
+  // ── 7. LOCAL-CURRENCY VARIANT (FX-neutral) ─────────────────────────────
+  console.log();
+  console.log('='.repeat(70));
+  console.log('  7. LOCAL-CURRENCY VARIANT (FX-neutral global CB growth rate)');
+  console.log('='.repeat(70));
+  console.log();
+
+  // Build the FX-neutral signal: each CB's growth in its OWN currency,
+  // combined by current USD-size weights.
+  const glLC = buildGlobalGrowthLC(walcl, ecb, boj, dexuseu, dexjpus, 13);
+
+  if (glLC.length === 0) {
+    console.log('  ERROR: buildGlobalGrowthLC returned 0 points. Check data overlap.');
+  } else {
+    const latestLC = glLC.at(-1);
+    console.log(`  Coverage : ${glLC[0].date} → ${latestLC.date}`);
+    console.log(`  Points   : ${glLC.length}`);
+    console.log(`  Latest global CB expansion rate: ${pct(latestLC.value)} (${latestLC.date})`);
+    if (Math.abs(latestLC.value) > 1) {
+      console.log('  WARNING: latest rate magnitude >100% — possible unit or data error.');
+    }
+    console.log();
+
+    // Lead/lag scan: lead = 0, 2, ..., 26 weeks
+    console.log('── 7a. LEAD/LAG SCAN (LC growth signal vs SPX 13-week forward return) ──');
+    console.log('  lead (wk)  |  Spearman IC  |  n pairs');
+    console.log('  -----------|---------------|----------');
+
+    const lcScanResults = [];
+    for (const lead of leads) {
+      const { ic, n } = leadLagICSignal(glLC, spx, lead, 13);
+      lcScanResults.push({ lead, ic, n });
+      console.log(`  ${String(lead).padStart(9)}  |  ${fmt(ic, 4).padStart(13)}  |  ${String(n).padStart(8)}`);
+    }
+
+    const lcBest = lcScanResults.reduce((a, b) => (b.ic > a.ic ? b : a));
+    console.log();
+    console.log(`  *** Best lead: ${lcBest.lead} weeks (IC = ${fmt(lcBest.ic, 4)}, n = ${lcBest.n})`);
+    console.log();
+
+    // Sub-period analysis
+    console.log('── 7b. REGIME ANALYSIS (LC variant) ────────────────────────────────');
+    console.log('  Period               |  lead=0 IC  |  n  |  best-lead IC  |  n');
+    console.log('  ---------------------|-------------|-----|----------------|-----');
+
+    function filterLCByYear(lcSeries, startYear, endYear) {
+      return lcSeries.filter((p) => {
+        const y = parseInt(p.date.slice(0, 4), 10);
+        return y >= startYear && y <= endYear;
+      });
+    }
+
+    for (const { label, startY, endY } of periods) {
+      const lcSlice = filterLCByYear(glLC, startY, endY);
+      const r0    = leadLagICSignal(lcSlice, spx, 0,          13);
+      const rBest = leadLagICSignal(lcSlice, spx, lcBest.lead, 13);
+      console.log(
+        `  ${label.padEnd(21)}|  ${fmt(r0.ic, 4).padStart(11)}  |  ${String(r0.n).padStart(3)}  |  ${fmt(rBest.ic, 4).padStart(14)}  |  ${String(rBest.n).padStart(3)}`
+      );
+    }
+    console.log();
+
+    // Fed-only local-currency comparison
+    console.log('── 7c. FED-ONLY LC GROWTH vs GLOBAL LC GROWTH ──────────────────────');
+
+    // Build Fed-only signal: pctChangeWeeks(walcl, t, 13) for each walcl date
+    // where the result is non-null.
+    const fedLCSignal = [];
+    for (const { date } of walcl) {
+      const g = pctChangeWeeks(walcl, date, 13);
+      if (g !== null) fedLCSignal.push({ date, value: g });
+    }
+
+    console.log(`  Fed-only LC signal: ${fedLCSignal.length} points`);
+    console.log(`  Global LC signal  : ${glLC.length} points`);
+    console.log();
+    console.log('  Metric                    |  Global LC  |  Fed-only LC');
+    console.log('  --------------------------|-------------|-------------');
+
+    const lcGlobalFull  = leadLagICSignal(glLC,        spx, lcBest.lead, 13);
+    const lcFedFull     = leadLagICSignal(fedLCSignal, spx, lcBest.lead, 13);
+    const lcGlobalAt0   = leadLagICSignal(glLC,        spx, 0,           13);
+    const lcFedAt0      = leadLagICSignal(fedLCSignal, spx, 0,           13);
+
+    console.log(`  Full-period IC (lead=0)   |  ${fmt(lcGlobalAt0.ic, 4).padStart(11)}  |  ${fmt(lcFedAt0.ic, 4).padStart(12)}`);
+    console.log(`  Full-period IC (best lead)|  ${fmt(lcGlobalFull.ic, 4).padStart(11)}  |  ${fmt(lcFedFull.ic, 4).padStart(12)}`);
+    console.log(`  n pairs (best lead)       |  ${String(lcGlobalFull.n).padStart(11)}  |  ${String(lcFedFull.n).padStart(12)}`);
+    console.log();
+
+    // Honest summary
+    console.log('── 7d. HONEST SUMMARY (LC variant) ─────────────────────────────────');
+    console.log();
+
+    const lcIC = lcGlobalFull.ic;
+    const lcFedIC = lcFedFull.ic;
+    const lcMagnitude =
+      Math.abs(lcIC) < 0.10
+        ? 'very weak (<0.10)'
+        : Math.abs(lcIC) < 0.25
+          ? 'weak (0.10–0.25)'
+          : Math.abs(lcIC) < 0.40
+            ? 'moderate (0.25–0.40)'
+            : 'strong (>0.40)';
+
+    console.log(`  Global LC IC (lead=${lcBest.lead}w) : ${fmt(lcIC, 4)} (${lcMagnitude})`);
+    console.log(`  Fed-only LC IC (same lead)   : ${fmt(lcFedIC, 4)}`);
+    console.log(`  FX-contaminated version IC   : ${fmt(globalFull.ic, 4)} (from section 5, lead=${best.lead}w)`);
+    console.log(`  LC delta vs FX-contaminated  : ${fmt(lcIC - globalFull.ic, 4)}`);
+    console.log(`  LC delta vs Fed-only LC      : ${fmt(lcIC - lcFedIC, 4)}`);
+    console.log();
+
+    const lcRegimes = periods.map(({ label, startY, endY }) => {
+      const slice = filterLCByYear(glLC, startY, endY);
+      return { label, ...leadLagICSignal(slice, spx, lcBest.lead, 13) };
+    });
+    const lcAllPositive = lcRegimes.every((r) => r.ic > 0);
+    const lcMinIC = Math.min(...lcRegimes.map((r) => r.ic));
+    const lcMaxIC = Math.max(...lcRegimes.map((r) => r.ic));
+
+    if (lcAllPositive) {
+      console.log('  LC signal is positive across ALL three regimes.');
+    } else {
+      console.log('  WARNING: LC signal flips sign across regimes — interpret with caution.');
+    }
+    console.log(`  IC range across regimes: [${fmt(lcMinIC, 4)}, ${fmt(lcMaxIC, 4)}]`);
+    console.log();
+    console.log('  CAVEATS:');
+    console.log('  • "FX-neutral" means growth rates are in local currency, but USD weights');
+    console.log('    are still used for combining — so FX still affects the weighting.');
+    console.log('  • A single dominant CB (Fed) with distinct growth can override global signal.');
+    console.log('  • Same 24-year backtest / non-overlapping-cycle caveats apply as section 6.');
+    console.log('  • This is exploratory research, not a live model. DO NOT trade on IC alone.');
+    console.log();
+    console.log('='.repeat(70));
+    console.log('  LC variant complete.');
+    console.log('='.repeat(70));
+  }
 }
 
 main().catch((err) => {

@@ -8,6 +8,8 @@ import {
   buildGlobalLiquidity,
   pctChangeWeeks,
   leadLagIC,
+  buildGlobalGrowthLC,
+  leadLagICSignal,
 } from '../scripts/global-lib.mjs';
 
 // ---------- rank ----------
@@ -333,6 +335,298 @@ describe('leadLagIC', () => {
     const tinySpx = [{ date: '2024-01-01', value: 1000 }];
     const result = leadLagIC(tinyGl, tinySpx, 4);
     expect(result.n).toBe(0);
+    expect(result.ic).toBe(0);
+  });
+});
+
+// ---------- buildGlobalGrowthLC ----------
+
+describe('buildGlobalGrowthLC', () => {
+  /**
+   * Hand-computed test for buildGlobalGrowthLC at t='2024-04-10':
+   *
+   * We choose weeks=4 for simplicity. Prior date = t - 4*7 = 2024-03-13.
+   *
+   * WALCL:
+   *   prior (2024-03-13 → asOf → 2024-03-11 = 7_000_000)
+   *   curr  (2024-04-10 = 7_140_000)
+   *   fedG = (7_140_000 - 7_000_000) / 7_000_000 = 0.02 (2%)
+   *
+   * ECB (in EUR):
+   *   prior (2024-03-13 → asOf → 2024-03-11 = 8_000_000 EUR)
+   *   curr  (2024-04-10 = 8_160_000 EUR)
+   *   ecbG = (8_160_000 - 8_000_000) / 8_000_000 = 0.02 (2%)
+   *
+   * BOJ (in 億円):
+   *   prior (2024-03-13 → asOf → 2024-03-11 = 600_000)
+   *   curr  (2024-04-10 = 612_000)
+   *   bojG = (612_000 - 600_000) / 600_000 = 0.02 (2%)
+   *
+   * USD weights at t=2024-04-10:
+   *   wFed = 7_140_000 / 1000 = 7140 (billion USD)
+   *   DEXUSEU at 2024-04-10 = 1.1 (USD/EUR)
+   *   wEcb = 8_160_000 * 1.1 / 1000 = 8976 (billion USD)
+   *   DEXJPUS at 2024-04-10 = 150 (JPY/USD)
+   *   wBoj = 612_000 * 100 / 150 / 1000 = 408 (billion USD)
+   *
+   * globalG = (7140*0.02 + 8976*0.02 + 408*0.02) / (7140 + 8976 + 408)
+   *         = 0.02 * (7140 + 8976 + 408) / (7140 + 8976 + 408)
+   *         = 0.02
+   *
+   * (All three grow at the same rate, so the weighted average must also be 0.02 regardless of weights)
+   */
+
+  // WALCL: prior point before t-4wks, plus t point
+  const walcl = [
+    { date: '2024-03-11', value: 7_000_000 },  // prior for 2024-04-10 lookback (4*7=28 days back = 2024-03-13, asOf → 2024-03-11)
+    { date: '2024-04-10', value: 7_140_000 },
+  ];
+  // ECB (million EUR)
+  const ecb = [
+    { date: '2024-03-11', value: 8_000_000 },
+    { date: '2024-04-10', value: 8_160_000 },
+  ];
+  // BOJ (億円)
+  const boj = [
+    { date: '2024-03-11', value: 600_000 },
+    { date: '2024-04-10', value: 612_000 },
+  ];
+  // DEXUSEU: USD/EUR
+  const dexuseu = [
+    { date: '2024-01-01', value: 1.1 },
+  ];
+  // DEXJPUS: JPY/USD
+  const dexjpus = [
+    { date: '2024-01-01', value: 150 },
+  ];
+
+  it('computes hand-checked globalG = 0.02 when all CBs grow at 2%', () => {
+    const result = buildGlobalGrowthLC(walcl, ecb, boj, dexuseu, dexjpus, 4);
+    const point = result.find((p) => p.date === '2024-04-10');
+    expect(point).toBeDefined();
+    expect(point!.value).toBeCloseTo(0.02, 5);
+  });
+
+  it('returns ascending date order', () => {
+    const result = buildGlobalGrowthLC(walcl, ecb, boj, dexuseu, dexjpus, 4);
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].date >= result[i - 1].date).toBe(true);
+    }
+  });
+
+  it('skips dates where any component is null', () => {
+    // WALCL has 2024-03-11 but ECB/BOJ/FX series only start from 2024-03-11 too.
+    // The earliest WALCL date (2024-03-11) needs pctChangeWeeks: prior = 2024-03-11 - 4*7 = 2024-02-12.
+    // No data exists before 2024-03-11, so 2024-03-11 should be skipped.
+    const result = buildGlobalGrowthLC(walcl, ecb, boj, dexuseu, dexjpus, 4);
+    const earlyPoint = result.find((p) => p.date === '2024-03-11');
+    expect(earlyPoint).toBeUndefined();
+  });
+
+  it('returns empty array when walcl is empty', () => {
+    expect(buildGlobalGrowthLC([], ecb, boj, dexuseu, dexjpus, 4)).toEqual([]);
+  });
+
+  /**
+   * FX-invariance test:
+   * Holding local-currency balance sheets CONSTANT, changing FX rates must NOT
+   * change the LC growth signal (globalG). The growth rates fedG/ecbG/bojG are
+   * computed in local currency, so FX only affects weights. Since we want
+   * FX-invariance of the signal *value*, we verify this with a concrete example:
+   *
+   * If ecbG = bojG = fedG = same value (e.g. 0.02), the weighted avg = 0.02
+   * regardless of weights (FX rates).
+   *
+   * If they differ, changing FX changes weights which changes globalG.
+   * The key property is: the GROWTH RATES themselves don't move with FX.
+   * Test: freeze local CB levels (fix fedG=2%, ecbG=2%, bojG=2%), vary DEXUSEU:
+   *   → globalG must stay 0.02 regardless of DEXUSEU value.
+   */
+  it('FX-invariance: changing FX rate does not change globalG when local CB growth rates are fixed', () => {
+    // Same local CB series but two different DEXUSEU values
+    const dexuseuLow  = [{ date: '2024-01-01', value: 0.9 }];  // weak dollar
+    const dexuseuHigh = [{ date: '2024-01-01', value: 1.5 }];  // strong dollar
+    // Same local-currency growth rates (2% each), so globalG must be 0.02 in both cases
+
+    const resultLow  = buildGlobalGrowthLC(walcl, ecb, boj, dexuseuLow,  dexjpus, 4);
+    const resultHigh = buildGlobalGrowthLC(walcl, ecb, boj, dexuseuHigh, dexjpus, 4);
+
+    const ptLow  = resultLow.find((p) => p.date === '2024-04-10');
+    const ptHigh = resultHigh.find((p) => p.date === '2024-04-10');
+
+    expect(ptLow).toBeDefined();
+    expect(ptHigh).toBeDefined();
+    // Both must equal 0.02 (because all three local-currency growth rates = 0.02)
+    expect(ptLow!.value).toBeCloseTo(0.02, 5);
+    expect(ptHigh!.value).toBeCloseTo(0.02, 5);
+  });
+
+  /**
+   * Additional FX-invariance: verify non-equal growth rates. fedG=3%, ecbG=1%, bojG=2%.
+   * Changing FX changes weights → globalG changes. But the growth rates themselves must be
+   * correct (unaffected by FX). We test that changing ONLY dexuseu:
+   *   - fedG remains (7_070_000/7_000_000 - 1) = 1%... we use different walcl here.
+   *
+   * Simpler: just verify that ecbG and bojG don't change when FX changes (by directly
+   * checking the function returns a value close to the weighted avg of 1%, 3%, 2%).
+   */
+  it('FX-invariance: different growth rates — globalG matches weighted average of LOCAL growth rates', () => {
+    // Fed: prior=7_000_000 → curr=7_210_000, fedG = 3%
+    // ECB: prior=8_000_000 → curr=8_080_000, ecbG = 1%
+    // BOJ: prior=600_000  → curr=612_000,   bojG = 2%
+    const walclDiff = [
+      { date: '2024-03-11', value: 7_000_000 },
+      { date: '2024-04-10', value: 7_210_000 },  // +3%
+    ];
+    const ecbDiff = [
+      { date: '2024-03-11', value: 8_000_000 },
+      { date: '2024-04-10', value: 8_080_000 },  // +1%
+    ];
+    // boj stays same (+2%): boj already defined above
+
+    // With dexuseu=1.1, dexjpus=150 (original):
+    //   wFed = 7_210_000 / 1000 = 7210
+    //   wEcb = 8_080_000 * 1.1 / 1000 = 8888
+    //   wBoj = 612_000 * 100 / 150 / 1000 = 408
+    //   totalW = 7210 + 8888 + 408 = 16506
+    //   globalG = (7210*0.03 + 8888*0.01 + 408*0.02) / 16506
+    //           = (216.3 + 88.88 + 8.16) / 16506
+    //           = 313.34 / 16506 ≈ 0.018983
+    const expected = (7210 * 0.03 + 8888 * 0.01 + 408 * 0.02) / (7210 + 8888 + 408);
+
+    const result = buildGlobalGrowthLC(walclDiff, ecbDiff, boj, dexuseu, dexjpus, 4);
+    const point = result.find((p) => p.date === '2024-04-10');
+    expect(point).toBeDefined();
+    expect(point!.value).toBeCloseTo(expected, 5);
+
+    // Now change dexuseu significantly — this changes weights but NOT growth rates
+    const dexuseuAlt = [{ date: '2024-01-01', value: 0.8 }]; // much weaker EUR
+    //   wFed = 7210
+    //   wEcb = 8_080_000 * 0.8 / 1000 = 6464
+    //   wBoj = 612_000 * 100 / 150 / 1000 = 408
+    //   totalW = 7210 + 6464 + 408 = 14082
+    //   globalG = (7210*0.03 + 6464*0.01 + 408*0.02) / 14082
+    //           = (216.3 + 64.64 + 8.16) / 14082
+    //           = 289.10 / 14082 ≈ 0.020531
+    const expectedAlt = (7210 * 0.03 + 6464 * 0.01 + 408 * 0.02) / (7210 + 6464 + 408);
+
+    const resultAlt = buildGlobalGrowthLC(walclDiff, ecbDiff, boj, dexuseuAlt, dexjpus, 4);
+    const pointAlt = resultAlt.find((p) => p.date === '2024-04-10');
+    expect(pointAlt).toBeDefined();
+    expect(pointAlt!.value).toBeCloseTo(expectedAlt, 5);
+
+    // The two globalG values differ (different weights) — but each matches its own
+    // hand-computed weighted avg of LOCAL growth rates.
+    // This confirms FX contaminates the weights (which is by design) but NOT the growth rates.
+    expect(Math.abs(point!.value - pointAlt!.value)).toBeGreaterThan(0.001);
+  });
+});
+
+// ---------- leadLagICSignal ----------
+
+describe('leadLagICSignal', () => {
+  /**
+   * Construct a synthetic signal that LEADS SPX by exactly LAG weeks.
+   *
+   * For each episode k=0..N-1, spaced SPACING weeks apart:
+   *   - signal[k].value = sign_k  (already a predictor, +1 or -1 alternating)
+   *   - SPX at (anchor_k + LAG) → SPX at (anchor_k + LAG + fwdWeeks):
+   *       return = sign_k * 0.10  (positive when signal positive, negative when signal negative)
+   *
+   * leadLagICSignal at lead=LAG should see perfect monotone relationship → IC ≈ 1.
+   * At lead=0, SPX return window doesn't align with the signal → IC ≈ 0 or low.
+   */
+  const LAG = 6;
+  const N_EPISODES = 20;
+  const SPACING = 30; // weeks
+  const FWD_WEEKS = 13;
+  const BASE_MS = new Date('2002-01-02').getTime();
+
+  function weekDate(weekIdx: number): string {
+    return new Date(BASE_MS + weekIdx * 7 * 86400000).toISOString().slice(0, 10);
+  }
+
+  function buildSyntheticSignalData() {
+    const signal: { date: string; value: number }[] = [];
+    const spxSeries: { date: string; value: number }[] = [];
+
+    // Baseline SPX level
+    let spxBase = 1000;
+
+    for (let k = 0; k < N_EPISODES; k++) {
+      const anchor = 20 + k * SPACING;
+      const sign = k % 2 === 0 ? 1 : -1;
+
+      // Signal at t=anchor: already a predictor value
+      signal.push({ date: weekDate(anchor), value: sign * 0.10 });
+
+      // SPX: at anchor+LAG = spxBase, at anchor+LAG+fwdWeeks = spxBase*(1+sign*0.10)
+      // Use a slowly drifting base to give Spearman distinct ranks
+      const startPrice = spxBase + k * 1;
+      const endPrice = startPrice * (1 + sign * 0.10);
+      spxSeries.push({ date: weekDate(anchor + LAG), value: startPrice });
+      spxSeries.push({ date: weekDate(anchor + LAG + FWD_WEEKS), value: endPrice });
+
+      // For lead=0 test: SPX at anchor+fwdWeeks is flat (≈ spxBase)
+      spxSeries.push({ date: weekDate(anchor), value: spxBase });
+      spxSeries.push({ date: weekDate(anchor + FWD_WEEKS), value: spxBase });
+    }
+
+    // Sort
+    signal.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+    // Sort and deduplicate SPX (keep last)
+    spxSeries.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    const spxDeduped: { date: string; value: number }[] = [];
+    for (const pt of spxSeries) {
+      if (spxDeduped.length > 0 && spxDeduped[spxDeduped.length - 1].date === pt.date) {
+        spxDeduped[spxDeduped.length - 1].value = pt.value;
+      } else {
+        spxDeduped.push({ ...pt });
+      }
+    }
+
+    return { signal, spxSeries: spxDeduped };
+  }
+
+  it('IC at optimal lead (LAG=6) is meaningfully positive (>0.5)', () => {
+    const { signal, spxSeries } = buildSyntheticSignalData();
+    const result = leadLagICSignal(signal, spxSeries, LAG, FWD_WEEKS);
+    expect(result.n).toBeGreaterThan(5);
+    expect(result.ic).toBeGreaterThan(0.5);
+  });
+
+  it('IC at optimal lead is higher than IC at lead=0', () => {
+    const { signal, spxSeries } = buildSyntheticSignalData();
+    const icAtLag = leadLagICSignal(signal, spxSeries, LAG, FWD_WEEKS);
+    const icAt0   = leadLagICSignal(signal, spxSeries, 0,   FWD_WEEKS);
+    expect(icAtLag.ic).toBeGreaterThan(icAt0.ic);
+  });
+
+  it('returns {ic, n} shape with correct types', () => {
+    const { signal, spxSeries } = buildSyntheticSignalData();
+    const result = leadLagICSignal(signal, spxSeries, LAG, FWD_WEEKS);
+    expect(result).toHaveProperty('ic');
+    expect(result).toHaveProperty('n');
+    expect(typeof result.ic).toBe('number');
+    expect(typeof result.n).toBe('number');
+  });
+
+  it('returns {ic:0, n:0} for empty signal', () => {
+    const { spxSeries } = buildSyntheticSignalData();
+    const result = leadLagICSignal([], spxSeries, LAG, FWD_WEEKS);
+    expect(result.ic).toBe(0);
+    expect(result.n).toBe(0);
+  });
+
+  it('returns {ic:0, n<=2} for a single-point signal', () => {
+    const signal = [{ date: '2020-01-01', value: 0.05 }];
+    const spxSeries = [
+      { date: '2020-01-01', value: 3000 },
+      { date: '2020-04-01', value: 3100 },
+    ];
+    const result = leadLagICSignal(signal, spxSeries, 0, FWD_WEEKS);
+    expect(result.n).toBeLessThanOrEqual(2);
     expect(result.ic).toBe(0);
   });
 });
