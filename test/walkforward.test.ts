@@ -110,9 +110,9 @@ describe('icWeights', () => {
     });
     // All other factors are constant 50 → IC ≈ 0 except netliqTrend (negative)
     const w = icWeights(snaps, 4);
-    const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy'];
+    const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy','curve'];
     for (const k of FACTOR_KEYS) {
-      expect(w[k]).toBeCloseTo(1 / 8, 5);
+      expect(w[k]).toBeCloseTo(1 / 9, 5);
     }
   });
 

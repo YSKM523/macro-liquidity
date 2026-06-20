@@ -2,7 +2,7 @@ import type { BtSnap } from './backtest';
 import { spearman, forwardReturns } from './backtest';
 import { WEIGHTS } from './config';
 
-const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy'];
+const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy','curve'];
 
 // Weighted sum of factors (each 0-100, weights sum ≈ 1 → result 0-100)
 export function weightedFrom(factors: Record<string, number>, weights: Record<string, number>): number {

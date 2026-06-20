@@ -110,7 +110,7 @@ export function forwardReturns(
 // ---------- runBacktest ----------
 
 const DEFAULT_HORIZONS = [4, 8, 13];
-const DEFAULT_FACTOR_KEYS = ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'vol', 'reserveAdequacy'];
+const DEFAULT_FACTOR_KEYS = ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'vol', 'reserveAdequacy', 'curve'];
 
 export function runBacktest(
   snaps: BtSnap[],

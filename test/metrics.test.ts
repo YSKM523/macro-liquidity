@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, balanceSheetImpulse, netliqDirection,
   percentileRank, scoreNetliqTrend, scoreImpulse, scoreCredit, scoreFunding,
-  scoreRates, scoreVol, weightedScore, scoreReserveAdequacy,
+  scoreRates, scoreVol, weightedScore, scoreReserveAdequacy, scoreCurve,
 } from '../src/metrics';
 import { verdictFromScore, buildReason, computeSnapshot, policyRegime, downgradeVerdict } from '../src/metrics';
 import { WEIGHTS } from '../src/config';
@@ -119,7 +119,7 @@ describe('factor scores', () => {
     expect(scoreVol(14)).toBeGreaterThan(scoreVol(35));
   });
   it('weightedScore stays in [0,100]', () => {
-    const f = { netliqTrend:80, impulse:70, credit:60, funding:90, rates:40, dollar:55, vol:75, reserveAdequacy:50 };
+    const f = { netliqTrend:80, impulse:70, credit:60, funding:90, rates:40, dollar:55, vol:75, reserveAdequacy:50, curve:60 };
     const s = weightedScore(f);
     expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
   });
@@ -291,8 +291,76 @@ describe('reserveAdequacy integration', () => {
     expect(WEIGHTS.reserveAdequacy).toBeGreaterThan(0);
   });
 
-  it('all 8 WEIGHTS sum to exactly 1.00', () => {
+  it('all 9 WEIGHTS sum to exactly 1.00', () => {
     const sum = (Object.values(WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
     expect(sum).toBeCloseTo(1.00, 10);
+  });
+});
+
+describe('scoreCurve', () => {
+  it('steep curve (slope=+1.5) + steepening (Δ=+0.3) → high score (>80)', () => {
+    const s = scoreCurve(1.5, 0.3);
+    expect(s).toBeGreaterThan(80);
+    expect(s).toBeLessThanOrEqual(100);
+  });
+
+  it('inverted curve (slope=−0.5) + flattening (Δ=−0.3) → low score (<20)', () => {
+    const s = scoreCurve(-0.5, -0.3);
+    expect(s).toBeLessThan(20);
+    expect(s).toBeGreaterThanOrEqual(0);
+  });
+
+  it('all null inputs → score = 50 (neutral fallback)', () => {
+    expect(scoreCurve(null, null)).toBeCloseTo(50);
+  });
+
+  it('output stays within [0, 100] boundary', () => {
+    expect(scoreCurve(-99, -99)).toBeGreaterThanOrEqual(0);
+    expect(scoreCurve(-99, -99)).toBeLessThanOrEqual(100);
+    expect(scoreCurve(99, 99)).toBeGreaterThanOrEqual(0);
+    expect(scoreCurve(99, 99)).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('curve integration', () => {
+  const wk = (start: number, step: number) =>
+    Array.from({ length: 30 }, (_, i) => ({
+      date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
+      value: start + i * step,
+    }));
+  const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+
+  const baseMap = {
+    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+    RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
+    BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
+    DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: 120 })),
+    SP500: daily(5000),
+  };
+
+  it('computeSnapshot includes curve in factors, within [0,100]', () => {
+    const curveData = Array.from({ length: 30 }, (_, i) => ({
+      date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10),
+      value: 0.5 + i * 0.01,
+    }));
+    const m = { ...baseMap, T10Y2Y: curveData };
+    const snap = computeSnapshot(m, '2024-07-31');
+    expect(typeof snap.factors.curve).toBe('number');
+    expect(snap.factors.curve).toBeGreaterThanOrEqual(0);
+    expect(snap.factors.curve).toBeLessThanOrEqual(100);
+  });
+
+  it('score is unaffected by T10Y2Y data (weight=0)', () => {
+    // score without T10Y2Y
+    const snapWithout = computeSnapshot(baseMap, '2024-07-31');
+    // score with T10Y2Y providing extreme steep curve
+    const curveData = [{ date: '2024-01-01', value: 2.5 }, { date: '2024-07-31', value: 2.5 }];
+    const snapWith = computeSnapshot({ ...baseMap, T10Y2Y: curveData }, '2024-07-31');
+    // weight is 0 so total score must not change
+    expect(snapWith.score).toBeCloseTo(snapWithout.score, 10);
+  });
+
+  it('curve weight is exactly 0', () => {
+    expect(WEIGHTS.curve).toBe(0);
   });
 });

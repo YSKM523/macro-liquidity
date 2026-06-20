@@ -13,6 +13,7 @@ export const SERIES = {
   VIXCLS:       { id: 'VIXCLS',       unit: 'I' },
   DTWEXBGS:     { id: 'DTWEXBGS',     unit: 'I' },
   SP500:        { id: 'SP500',        unit: 'I' },
+  T10Y2Y:       { id: 'T10Y2Y',       unit: 'P' },
 } as const;
 
 export const SERIES_IDS: string[] = Object.values(SERIES).map(s => s.id);
@@ -26,8 +27,8 @@ export const QT_END_DATE = '2025-12-01';
 // reserveAdequacy +0.12 (the 3 robust positives → ~0.75 of the weight); impulse +0.08 / rates +0.06 / credit ~-0.03 /
 // funding ~-0.04 kept low (weak/neutral risk sensors); vol = robust contrarian → 0, lives in the live-stress overlay.
 // Modest IC-direction tilt (NOT an IC-proportional fit); in-sample over 2016-2026 — true walk-forward is later.
-// sum check: 0.40+0.05+0.10+0.05+0.05+0.20+0.00+0.15 = 1.00
-export const WEIGHTS = { netliqTrend: 0.40, impulse: 0.05, credit: 0.10, funding: 0.05, rates: 0.05, dollar: 0.20, vol: 0.00, reserveAdequacy: 0.15 } as const;
+// sum check: 0.40+0.05+0.10+0.05+0.05+0.20+0.00+0.15+0.00 = 1.00
+export const WEIGHTS = { netliqTrend: 0.40, impulse: 0.05, credit: 0.10, funding: 0.05, rates: 0.05, dollar: 0.20, vol: 0.00, reserveAdequacy: 0.15, curve: 0.00 } as const;
 export const RESERVE_LOW  = 2800;  // bank reserves ($B) tight end (~LCLOR zone) → adequacy low
 export const RESERVE_HIGH = 3800;  // abundant end → adequacy high
 export const QEQT_EPSILON_B = 50;        // ΔWALCL 13w dead-band (billions), initial

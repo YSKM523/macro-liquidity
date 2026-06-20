@@ -67,7 +67,7 @@ export function netliqDirection(netliqWeekly: number[]): Direction {
 
 export interface Factors {
   netliqTrend: number; impulse: number; credit: number; funding: number;
-  rates: number; dollar: number; vol: number; reserveAdequacy: number;
+  rates: number; dollar: number; vol: number; reserveAdequacy: number; curve: number;
 }
 
 export function percentileRank(value: number, history: number[]): number {
@@ -148,12 +148,23 @@ export function scoreReserveAdequacy(
   return clamp(0.5 * lvl + 0.3 * mom + 0.2 * fund);
 }
 
+/**
+ * Yield-curve slope score (0–100).
+ * @param slope       T10Y2Y level (pp): -0.5 inverted → 0, +1.5 steep → 100
+ * @param slopeChange20  20-day change in T10Y2Y: -0.3 (flattening) → 0, +0.3 (steepening) → 100
+ */
+export function scoreCurve(slope: number | null, slopeChange20: number | null): number {
+  const lvl = slope == null ? 50 : linMap(slope, -0.5, 1.5);
+  const mom = slopeChange20 == null ? 50 : linMap(slopeChange20, -0.3, 0.3);
+  return clamp(0.5 * lvl + 0.5 * mom);
+}
+
 export function weightedScore(f: Factors): number {
   const s =
     f.netliqTrend * WEIGHTS.netliqTrend + f.impulse * WEIGHTS.impulse +
     f.credit * WEIGHTS.credit + f.funding * WEIGHTS.funding +
     f.rates * WEIGHTS.rates + f.dollar * WEIGHTS.dollar + f.vol * WEIGHTS.vol +
-    f.reserveAdequacy * WEIGHTS.reserveAdequacy;
+    f.reserveAdequacy * WEIGHTS.reserveAdequacy + f.curve * WEIGHTS.curve;
   return clamp(s);
 }
 
@@ -229,6 +240,9 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const reservesLevel = asOf(m.WRBWFRBL ?? [], date);
   const deltaReserves13w = changeOverDays(m.WRBWFRBL ?? [], date, 91); // ~13 weeks
 
+  const curveSlope = asOf(m.T10Y2Y ?? [], date);
+  const curveChange20 = changeOverDays(m.T10Y2Y ?? [], date, 20);
+
   const factors: Factors = {
     netliqTrend: scoreNetliqTrend(netliqWeekly),
     impulse: scoreImpulse(bsImpulse),
@@ -238,6 +252,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     dollar: scoreDollar(m.DTWEXBGS ?? [], date),
     vol: scoreVol(vix),
     reserveAdequacy: scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb),
+    curve: scoreCurve(curveSlope, curveChange20),
   };
   const score = weightedScore(factors);
   const verdict = verdictFromScore(score, prev);
