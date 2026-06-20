@@ -168,6 +168,111 @@ export function weightedScore(f: Factors): number {
   return clamp(s);
 }
 
+// ── Part 3b: buildGuidance — pure mapping function ────────────────────────────
+
+export interface GuidanceInput {
+  score: number;
+  verdict: string;        // macro verdict BULLISH/NEUTRAL/BEARISH
+  netliqDir: string;      // 'UP' | 'DOWN' | 'FLAT'
+  qeQtRegime: string;     // 'EXPANDING' | 'CONTRACTING' | 'FLAT'
+  stressed: boolean;      // live_stress.stressed
+}
+
+export interface GuidanceTrigger {
+  label: string;
+  detail: string;
+  armed: boolean;
+}
+
+export interface Guidance {
+  tone: 'bull' | 'neutral' | 'bear' | 'brake';
+  tierLabel: string;
+  exposure: string;
+  lean: string;
+  divergence: string | null;
+  triggers: GuidanceTrigger[];
+}
+
+export function buildGuidance(input: GuidanceInput): Guidance {
+  const { score, netliqDir, qeQtRegime, stressed } = input;
+
+  // Tier logic (ordered: stress first, then score bands)
+  let tone: Guidance['tone'];
+  let tierLabel: string;
+  let exposure: string;
+  let lean: string;
+
+  if (stressed) {
+    tone = 'brake';
+    tierLabel = 'RISK-OFF · 刹车';
+    exposure = '立刻停止加仓、收到基准以下';
+    lean = '现金/防御,等实时风险解除';
+  } else if (score >= 55) {
+    if (netliqDir === 'DOWN') {
+      tone = 'neutral';
+      tierLabel = '偏多但留意背离';
+      exposure = '基准附近偏上,别追到满仓';
+      lean = 'beta 可拿但控量';
+    } else {
+      tone = 'bull';
+      tierLabel = '顺风 · 可加码';
+      exposure = '基准 +15~20pp';
+      lean = 'beta/成长(QQQ、高弹性)';
+    }
+  } else if (score < 45) {
+    if (netliqDir === 'DOWN') {
+      tone = 'bear';
+      tierLabel = '逆风 · 减仓';
+      exposure = '基准 −15~20pp';
+      lean = '质量/防御、现金';
+    } else {
+      tone = 'bear';
+      tierLabel = '偏空 · 降一档';
+      exposure = '基准以下';
+      lean = '质量/防御';
+    }
+  } else if (score < 50) {
+    tone = 'neutral';
+    tierLabel = '中性偏谨慎';
+    exposure = '维持基准或略低';
+    lean = '均衡;别上杠杆,留点干火药';
+  } else {
+    tone = 'neutral';
+    tierLabel = '中性偏多';
+    exposure = '维持基准';
+    lean = '均衡';
+  }
+
+  // Divergence detection
+  let divergence: string | null = null;
+  if (qeQtRegime === 'EXPANDING' && netliqDir === 'DOWN') {
+    divergence = '扩表却收水:真正驱动股市的净流动性在抽水,别被 Fed 扩表骗';
+  } else if (qeQtRegime === 'CONTRACTING' && netliqDir === 'UP') {
+    divergence = '缩表却放水:净流动性反在改善';
+  }
+
+  // Triggers (two fixed)
+  const trigger0: GuidanceTrigger = score >= 45
+    ? {
+        label: '分数跌破 45 → 主动减一档',
+        detail: '当前 ' + score.toFixed(1) + ',距 45 还有 ' + (score - 45).toFixed(1),
+        armed: (score - 45) <= 2,
+      }
+    : {
+        label: '分数已在 45 下方 → 维持减仓',
+        detail: '当前 ' + score.toFixed(1),
+        armed: true,
+      };
+
+  const trigger1: GuidanceTrigger = {
+    label: '实时风险(stress)触发 → 立刻刹车',
+    detail: stressed ? '已触发' : '当前未触发',
+    armed: stressed,
+  };
+
+  return { tone, tierLabel, exposure, lean, divergence, triggers: [trigger0, trigger1] };
+}
+
 // ── Part 4: verdict + reason + computeSnapshot ────────────────────────────────
 
 export type Verdict = 'BULLISH' | 'BEARISH' | 'NEUTRAL';

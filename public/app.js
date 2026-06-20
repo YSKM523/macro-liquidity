@@ -1,6 +1,7 @@
 const FACTOR_LABELS = {
   netliqTrend: '净流动性', impulse: '资产负债表', credit: '信用', funding: '资金面',
   rates: '利率冲量', dollar: '美元', vol: '波动',
+  reserveAdequacy: '准备金', curve: '收益率曲线',
 };
 const VERDICT_CN = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
 const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral' };
@@ -14,6 +15,7 @@ async function main() {
     fetch('/api/history?from=' + threeYearsAgo()).then(r => r.json()),
   ]);
   renderVerdict(snapRes);
+  renderGuidance(snapRes.snapshot);
   renderScore(snapRes.snapshot);
   renderFactorTable(snapRes);
   renderChart(histRes.rows || []);
@@ -78,6 +80,35 @@ function renderVerdict(res) {
     coverageEl.textContent = `${n}/7 因子有真实数据`;
     coverageEl.style.color = n < 7 ? '#B7791F' : '';
   }
+}
+
+function renderGuidance(s) {
+  const card = document.getElementById('guidance-card');
+  if (!s || !s.guidance) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const g = s.guidance;
+
+  // Tier badge + tone color class
+  const tierEl = document.getElementById('g-tier');
+  tierEl.textContent = g.tierLabel;
+  tierEl.className = 'g-badge ' + g.tone;
+
+  document.getElementById('g-exposure').textContent = g.exposure;
+  document.getElementById('g-lean').textContent = '偏向:' + g.lean;
+
+  const divergeEl = document.getElementById('g-diverge');
+  if (g.divergence) {
+    divergeEl.textContent = g.divergence;
+    divergeEl.style.display = '';
+  } else {
+    divergeEl.style.display = 'none';
+  }
+
+  const triggersList = document.getElementById('g-triggers');
+  triggersList.innerHTML = (g.triggers || []).map(t => {
+    const cls = t.armed ? 'armed' : '';
+    return `<li class="${cls}"><b>${t.label}</b> · ${t.detail}</li>`;
+  }).join('');
 }
 
 function dirCn(d) { return { UP: '在升', DOWN: '在收', FLAT: '走平' }[d] || '—'; }

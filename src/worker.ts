@@ -2,7 +2,7 @@ import type { Env } from './service';
 import { runIngest } from './service';
 import { latestSnapshot, snapshotHistory, loadBacktestRows } from './db';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
-import { policyRegime, downgradeVerdict } from './metrics';
+import { policyRegime, downgradeVerdict, buildGuidance } from './metrics';
 import { STRESS_SCORE_CEILING } from './config';
 import { runBacktest } from './backtest';
 import { runWalkForward } from './walkforward';
@@ -26,7 +26,14 @@ export default {
         const display_verdict = (stress.stressed && row.score < STRESS_SCORE_CEILING)
           ? downgradeVerdict(row.verdict)
           : row.verdict;
-        snap = { ...row, policy_regime: policyRegime(row.qe_qt_regime, row.date), display_verdict, live_stress: stress };
+        const guidance = buildGuidance({
+          score: row.score,
+          verdict: row.verdict,
+          netliqDir: row.netliq_dir,
+          qeQtRegime: row.qe_qt_regime,
+          stressed: stress.stressed,
+        });
+        snap = { ...row, policy_regime: policyRegime(row.qe_qt_regime, row.date), display_verdict, live_stress: stress, guidance };
       }
       return json({ snapshot: snap, live });
     }

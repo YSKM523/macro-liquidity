@@ -3,6 +3,7 @@ import {
   clamp, linMap, sma, asOf, buildWeeklyNetliq, changeOverDays, balanceSheetImpulse, netliqDirection,
   percentileRank, scoreNetliqTrend, scoreImpulse, scoreCredit, scoreFunding,
   scoreRates, scoreVol, weightedScore, scoreReserveAdequacy, scoreCurve,
+  buildGuidance,
 } from '../src/metrics';
 import { verdictFromScore, buildReason, computeSnapshot, policyRegime, downgradeVerdict } from '../src/metrics';
 import { WEIGHTS } from '../src/config';
@@ -360,5 +361,137 @@ describe('curve integration', () => {
 
   it('curve carries a positive weight (earned its keep: 13w IC +0.17, raises equal-weight OOS IC)', () => {
     expect(WEIGHTS.curve).toBeGreaterThan(0);
+  });
+});
+
+// ── buildGuidance TDD ───────────────────────────────────────────────────────
+describe('buildGuidance', () => {
+  const base = { verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false } as const;
+
+  // ── stress-override branch ──────────────────────────────────────────────
+  it('stressed=true → tone brake regardless of score', () => {
+    const g = buildGuidance({ score: 70, ...base, stressed: true });
+    expect(g.tone).toBe('brake');
+    expect(g.tierLabel).toBe('RISK-OFF · 刹车');
+    expect(g.exposure).toContain('立刻停止加仓');
+    expect(g.lean).toContain('现金');
+  });
+
+  it('stressed=true → trigger[1] armed=true', () => {
+    const g = buildGuidance({ score: 70, ...base, stressed: true });
+    expect(g.triggers[1].armed).toBe(true);
+    expect(g.triggers[1].detail).toContain('已触发');
+  });
+
+  // ── score >= 55, no DOWN divergence → bull ─────────────────────────────
+  it('score=60, netliqDir=UP → tone bull, 顺风·可加码', () => {
+    const g = buildGuidance({ score: 60, verdict: 'BULLISH', netliqDir: 'UP', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.tone).toBe('bull');
+    expect(g.tierLabel).toBe('顺风 · 可加码');
+    expect(g.exposure).toContain('+15~20pp');
+    expect(g.lean).toContain('beta');
+  });
+
+  // ── score >= 55, netliqDir=DOWN → neutral (divergence caution) ─────────
+  it('score=60, netliqDir=DOWN → tone neutral, 偏多但留意背离', () => {
+    const g = buildGuidance({ score: 60, verdict: 'BULLISH', netliqDir: 'DOWN', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.tone).toBe('neutral');
+    expect(g.tierLabel).toBe('偏多但留意背离');
+    expect(g.exposure).toContain('别追到满仓');
+    expect(g.lean).toContain('beta');
+  });
+
+  // ── score < 45, netliqDir=DOWN → bear (full bear) ──────────────────────
+  it('score=40, netliqDir=DOWN → tone bear, 逆风·减仓', () => {
+    const g = buildGuidance({ score: 40, verdict: 'BEARISH', netliqDir: 'DOWN', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.tone).toBe('bear');
+    expect(g.tierLabel).toBe('逆风 · 减仓');
+    expect(g.exposure).toContain('−15~20pp');
+    expect(g.lean).toContain('质量');
+  });
+
+  // ── score < 45, netliqDir=UP → bear (mild bear) ────────────────────────
+  it('score=42, netliqDir=UP → tone bear, 偏空·降一档', () => {
+    const g = buildGuidance({ score: 42, verdict: 'BEARISH', netliqDir: 'UP', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.tone).toBe('bear');
+    expect(g.tierLabel).toBe('偏空 · 降一档');
+    expect(g.exposure).toContain('基准以下');
+    expect(g.lean).toContain('质量');
+  });
+
+  // ── score 45–50 → neutral caution ──────────────────────────────────────
+  it('score=47 → tone neutral, 中性偏谨慎', () => {
+    const g = buildGuidance({ score: 47, verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.tone).toBe('neutral');
+    expect(g.tierLabel).toBe('中性偏谨慎');
+    expect(g.exposure).toContain('维持基准');
+    expect(g.lean).toContain('均衡');
+  });
+
+  // ── score 50–55 → neutral mild bull ────────────────────────────────────
+  it('score=52 → tone neutral, 中性偏多', () => {
+    const g = buildGuidance({ score: 52, verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.tone).toBe('neutral');
+    expect(g.tierLabel).toBe('中性偏多');
+    expect(g.exposure).toBe('维持基准');
+    expect(g.lean).toBe('均衡');
+  });
+
+  // ── divergence: EXPANDING + DOWN ───────────────────────────────────────
+  it('qeQtRegime=EXPANDING, netliqDir=DOWN → divergence contains 扩表却收水', () => {
+    const g = buildGuidance({ score: 52, verdict: 'NEUTRAL', netliqDir: 'DOWN', qeQtRegime: 'EXPANDING', stressed: false });
+    expect(g.divergence).not.toBeNull();
+    expect(g.divergence).toContain('扩表却收水');
+  });
+
+  // ── divergence: CONTRACTING + UP ───────────────────────────────────────
+  it('qeQtRegime=CONTRACTING, netliqDir=UP → divergence contains 缩表却放水', () => {
+    const g = buildGuidance({ score: 52, verdict: 'NEUTRAL', netliqDir: 'UP', qeQtRegime: 'CONTRACTING', stressed: false });
+    expect(g.divergence).not.toBeNull();
+    expect(g.divergence).toContain('缩表却放水');
+  });
+
+  // ── divergence: null when no mismatch ──────────────────────────────────
+  it('no regime divergence → divergence is null', () => {
+    const g = buildGuidance({ score: 52, verdict: 'NEUTRAL', netliqDir: 'UP', qeQtRegime: 'EXPANDING', stressed: false });
+    expect(g.divergence).toBeNull();
+  });
+
+  // ── trigger[0]: score above 45, shows distance, armed when within 2 ───
+  it('score=46.5 → trigger[0] armed=true (within 2 of 45)', () => {
+    const g = buildGuidance({ score: 46.5, verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.triggers[0].armed).toBe(true);
+    expect(g.triggers[0].detail).toContain('46.5');
+    expect(g.triggers[0].detail).toContain('1.5');
+  });
+
+  it('score=50 → trigger[0] armed=false (5 from 45)', () => {
+    const g = buildGuidance({ score: 50, verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.triggers[0].armed).toBe(false);
+  });
+
+  // ── trigger[0]: score below 45, armed=true, different label ───────────
+  it('score=43 → trigger[0] armed=true, label 已在45下方', () => {
+    const g = buildGuidance({ score: 43, verdict: 'BEARISH', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.triggers[0].armed).toBe(true);
+    expect(g.triggers[0].label).toContain('已在 45 下方');
+    expect(g.triggers[0].detail).toContain('43.0');
+  });
+
+  // ── trigger[1]: stress not triggered ───────────────────────────────────
+  it('stressed=false → trigger[1] armed=false, detail 当前未触发', () => {
+    const g = buildGuidance({ score: 52, verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressed: false });
+    expect(g.triggers[1].armed).toBe(false);
+    expect(g.triggers[1].detail).toContain('当前未触发');
+  });
+
+  // ── self-check: real-world scenario (score≈45.7, DOWN, EXPANDING) ─────
+  it('self-check: score=45.7, DOWN, EXPANDING → neutral-caution + 扩表却收水 divergence + trigger armed', () => {
+    const g = buildGuidance({ score: 45.7, verdict: 'NEUTRAL', netliqDir: 'DOWN', qeQtRegime: 'EXPANDING', stressed: false });
+    expect(g.tone).toBe('neutral');
+    expect(g.tierLabel).toBe('中性偏谨慎');
+    expect(g.divergence).toContain('扩表却收水');
+    // 45.7 − 45 = 0.7, within 2 → armed = true
+    expect(g.triggers[0].armed).toBe(true);
   });
 });

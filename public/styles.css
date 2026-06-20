@@ -35,3 +35,18 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .tag{font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
 .tag.ok{color:var(--green)} .tag.bad{color:var(--red)}
 @media(max-width:760px){.grid{grid-template-columns:1fr}}
+
+/* ── Guidance / Position Dial panel ─────────────────────────────────────── */
+.guidance .g-tier{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.g-badge{display:inline-block;padding:4px 12px;border-radius:6px;font-weight:700;font-size:15px;color:#fff}
+.g-badge.bull{background:var(--green)}
+.g-badge.bear{background:var(--red)}
+.g-badge.neutral{background:var(--amber)}
+.g-badge.brake{background:#9B2335}
+.g-exposure{font-size:15px;font-weight:600;color:var(--ink)}
+.g-lean{font-size:14px;color:var(--muted);margin-bottom:10px}
+.g-diverge{font-size:13px;color:var(--amber);margin-bottom:10px}
+.g-triggers{list-style:none;padding:0;margin:0 0 12px;display:flex;flex-direction:column;gap:6px}
+.g-triggers li{font-size:13px;color:var(--muted);padding:4px 0}
+.g-triggers li.armed{font-weight:700;color:var(--ink);border-left:3px solid var(--amber);padding-left:8px}
+.g-note{font-size:0.75rem;color:var(--muted);margin:0}
