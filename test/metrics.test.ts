@@ -350,17 +350,15 @@ describe('curve integration', () => {
     expect(snap.factors.curve).toBeLessThanOrEqual(100);
   });
 
-  it('score is unaffected by T10Y2Y data (weight=0)', () => {
-    // score without T10Y2Y
+  it('curve is weighted (earned via IC), so T10Y2Y moves the score', () => {
     const snapWithout = computeSnapshot(baseMap, '2024-07-31');
-    // score with T10Y2Y providing extreme steep curve
+    // T10Y2Y providing a steep curve → higher curve score than the null fallback (50)
     const curveData = [{ date: '2024-01-01', value: 2.5 }, { date: '2024-07-31', value: 2.5 }];
     const snapWith = computeSnapshot({ ...baseMap, T10Y2Y: curveData }, '2024-07-31');
-    // weight is 0 so total score must not change
-    expect(snapWith.score).toBeCloseTo(snapWithout.score, 10);
+    expect(snapWith.score).not.toBeCloseTo(snapWithout.score);
   });
 
-  it('curve weight is exactly 0', () => {
-    expect(WEIGHTS.curve).toBe(0);
+  it('curve carries a positive weight (earned its keep: 13w IC +0.17, raises equal-weight OOS IC)', () => {
+    expect(WEIGHTS.curve).toBeGreaterThan(0);
   });
 });
