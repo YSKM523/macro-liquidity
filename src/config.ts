@@ -22,11 +22,12 @@ export const UNIT_BY_ID: Record<string, string> =
 export const START_DATE = '2003-01-01';
 // Fed 在 2025-10-29 FOMC 宣布证券持仓缩减于 2025-12-01 结束(分析师引用,如有变更改此处)
 export const QT_END_DATE = '2025-12-01';
-// P2-1a: vol weight → 0 (backtest: VIX score is robustly CONTRARIAN, not a bullish factor; VIX moves to the live-stress overlay).
-// vol still computed/stored so /api/backtest keeps measuring its IC. Freed 0.07 → the two robustly-positive factors (netliqTrend, dollar). Sum = 1.00.
-// reserveAdequacy: weight 0 (measure-only this step; IC assessed before reweighting)
-// sum check: 0.50+0.05+0.15+0.10+0.10+0.10+0.00+0.00 = 1.00
-export const WEIGHTS = { netliqTrend: 0.50, impulse: 0.05, credit: 0.15, funding: 0.10, rates: 0.10, dollar: 0.10, vol: 0.00, reserveAdequacy: 0.00 } as const;
+// P2-4: data-grounded reweight from measured 10yr factor IC (13w spearman): netliqTrend +0.19, dollar +0.16,
+// reserveAdequacy +0.12 (the 3 robust positives → ~0.75 of the weight); impulse +0.08 / rates +0.06 / credit ~-0.03 /
+// funding ~-0.04 kept low (weak/neutral risk sensors); vol = robust contrarian → 0, lives in the live-stress overlay.
+// Modest IC-direction tilt (NOT an IC-proportional fit); in-sample over 2016-2026 — true walk-forward is later.
+// sum check: 0.40+0.05+0.10+0.05+0.05+0.20+0.00+0.15 = 1.00
+export const WEIGHTS = { netliqTrend: 0.40, impulse: 0.05, credit: 0.10, funding: 0.05, rates: 0.05, dollar: 0.20, vol: 0.00, reserveAdequacy: 0.15 } as const;
 export const RESERVE_LOW  = 2800;  // bank reserves ($B) tight end (~LCLOR zone) → adequacy low
 export const RESERVE_HIGH = 3800;  // abundant end → adequacy high
 export const QEQT_EPSILON_B = 50;        // ΔWALCL 13w dead-band (billions), initial
