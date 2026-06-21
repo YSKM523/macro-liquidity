@@ -1,6 +1,6 @@
 import type { Env } from './service';
 import { runIngest } from './service';
-import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots, snapshotOnOrBefore } from './db';
+import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots, snapshotOnOrBefore, loadSeriesMap } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
 import { policyRegime, downgradeVerdict, buildGuidance } from './metrics';
@@ -9,6 +9,7 @@ import { assessHealth } from './health';
 import { runBacktest } from './backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
+import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -142,6 +143,14 @@ export default {
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
       return json(runRobustness(snaps));
+    }
+    if (p === '/api/global-liquidity') {
+      const m = await loadSeriesMap(env.DB);
+      const date = (m.WALCL ?? []).at(-1)?.date;
+      const latest = date ? globalLiquidityLatest(m, date) : null;
+      const series = date ? globalLiquiditySeries(m, date) : [];
+      if (!latest || series.length === 0) return json({ error: 'no_data' });
+      return json({ latest, series, note: 'display-only · 不进打分 · 弱信号(IC≈0.08 不显著)' });
     }
     if (p === '/api/admin/refresh' && req.method === 'POST') {
       const auth = req.headers.get('authorization') ?? '';
