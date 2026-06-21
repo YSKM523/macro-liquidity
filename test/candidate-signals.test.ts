@@ -32,16 +32,30 @@ describe('termPremiumSignal', () => {
 });
 
 describe('earningsMomentumSignal', () => {
-  it('does not use earnings published after the signal date (no lookahead)', () => {
-    // Earnings jump to a high value only on 2021-06-15; with a 60-day lag,
-    // the signal on 2021-06-20 must NOT yet reflect that jump.
+  it('does not use earnings published after (signal date − lag) [no lookahead]', () => {
+    // Emit dates ARE the earnings dates. EPS jumps to 500 on 2021-06-15.
+    // With a 60-day lag, the signal at 2021-06-15 uses asOf(2021-04-16)=100 (pre-jump)
+    // → value 0; WITHOUT the lag it would use 500 → value 4. Asserting < 1 here fails
+    // loudly if the lag is ever removed (this is the real lookahead guard).
     const earnings = [
-      { date: '2020-01-15', value: 100 }, { date: '2020-06-15', value: 100 },
-      { date: '2021-01-15', value: 100 }, { date: '2021-06-15', value: 500 },
+      { date: '2020-04-15', value: 100 },
+      { date: '2021-02-15', value: 100 },
+      { date: '2021-06-15', value: 500 }, // jump on the emit date
     ];
     const sig = earningsMomentumSignal(earnings, 60);
-    const onJun20 = sig.find(s => s.date === '2021-06-20');
-    if (onJun20) expect(onJun20.value).toBeLessThan(1); // jump (×5) not yet visible
+    const onJun15 = sig.find(s => s.date === '2021-06-15');
+    expect(onJun15).toBeDefined();
+    expect(onJun15.value).toBeLessThan(1); // 0 with lag; would be 4 without
+  });
+  it('reflects real YoY growth once the lag has passed', () => {
+    const earnings = [
+      { date: '2020-04-15', value: 100 },
+      { date: '2021-06-15', value: 200 },
+      { date: '2022-06-15', value: 200 },
+    ];
+    const sig = earningsMomentumSignal(earnings, 60);
+    const latest = sig.at(-1);
+    expect(latest.value).toBeCloseTo(1.0, 1); // (200-100)/100 at the 2022-06-15 emit
   });
   it('returns [] on empty input', () => {
     expect(earningsMomentumSignal([], 60)).toEqual([]);
