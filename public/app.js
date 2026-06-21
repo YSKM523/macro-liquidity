@@ -20,10 +20,13 @@ const FACTOR_MEANING = {
   curve: '收益率曲线斜率(10Y−2Y)',
 };
 let explainData = null;
+const REGIME_AXIS_LABEL = { balance_sheet: '资产负债表', covid: 'COVID 前后', qt: 'QT 前后', vix: 'VIX 风险档' };
+const REGIME_BUCKET_LABEL = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住', pre: '前', post: '后', low: '低波', high: '高波' };
 
 async function main() {
   setupExplain();
   fetchExplain('1w');
+  fetchRobust();
   let snapRes, histRes;
   try {
     [snapRes, histRes] = await Promise.all([
@@ -386,6 +389,59 @@ function renderNetliq(nl, win) {
       + `(WALCL ${tag(d.walcl, false)} · TGA ${tag(d.tga, true)} · RRP ${tag(d.rrp, true)};TGA/RRP 升=抽水)</p>`;
   }
   return `<div class="ex-sub">净流动性拆解(十亿$)</div>${bridge}${note}`;
+}
+
+// ── 回测稳健性面板 ────────────────────────────────────────────────────────
+async function fetchRobust() {
+  const card = document.getElementById('robust-card');
+  const body = document.getElementById('robust-body');
+  if (!card || !body) return;
+  try {
+    const r = await fetch('/api/robustness').then(x => x.json());
+    if (!r || !r.ic) { body.innerHTML = '<p class="rb-note">数据不足</p>'; card.style.display = ''; return; }
+    body.innerHTML = renderRobust(r);
+    card.style.display = '';
+  } catch (e) {
+    body.innerHTML = '<p class="rb-note">稳健性加载失败,稍后重试</p>';
+    card.style.display = '';
+  }
+}
+
+function rbPct(x, d = 1) { return (x * 100).toFixed(d) + '%'; }
+function rbIcCls(x) { return x >= 0 ? 'rb-pos' : 'rb-neg'; }
+
+function renderRobust(r) {
+  const ic = r.ic, st = r.strategy, b = ic.bootstrap, sh = st.sharpe;
+  const icBlock = `<div class="rb-sub">IC 稳健性(${r.horizon_weeks} 周)</div>`
+    + `<div class="rb-stat"><span class="k">IC 点估</span><span class="v ${rbIcCls(b.point)}">${b.point.toFixed(3)} <span class="rb-ci">95%CI [${b.ci_lo.toFixed(3)}, ${b.ci_hi.toFixed(3)}] · p(IC≤0)=${b.p_value.toFixed(2)}</span></span></div>`
+    + `<div class="rb-stat"><span class="k">重叠样本</span><span class="v">n=${ic.overlapping.n} · IC=${ic.overlapping.ic_spearman.toFixed(3)}</span></div>`
+    + `<div class="rb-stat"><span class="k">非重叠样本(独立)</span><span class="v">n=${ic.non_overlapping.n} · IC=${ic.non_overlapping.ic_spearman.toFixed(3)}</span></div>`;
+
+  const stratBlock = `<div class="rb-sub">策略稳健性(score&gt;55 多/空)</div>`
+    + `<div class="rb-stat"><span class="k">年化 vs 买入持有</span><span class="v">${rbPct(st.ann_return)} vs ${rbPct(st.buyhold_ann)}</span></div>`
+    + `<div class="rb-stat"><span class="k">Sharpe</span><span class="v ${rbIcCls(sh.point)}">${sh.point.toFixed(2)} <span class="rb-ci">95%CI [${sh.ci_lo.toFixed(2)}, ${sh.ci_hi.toFixed(2)}] · p(≤0)=${sh.p_value.toFixed(2)}</span></span></div>`
+    + `<div class="rb-stat"><span class="k">最大回撤</span><span class="v rb-neg">−${rbPct(st.max_drawdown)}</span></div>`
+    + `<div class="rb-stat"><span class="k">换手</span><span class="v">${rbPct(st.turnover_per_period)}/期 · ${st.turnover_annual.toFixed(1)}/年</span></div>`;
+
+  const regimeBlock = `<div class="rb-sub">分 regime IC</div>`
+    + Object.entries(r.regimes).map(([axis, buckets]) => {
+      const rows = Object.entries(buckets).map(([k, v]) =>
+        `<tr><td>${REGIME_BUCKET_LABEL[k] || k}</td><td class="num">${v.n}</td><td class="num ${rbIcCls(v.ic_spearman)}">${v.ic_spearman.toFixed(3)}</td></tr>`).join('');
+      return `<table class="rb-table"><thead><tr><th>${REGIME_AXIS_LABEL[axis] || axis}</th><th class="num">n</th><th class="num">IC</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }).join('');
+
+  const concl = `<div class="rb-concl">${robustConclusion(r)}</div>`;
+  const notes = (r.caveats || []).map(c => `<p class="rb-note">· ${c}</p>`).join('');
+  return icBlock + stratBlock + regimeBlock + concl + notes;
+}
+
+function robustConclusion(r) {
+  const b = r.ic.bootstrap, no = r.ic.non_overlapping;
+  const edge = b.ci_lo > 0 ? 'IC 稳健为正' : (b.point > 0 ? 'IC 为正但 95%CI 跨 0(弱)' : 'IC 不显著');
+  const bs = r.regimes.balance_sheet || {};
+  const best = Object.entries(bs).sort((a, c) => c[1].ic_spearman - a[1].ic_spearman)[0];
+  const bestTxt = best ? `资产负债表 ${REGIME_BUCKET_LABEL[best[0]] || best[0]} 期最强(IC=${best[1].ic_spearman.toFixed(2)})` : '';
+  return `${edge};非重叠独立样本仅 n=${no.n}(IC=${no.ic_spearman.toFixed(3)})——重叠版显著性被高估。${bestTxt}。定位:弱信号宏观风控仪表盘,非择时工具。`;
 }
 
 main().catch(e => { showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）'); });

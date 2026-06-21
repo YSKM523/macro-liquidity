@@ -115,3 +115,17 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .ex-bridge .bar.tot{background:var(--green)}
 .ex-bridge .amt{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
 @media(max-width:760px){.ex-row{grid-template-columns:72px 1fr 52px}.ex-bridge .br{grid-template-columns:96px 1fr 80px}}
+
+/* ── Robustness panel ───────────────────────────────────────────────────── */
+.rb-sub{font-size:13px;color:var(--muted);font-weight:600;margin:16px 0 8px}
+.rb-stat{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:13px;color:var(--ink);padding:2px 0}
+.rb-stat .k{color:var(--muted)}
+.rb-stat .v{text-align:right;font-variant-numeric:tabular-nums}
+.rb-ci{color:var(--muted);font-size:12px}
+.rb-pos{color:var(--green)} .rb-neg{color:var(--red)}
+.rb-table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 10px}
+.rb-table th,.rb-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.rb-table th{color:var(--muted);font-weight:600}
+.rb-table td.num,.rb-table th.num{text-align:right;font-variant-numeric:tabular-nums}
+.rb-concl{font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-top:14px}
+.rb-note{font-size:12px;color:var(--muted);margin:6px 0 0}
