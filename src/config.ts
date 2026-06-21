@@ -14,6 +14,10 @@ export const SERIES = {
   DTWEXBGS:     { id: 'DTWEXBGS',     unit: 'I' },
   SP500:        { id: 'SP500',        unit: 'I' },
   T10Y2Y:       { id: 'T10Y2Y',       unit: 'P' },
+  ECBASSETSW:   { id: 'ECBASSETSW',   unit: 'I' }, // ECB total assets, millions EUR (raw)
+  JPNASSETS:    { id: 'JPNASSETS',    unit: 'I' }, // BOJ total assets, 億円 (raw)
+  DEXUSEU:      { id: 'DEXUSEU',      unit: 'I' }, // USD per EUR
+  DEXJPUS:      { id: 'DEXJPUS',      unit: 'I' }, // JPY per USD
 } as const;
 
 export const SERIES_IDS: string[] = Object.values(SERIES).map(s => s.id);
