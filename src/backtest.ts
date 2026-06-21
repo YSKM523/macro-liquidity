@@ -3,6 +3,8 @@ export interface BtSnap {
   score: number;
   spx: number;
   factors: Record<string, number>;
+  regime?: string;
+  vix?: number;
 }
 
 export interface BacktestResult {
