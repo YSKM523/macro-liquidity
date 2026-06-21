@@ -3,7 +3,7 @@
  * Ported from src/robustness.ts + src/backtest.ts (research-only; no Date.now/Math.random).
  * Reuses spearman/rank/asOf from global-lib.mjs.
  */
-import { spearman } from './global-lib.mjs';
+import { spearman, rank } from './global-lib.mjs';
 
 // Seeded PRNG (identical to robustness.ts mulberry32)
 export function mulberry32(seed) {
@@ -107,4 +107,27 @@ export function regimeBreakdown(pairs, label) {
     out[k] = { n: g.xs.length, ic: g.xs.length >= 3 ? spearman(g.xs, g.ys) : 0 };
   }
   return out;
+}
+
+// Expanding-window percentile → 0..100, oriented by sign. Zero-tuning research score.
+export function percentileScore(value, history, sign) {
+  if (!history || history.length === 0) return 50;
+  const below = history.filter(h => h <= value).length;
+  const p = below / history.length;          // 0..1
+  return (sign < 0 ? 1 - p : p) * 100;
+}
+
+// Residual IC: rank-space OLS of candidate on composite, correlate residual with forward.
+export function residualIC(xs, comps, fwds) {
+  if (xs.length < 3) return 0;
+  const rx = rank(xs), rc = rank(comps);
+  const n = rx.length;
+  const mc = rc.reduce((a, b) => a + b, 0) / n;
+  const mx = rx.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) { num += (rc[i] - mc) * (rx[i] - mx); den += (rc[i] - mc) ** 2; }
+  const b = den === 0 ? 0 : num / den;
+  const a = mx - b * mc;
+  const resid = rx.map((v, i) => v - (a + b * rc[i]));
+  return spearman(resid, fwds);
 }

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   mulberry32, addDays, forwardReturns, nonOverlappingIC, blockBootstrapIC, regimeBreakdown,
 } from '../scripts/research-lib.mjs';
+import { percentileScore, residualIC } from '../scripts/research-lib.mjs';
 
 describe('mulberry32', () => {
   it('is reproducible for a fixed seed', () => {
@@ -84,5 +85,37 @@ describe('regimeBreakdown', () => {
     expect(out.b.n).toBe(10);
     expect(out).not.toHaveProperty('null');
     expect(Math.abs(out.a.ic)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('percentileScore', () => {
+  it('maps the max of an increasing history near 100 (sign +1)', () => {
+    const hist = [1, 2, 3, 4, 5];
+    expect(percentileScore(5, hist, 1)).toBeGreaterThan(90);
+    expect(percentileScore(1, hist, 1)).toBeLessThan(30);
+  });
+  it('flips orientation when sign is negative', () => {
+    const hist = [1, 2, 3, 4, 5];
+    expect(percentileScore(5, hist, -1)).toBeLessThan(30);
+    expect(percentileScore(1, hist, -1)).toBeGreaterThan(70);
+  });
+  it('stays within [0,100] and handles empty history', () => {
+    expect(percentileScore(3, [], 1)).toBe(50);
+    const s = percentileScore(3, [1, 2, 3], 1);
+    expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('residualIC', () => {
+  it('is ~0 when the candidate equals the composite (fully redundant)', () => {
+    const comps = [5, 3, 8, 1, 9, 2, 7, 4, 6, 0];
+    const fwds = comps.map(c => c / 10);
+    expect(Math.abs(residualIC(comps.slice(), comps.slice(), fwds))).toBeLessThan(0.05);
+  });
+  it('is non-zero when the candidate carries signal orthogonal to the composite', () => {
+    const comps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const xs    = [5, 1, 8, 2, 9, 3, 10, 4, 6, 7];   // uncorrelated with comps
+    const fwds  = [5, 1, 8, 2, 9, 3, 10, 4, 6, 7];   // tracks xs, not comps
+    expect(Math.abs(residualIC(xs, comps, fwds))).toBeGreaterThan(0.2);
   });
 });
