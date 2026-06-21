@@ -409,6 +409,7 @@ async function fetchRobust() {
 
 function rbPct(x, d = 1) { return (x * 100).toFixed(d) + '%'; }
 function rbIcCls(x) { return x >= 0 ? 'rb-pos' : 'rb-neg'; }
+function rbEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 function renderRobust(r) {
   const ic = r.ic, st = r.strategy, b = ic.bootstrap, sh = st.sharpe;
@@ -426,12 +427,12 @@ function renderRobust(r) {
   const regimeBlock = `<div class="rb-sub">分 regime IC</div>`
     + Object.entries(r.regimes).map(([axis, buckets]) => {
       const rows = Object.entries(buckets).map(([k, v]) =>
-        `<tr><td>${REGIME_BUCKET_LABEL[k] || k}</td><td class="num">${v.n}</td><td class="num ${rbIcCls(v.ic_spearman)}">${v.ic_spearman.toFixed(3)}</td></tr>`).join('');
-      return `<table class="rb-table"><thead><tr><th>${REGIME_AXIS_LABEL[axis] || axis}</th><th class="num">n</th><th class="num">IC</th></tr></thead><tbody>${rows}</tbody></table>`;
+        `<tr><td>${REGIME_BUCKET_LABEL[k] || rbEsc(k)}</td><td class="num">${v.n}</td><td class="num ${rbIcCls(v.ic_spearman)}">${v.ic_spearman.toFixed(3)}</td></tr>`).join('');
+      return `<table class="rb-table"><thead><tr><th>${REGIME_AXIS_LABEL[axis] || rbEsc(axis)}</th><th class="num">n</th><th class="num">IC</th></tr></thead><tbody>${rows}</tbody></table>`;
     }).join('');
 
   const concl = `<div class="rb-concl">${robustConclusion(r)}</div>`;
-  const notes = (r.caveats || []).map(c => `<p class="rb-note">· ${c}</p>`).join('');
+  const notes = (r.caveats || []).map(c => `<p class="rb-note">· ${rbEsc(c)}</p>`).join('');
   return icBlock + stratBlock + regimeBlock + concl + notes;
 }
 
@@ -439,7 +440,7 @@ function robustConclusion(r) {
   const b = r.ic.bootstrap, no = r.ic.non_overlapping;
   const edge = b.ci_lo > 0 ? 'IC 稳健为正' : (b.point > 0 ? 'IC 为正但 95%CI 跨 0(弱)' : 'IC 不显著');
   const bs = r.regimes.balance_sheet || {};
-  const best = Object.entries(bs).sort((a, c) => c[1].ic_spearman - a[1].ic_spearman)[0];
+  const best = Object.entries(bs).sort((a, x) => x[1].ic_spearman - a[1].ic_spearman)[0];
   const bestTxt = best ? `资产负债表 ${REGIME_BUCKET_LABEL[best[0]] || best[0]} 期最强(IC=${best[1].ic_spearman.toFixed(2)})` : '';
   return `${edge};非重叠独立样本仅 n=${no.n}(IC=${no.ic_spearman.toFixed(3)})——重叠版显著性被高估。${bestTxt}。定位:弱信号宏观风控仪表盘,非择时工具。`;
 }
