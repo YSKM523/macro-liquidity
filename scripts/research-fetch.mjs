@@ -48,9 +48,7 @@ export async function fetchDebtToPenny(start = '2002-01-01') {
   return out;
 }
 
-// Term premium — try NY Fed ACM CSV; fall back to FRED THREEFYTP10 (Kim-Wright, active as of 2026).
-// NOTE: The NY Fed URL (ACMTermPremium.csv) returns a binary Excel file, not plain text CSV.
-// The try block will fail on parse and fall through to the FRED fallback every time.
+// Term premium — try NY Fed ACM CSV; fall back to FRED Kim-Wright THREEFYTP10 (research window).
 export async function fetchTermPremium() {
   const acmUrl = 'https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTermPremium.csv';
   try {
@@ -60,10 +58,15 @@ export async function fetchTermPremium() {
       const series = parseAcmCsv(text);
       if (series.length > 100) return { source: 'NYFed ACM ACMTP10', series };
     }
-  } catch { /* fall through */ }
-  // Fallback: FRED THREEFYTP10 (Kim-Wright 10-year term premium, in percentage points)
-  const series = await fetchFred('THREEFYTP10');
-  return { source: 'FRED THREEFYTP10 (Kim-Wright)', series };
+  } catch (e) {
+    console.warn(`ACM term-premium fetch failed, falling back to FRED: ${e.message}`);
+  }
+  try {
+    const series = await fetchFred('THREEFYTP10'); // pp; Kim-Wright
+    return { source: 'FRED THREEFYTP10 (Kim-Wright)', series };
+  } catch (e) {
+    throw new Error(`Term premium: ACM unavailable and FRED THREEFYTP10 fallback failed — ${e.message}`);
+  }
 }
 
 // ACM CSV: header row contains a DATE column and ACMTP10 column. Dates may be MM/DD/YYYY.
