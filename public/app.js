@@ -8,8 +8,22 @@ const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral' };
 const REGIME_CN = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住' };
 const POLICY_CN = { QE: 'QE(宽松)', QT: 'QT(紧缩)', RESERVE_MGMT: '准备金管理(QT已结束)', NEUTRAL: '中性' };
 const fmt = (x, d = 2) => (x == null ? '—' : Number(x).toFixed(d));
+const EX_WINDOW_LABEL = { '1w': '上周', '1m': '上月', '3m': '3 个月前' };
+const FACTOR_MEANING = {
+  netliqTrend: '净流动性 13 周趋势,升=放水偏多',
+  impulse: 'Fed 资产负债表脉冲(扩/缩)',
+  credit: '高收益债信用利差(低=风险偏好高)',
+  funding: 'SOFR−IORB 资金面压力',
+  rates: '10 年期利率冲量',
+  dollar: '广义美元 DTWEXBGS,走强=逆风',
+  reserveAdequacy: '银行准备金充裕度',
+  curve: '收益率曲线斜率(10Y−2Y)',
+};
+let explainData = null;
 
 async function main() {
+  setupExplain();
+  fetchExplain('1w');
   let snapRes, histRes;
   try {
     [snapRes, histRes] = await Promise.all([
@@ -210,6 +224,158 @@ function renderChart(rows) {
     const spxv = param.seriesData.get(spx);
     setLeg(nlv ? nlv.value : null, spxv ? spxv.value : null);
   });
+}
+
+// ── 分数归因卡 ────────────────────────────────────────────────────────────
+async function fetchExplain(win) {
+  const card = document.getElementById('explain-card');
+  const body = document.getElementById('explain-body');
+  if (!card || !body) return;
+  try {
+    const res = await fetch('/api/explain?window=' + win).then(r => r.json());
+    explainData = res;
+    renderExplain(res);
+    card.style.display = '';
+  } catch (e) {
+    explainData = null;
+    body.innerHTML = '<p class="ex-note">归因加载失败,稍后重试</p>';
+    card.style.display = '';
+  }
+}
+
+function setupExplain() {
+  const seg = document.getElementById('explain-window');
+  if (seg && !seg.dataset.wired) {
+    seg.dataset.wired = '1';
+    seg.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-window]');
+      if (!btn) return;
+      seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+      fetchExplain(btn.dataset.window);
+    });
+  }
+  const body = document.getElementById('explain-body');
+  if (body && !body.dataset.wired) {
+    body.dataset.wired = '1';
+    body.addEventListener('click', (e) => {
+      const row = e.target.closest('.ex-row[data-key]');
+      if (!row || !explainData) return;
+      const sib = row.nextElementSibling;
+      if (sib && sib.classList.contains('ex-detail')) { sib.remove(); return; }
+      const key = row.dataset.key;
+      const c = (explainData.contributions || []).find(x => x.key === key);
+      const a = (explainData.attribution || []).find(x => x.key === key);
+      const bits = [];
+      if (c) bits.push(`当前因子 ${c.factor.toFixed(0)}/100 · 权重 ${Math.round(c.weight * 100)}% · 贡献 ${c.contribution >= 0 ? '+' : ''}${c.contribution.toFixed(2)}`);
+      if (a) bits.push(`较基准 Δ ${a.deltaFactor >= 0 ? '+' : ''}${a.deltaFactor.toFixed(0)} → 拉动 ${a.deltaContribution >= 0 ? '+' : ''}${a.deltaContribution.toFixed(2)}`);
+      if (FACTOR_MEANING[key]) bits.push(FACTOR_MEANING[key]);
+      const det = document.createElement('div');
+      det.className = 'ex-detail';
+      det.textContent = bits.join('　·　');
+      row.after(det);
+    });
+  }
+}
+
+function renderExplain(res) {
+  const body = document.getElementById('explain-body');
+  if (!res || res.error === 'no_data' || !res.current) {
+    body.innerHTML = '<p class="ex-note">暂无数据</p>';
+    return;
+  }
+  body.innerHTML = renderAttribution(res) + renderContribution(res.contributions) + renderNetliq(res.netliq, res.window);
+}
+
+// 信号变化归因 = Δ分瀑布图(从基准分逐因子累加落到当前分)
+function renderAttribution(res) {
+  const label = EX_WINDOW_LABEL[res.window] || '基准';
+  if (!res.attribution || res.reference == null || res.deltaScore == null) {
+    return `<div class="ex-sub">这次为什么变(较${label})</div>`
+      + `<p class="ex-note">基准数据不足(历史不够),换更短的时间档试试。</p>`;
+  }
+  const R = res.reference.score, C = res.current.score, d = res.deltaScore;
+  const dCls = d >= 0 ? 'ex-up' : 'ex-down';
+  const dSign = d >= 0 ? '+' : '';
+
+  const steps = res.attribution
+    .filter(a => Math.abs(a.deltaContribution) >= 0.2)
+    .map(a => ({ label: FACTOR_LABELS[a.key] || a.key, v: a.deltaContribution, key: a.key }));
+  const otherSum = res.attribution
+    .filter(a => Math.abs(a.deltaContribution) < 0.2)
+    .reduce((s, a) => s + a.deltaContribution, 0);
+  if (Math.abs(otherSum) >= 0.005) steps.push({ label: '其它', v: otherSum, key: null });
+
+  // 轴范围:覆盖 R、C 及所有累加中间点
+  let run = R; const pts = [R];
+  for (const s of steps) { run += s.v; pts.push(run); }
+  const lo = Math.min.apply(null, pts.concat([R, C]));
+  const hi = Math.max.apply(null, pts.concat([R, C]));
+  const span = Math.max(0.5, hi - lo);
+  const x = (v) => (v - lo) / span * 100;
+
+  let cum = R;
+  const bars = steps.map(s => {
+    const a = cum, b = cum + s.v; cum = b;
+    const left = Math.min(x(a), x(b));
+    const width = Math.max(0.8, Math.abs(x(b) - x(a)));
+    const dataKey = s.key ? ` data-key="${s.key}"` : '';
+    const cls = s.v >= 0 ? 'ex-up' : 'ex-down';
+    const sign = s.v >= 0 ? '+' : '';
+    return `<div class="ex-row"${dataKey}><span class="lbl">${s.label}</span>`
+      + `<span class="ex-track"><span class="wf ${s.v >= 0 ? 'up' : 'down'}" style="left:${left}%;width:${width}%"></span></span>`
+      + `<span class="ex-val ${cls}">${sign}${s.v.toFixed(2)}</span></div>`;
+  }).join('');
+
+  return `<div class="ex-sub">这次为什么变(较${label})</div>`
+    + `<div class="ex-head-line">基准 ${R.toFixed(1)} → 当前 ${C.toFixed(1)} <span class="${dCls}">(${dSign}${d.toFixed(1)})</span></div>`
+    + bars;
+}
+
+// 因子贡献 = 离中性发散条
+function renderContribution(contribs) {
+  if (!contribs || !contribs.length) return '';
+  const max = Math.max.apply(null, contribs.map(c => Math.abs(c.contribution)).concat([0.01]));
+  const rows = contribs.map(c => divergingRow(FACTOR_LABELS[c.key] || c.key, c.contribution, max, c.key)).join('');
+  return `<div class="ex-sub">谁在拉扯(离中性 50 的贡献分,合计 = 分数 − 50)</div>${rows}`;
+}
+
+function divergingRow(label, value, max, key) {
+  const pct = Math.min(50, Math.abs(value) / max * 50);
+  const bar = value >= 0
+    ? `<span class="pos" style="width:${pct}%"></span>`
+    : `<span class="neg" style="width:${pct}%"></span>`;
+  const cls = value >= 0 ? 'ex-up' : 'ex-down';
+  const sign = value >= 0 ? '+' : '';
+  return `<div class="ex-row" data-key="${key}"><span class="lbl">${label}</span>`
+    + `<span class="ex-track"><span class="mid"></span>${bar}</span>`
+    + `<span class="ex-val ${cls}">${sign}${value.toFixed(2)}</span></div>`;
+}
+
+// 净流动性拆解 = 桥接图 WALCL − TGA − RRP = netliq
+function renderNetliq(nl, win) {
+  if (!nl || !nl.current) return '';
+  const c = nl.current;
+  const r = (x) => Math.round(x).toLocaleString();
+  const maxv = Math.max(Math.abs(c.walcl), 1);
+  const w = (x) => Math.max(1, Math.min(100, Math.abs(x) / maxv * 100));
+  const bridge = `<div class="ex-bridge">`
+    + `<div class="br"><span class="lbl">Fed 资产负债表</span><span class="barwrap"><span class="bar" style="width:${w(c.walcl)}%"></span></span><span class="amt">${r(c.walcl)}</span></div>`
+    + `<div class="br"><span class="lbl">− 财政部 TGA</span><span class="barwrap"><span class="bar sub" style="width:${w(c.tga)}%"></span></span><span class="amt">−${r(c.tga)}</span></div>`
+    + `<div class="br"><span class="lbl">− 逆回购 RRP</span><span class="barwrap"><span class="bar sub" style="width:${w(c.rrp)}%"></span></span><span class="amt">−${r(c.rrp)}</span></div>`
+    + `<div class="br"><span class="lbl">= 净流动性</span><span class="barwrap"><span class="bar tot" style="width:${w(c.netliq)}%"></span></span><span class="amt">${r(c.netliq)}</span></div>`
+    + `</div>`;
+  let note = '';
+  if (nl.delta) {
+    const d = nl.delta;
+    const tag = (v, invert) => {
+      const up = v >= 0;
+      const good = invert ? !up : up;
+      return `<span class="${good ? 'ex-up' : 'ex-down'}">${up ? '+' : ''}${Math.round(v)}</span>`;
+    };
+    note = `<p class="ex-note">较${EX_WINDOW_LABEL[win] || '基准'} 净流动性 ${tag(d.netliq, false)}B`
+      + `(WALCL ${tag(d.walcl, false)} · TGA ${tag(d.tga, true)} · RRP ${tag(d.rrp, true)};TGA/RRP 升=抽水)</p>`;
+  }
+  return `<div class="ex-sub">净流动性拆解(十亿$)</div>${bridge}${note}`;
 }
 
 main().catch(e => { showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）'); });
