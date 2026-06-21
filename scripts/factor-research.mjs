@@ -7,10 +7,10 @@
  * Requires: npm run export:snapshots first (scripts/data/snapshots.json).
  */
 import fs from 'node:fs';
-import { asOf, spearman } from './global-lib.mjs';
+import { spearman } from './global-lib.mjs';
 import {
   forwardReturns, blockBootstrapIC, nonOverlappingIC, regimeBreakdown,
-  percentileScore, residualIC, mulberry32, addDays,
+  percentileScore, residualIC, mulberry32,
 } from './research-lib.mjs';
 import {
   CANDIDATES, fiscalIssuanceSignal, termPremiumSignal, earningsMomentumSignal, globalLiquiditySignal,
@@ -83,8 +83,13 @@ function regimeAll(pairs) {
   };
 }
 
-function verdict(standalone, boot, incr, nIndep) {
-  const robustPos = boot.ci_lo > 0 || (boot.p_value < 0.10 && standalone > 0);
+// sign>0: a good candidate has positive raw IC; sign<0: a good candidate has NEGATIVE raw IC.
+// Orient the standalone IC and its bootstrap CI/p so the robustness gate is symmetric.
+function verdict(standalone, boot, incr, nIndep, sign) {
+  const oIC   = sign * standalone;
+  const oCiLo = sign > 0 ? boot.ci_lo : -boot.ci_hi;        // oriented lower CI bound
+  const oP    = sign > 0 ? boot.p_value : 1 - boot.p_value; // oriented P(IC <= 0)
+  const robustPos   = oCiLo > 0 || (oP < 0.10 && oIC > 0);
   const incremental = incr.delta > 0.003 || Math.abs(incr.resid) > 0.05;
   if (robustPos && incremental && nIndep >= 10) return 'PASS';
   if (Math.abs(standalone) > 0.05 || Math.abs(incr.resid) > 0.05) return 'DISPLAY-ONLY';
@@ -145,7 +150,7 @@ async function main() {
     const corr = {};
     for (const k of FACTOR_KEYS) corr[k] = spearman(pairs.map(p => p.x), pairs.map((p, i) => snaps_factor(snaps, pairs, i, k)));
 
-    const v = verdict(standalone, boot, incr, nonov.n);
+    const v = verdict(standalone, boot, incr, nonov.n, c.sign);
     summary.push({ key: c.key, label: c.label, standalone, nonov, boot, incr, v });
 
     // Coverage for this candidate
@@ -183,6 +188,8 @@ async function main() {
     lines.push(`| ${s.label} | ${fmt(s.standalone)} | ${s.nonov.n} | [${fmt(s.boot.ci_lo,2)},${fmt(s.boot.ci_hi,2)}]/${fmt(s.boot.p_value,2)} | ${fmt(s.incr.delta)} | ${fmt(s.incr.resid)} | **${s.v}** |`);
   }
   lines.push('', '> 门槛:PASS=bootstrap CI 排除~0 或 p<0.1 且增量为正(Δ>0.003 或 |残差|>0.05)且非重叠 n≥10;否则有信号→DISPLAY-ONLY,无→DROP。最终由人在 checkpoint 拍板。');
+  lines.push('> 注:期限溢价与现有 `rates` 因子近重复(20日Δ同一10Y),相关 r≈−0.95 → 故 DROP(避免双权重)。');
+  lines.push('> 注:财政发行与 `netliqTrend` 相关仅 r≈−0.04(低于预期)——发行速率与净流动性趋势在 2016+ 比想象中更正交(netliqTrend 由 WALCL 主导);盈利动量覆盖止于 2023-07、IC 为负且方向与假设相反(post-COVID 基数效应+n小),DISPLAY-ONLY 须附此 caveat。');
 
   const out = lines.join('\n');
   fs.mkdirSync('docs/superpowers', { recursive: true });
