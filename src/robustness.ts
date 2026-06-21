@@ -1,5 +1,6 @@
 import type { BtSnap } from './backtest';
 import { spearman, forwardReturns, addDays, mean, std } from './backtest';
+import { QT_END_DATE } from './config';
 
 const fin = (x: number): number => (Number.isFinite(x) ? x : 0);
 
@@ -141,4 +142,105 @@ export function blockBootstrapSharpe(
   stats.sort((a, b) => a - b);
   const p_value = stats.filter(s => s <= 0).length / stats.length;
   return { point, ci_lo: percentile(stats, 0.025), ci_hi: percentile(stats, 0.975), p_value, iters };
+}
+
+export const COVID_SPLIT = '2020-03-01';
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+export interface RobustnessResult {
+  window: { from: string; to: string; n_snapshots: number; years: number };
+  horizon_weeks: number;
+  ic: {
+    overlapping: { n: number; ic_spearman: number };
+    non_overlapping: { n: number; ic_spearman: number };
+    bootstrap: BootStat;
+  };
+  strategy: {
+    ann_return: number; buyhold_ann: number; n_periods: number;
+    sharpe: BootStat;
+    max_drawdown: number;
+    turnover_per_period: number; turnover_annual: number;
+  };
+  regimes: {
+    balance_sheet: Record<string, { n: number; ic_spearman: number }>;
+    covid: Record<string, { n: number; ic_spearman: number }>;
+    qt: Record<string, { n: number; ic_spearman: number }>;
+    vix: Record<string, { n: number; ic_spearman: number }>;
+  };
+  caveats: string[];
+}
+
+export function runRobustness(
+  snaps: BtSnap[],
+  opts?: { horizonWeeks?: number; iters?: number; blockLen?: number; seed?: number },
+): RobustnessResult {
+  const horizon = opts?.horizonWeeks ?? 13;
+  const iters = opts?.iters ?? 2000;
+  const blockLen = opts?.blockLen ?? horizon;
+  const seed = opts?.seed ?? 12345;
+  const rng = mulberry32(seed);
+
+  const from = snaps[0]?.date ?? '';
+  const to = snaps.at(-1)?.date ?? '';
+  const n_snapshots = snaps.length;
+  const years = fin(n_snapshots >= 2 ? daysBetween(from, to) / 365.25 : 0);
+
+  // ---- IC: overlapping + non-overlapping + bootstrap ----
+  const olPairs = forwardReturns(snaps, horizon).map(p => ({ score: snaps[p.idx].score, fwd: p.fwd }));
+  const overlapping = {
+    n: olPairs.length,
+    ic_spearman: fin(spearman(olPairs.map(p => p.score), olPairs.map(p => p.fwd))),
+  };
+  const non_overlapping = nonOverlappingIC(snaps, horizon);
+  const bootstrap = blockBootstrapIC(olPairs, blockLen, iters, rng);
+
+  // ---- strategy (long-flat score>55) ----
+  const positions: number[] = [];
+  const stratRets: number[] = [];
+  for (let i = 0; i < snaps.length - 1; i++) {
+    const pos = snaps[i].score > 55 ? 1 : 0;
+    positions.push(pos);
+    stratRets.push(pos * fin(snaps[i + 1].spx / snaps[i].spx - 1));
+  }
+  const n_periods = stratRets.length;
+  const total_strat = fin(stratRets.reduce((a, r) => a * (1 + r), 1) - 1);
+  const total_buyhold = n_snapshots >= 2 ? fin(snaps.at(-1)!.spx / snaps[0].spx - 1) : 0;
+  const safeYears = years > 0 ? years : 1;
+  const ann_return = fin(Math.pow(1 + total_strat, 1 / safeYears) - 1);
+  const buyhold_ann = fin(Math.pow(1 + total_buyhold, 1 / safeYears) - 1);
+  const ppy = fin(n_periods / safeYears);
+  const sharpe = blockBootstrapSharpe(stratRets, blockLen, iters, rng, ppy);
+  const tpp = turnover(positions);
+
+  // ---- regimes ----
+  const med = median(snaps.filter(s => s.vix != null).map(s => s.vix as number));
+  const regimes = {
+    balance_sheet: regimeBreakdown(snaps, horizon, s => s.regime ?? null),
+    covid: regimeBreakdown(snaps, horizon, s => (s.date < COVID_SPLIT ? 'pre' : 'post')),
+    qt: regimeBreakdown(snaps, horizon, s => (s.date < QT_END_DATE ? 'pre' : 'post')),
+    vix: regimeBreakdown(snaps, horizon, s => (s.vix == null ? null : (s.vix < med ? 'low' : 'high'))),
+  };
+
+  return {
+    window: { from, to, n_snapshots, years },
+    horizon_weeks: horizon,
+    ic: { overlapping, non_overlapping, bootstrap },
+    strategy: {
+      ann_return, buyhold_ann, n_periods,
+      sharpe, max_drawdown: maxDrawdown(stratRets),
+      turnover_per_period: tpp, turnover_annual: fin(tpp * ppy),
+    },
+    regimes,
+    caveats: [
+      'block bootstrap (seed-fixed) — CI/p quantify overlap autocorrelation; non-overlapping n is the honest independent count',
+      'regime splits are descriptive (in-sample) — small-n buckets (esp. post-QT) are noisy',
+      'long-flat (score>55) is a coarse proxy; turnover ignores trading costs',
+    ],
+  };
 }

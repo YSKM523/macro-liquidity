@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mulberry32, nonOverlappingIC, maxDrawdown, turnover, regimeBreakdown, blockBootstrapIC, blockBootstrapSharpe } from '../src/robustness';
+import { mulberry32, nonOverlappingIC, maxDrawdown, turnover, regimeBreakdown, blockBootstrapIC, blockBootstrapSharpe, runRobustness } from '../src/robustness';
 
 function wkSnaps(n: number, scoreFn: (i: number) => number, spxFn: (i: number) => number, extra: (i: number) => any = () => ({})): any[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -94,5 +94,44 @@ describe('blockBootstrapSharpe', () => {
     expect(a.ci_lo).toBeLessThanOrEqual(a.ci_hi);
     expect(a.p_value).toBeGreaterThanOrEqual(0);
     expect(a.p_value).toBeLessThanOrEqual(1);
+  });
+});
+
+function bigSnaps(n: number): any[] {
+  return Array.from({ length: n }, (_, i) => ({
+    date: new Date(Date.UTC(2018, 0, 5 + i * 7)).toISOString().slice(0, 10),
+    score: 45 + (i % 20),
+    spx: 2000 * Math.pow(1.001, i) * (1 + ((i % 7) - 3) * 0.01),
+    factors: {},
+    regime: ['EXPANDING', 'CONTRACTING', 'FLAT'][i % 3],
+    vix: 12 + (i % 25),
+  }));
+}
+
+describe('runRobustness', () => {
+  const r = runRobustness(bigSnaps(300), { iters: 200 });
+  it('all four regime axes present with expected buckets', () => {
+    expect(Object.keys(r.regimes).sort()).toEqual(['balance_sheet', 'covid', 'qt', 'vix']);
+    expect(Object.keys(r.regimes.balance_sheet).sort()).toEqual(['CONTRACTING', 'EXPANDING', 'FLAT']);
+    expect(Object.keys(r.regimes.vix).sort()).toEqual(['high', 'low']);
+  });
+  it('non-overlapping n < overlapping n; bootstrap iters honored', () => {
+    expect(r.ic.non_overlapping.n).toBeLessThan(r.ic.overlapping.n);
+    expect(r.ic.bootstrap.iters).toBe(200);
+  });
+  it('strategy stats present and in range', () => {
+    expect(r.strategy.max_drawdown).toBeGreaterThanOrEqual(0);
+    expect(r.strategy.max_drawdown).toBeLessThanOrEqual(1);
+    expect(r.strategy.turnover_per_period).toBeGreaterThanOrEqual(0);
+    expect(r.strategy.turnover_per_period).toBeLessThanOrEqual(1);
+    expect(r.strategy.sharpe.ci_lo).toBeLessThanOrEqual(r.strategy.sharpe.ci_hi);
+  });
+  it('reproducible (fixed default seed)', () => {
+    expect(runRobustness(bigSnaps(300), { iters: 200 })).toEqual(r);
+  });
+  it('tiny sample does not throw, returns safe zeros', () => {
+    const small = runRobustness(bigSnaps(3), { iters: 200 });
+    expect(small.ic.bootstrap.iters).toBe(0);
+    expect(Number.isFinite(small.strategy.ann_return)).toBe(true);
   });
 });
