@@ -52,7 +52,7 @@
       </section>
     </div>
 
-    <section class="card" id="explain-card" style="display:none">
+    <section class="card collapsible" id="explain-card" style="display:none">
       <div class="explain-head">
         <h2>分数归因 · 为什么是这个分</h2>
         <div class="seg" id="explain-window">
@@ -64,7 +64,7 @@
       <div id="explain-body"></div>
     </section>
 
-    <section class="card">
+    <section class="card collapsible" id="factor-card">
       <h2>因子明细</h2>
       <table class="factor-table" id="factor-table">
         <thead><tr><th>因子</th><th>读数</th><th>状态</th></tr></thead>
@@ -73,11 +73,11 @@
       <p class="muted" style="font-size:0.75rem;margin-top:0.5rem;color:#697386;">注:顶部/此处美元为 ICE DXY(实时,仅展示);打分用的是 FRED 广义美元 DTWEXBGS(可回溯),两者走势一致、绝对值不同。</p>
     </section>
 
-    <section class="card" id="robust-card" style="display:none">
+    <section class="card collapsible" id="robust-card" style="display:none">
       <h2>回测稳健性 · 防样本结构高估</h2>
       <div id="robust-body"></div>
     </section>
-    <section class="card" id="global-card" style="display:none">
+    <section class="card collapsible" id="global-card" style="display:none">
       <h2>全球流动性(Fed+ECB+BOJ)· 不进打分</h2>
       <div id="global-body"></div>
       <div id="global-chart" style="height:220px;margin-top:0.75rem;"></div>

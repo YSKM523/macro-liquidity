@@ -23,6 +23,30 @@ let explainData = null;
 const REGIME_AXIS_LABEL = { balance_sheet: '资产负债表', covid: 'COVID 前后', qt: 'QT 前后', vix: 'VIX 风险档' };
 const REGIME_BUCKET_LABEL = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住', pre: '前', post: '后', low: '低波', high: '高波' };
 
+// 移动端折叠次要卡片(规整:顶部只留决策区,分析类点击标题展开)
+let glChart = null;
+function setupAccordions() {
+  if (!window.matchMedia || !window.matchMedia('(max-width:760px)').matches) return;
+  document.querySelectorAll('.collapsible').forEach((card) => {
+    const h2 = card.querySelector('h2');
+    if (!h2 || h2.dataset.acc) return;
+    h2.dataset.acc = '1';
+    card.classList.add('collapsed');
+    const chev = document.createElement('span');
+    chev.className = 'chev';
+    chev.textContent = '▸';
+    h2.appendChild(chev);
+    h2.addEventListener('click', () => {
+      const collapsed = card.classList.toggle('collapsed');
+      chev.textContent = collapsed ? '▸' : '▾';
+      if (!collapsed && card.id === 'global-card' && glChart) {
+        const gel = document.getElementById('global-chart');
+        if (gel) { glChart.applyOptions({ width: gel.clientWidth }); glChart.timeScale().fitContent(); }
+      }
+    });
+  });
+}
+
 async function main() {
   setupExplain();
   fetchExplain('1w');
@@ -49,6 +73,7 @@ async function main() {
   renderChart((histRes && histRes.rows) || []);
   renderIngest(snapRes.ingest);
   renderGlobal();
+  setupAccordions();
 }
 
 function showBanner(text) {
@@ -481,15 +506,15 @@ async function renderGlobal() {
 
   const el = document.getElementById('global-chart');
   if (el && window.LightweightCharts) {
-    const chart = LightweightCharts.createChart(el, {
+    glChart = LightweightCharts.createChart(el, {
       height: 220, layout: { background: { color: '#FFFFFF' }, textColor: '#697386' },
       grid: { vertLines: { color: '#E3E8EE' }, horzLines: { color: '#E3E8EE' } },
       rightPriceScale: { borderColor: '#E3E8EE' }, leftPriceScale: { visible: false },
       timeScale: { borderColor: '#E3E8EE' },
     });
-    const gl = chart.addLineSeries({ color: '#635BFF', priceScaleId: 'right', lineWidth: 2 });
+    const gl = glChart.addLineSeries({ color: '#635BFF', priceScaleId: 'right', lineWidth: 2 });
     gl.setData(res.series.map(p => ({ time: p.date, value: p.gl })));
-    chart.timeScale().fitContent();
-    new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+    glChart.timeScale().fitContent();
+    new ResizeObserver(() => glChart.applyOptions({ width: el.clientWidth })).observe(el);
   }
 }
