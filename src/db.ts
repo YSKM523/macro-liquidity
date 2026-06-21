@@ -68,7 +68,7 @@ export async function distinctSnapshotDates(db: D1Database, lastN: number): Prom
 
 export async function loadBacktestRows(db: D1Database): Promise<any[]> {
   const rs = await db.prepare(
-    'SELECT date, score, spx, verdict, factors_json FROM daily_snapshot WHERE spx IS NOT NULL ORDER BY date'
+    'SELECT date, score, spx, verdict, factors_json, qe_qt_regime, vix_eod FROM daily_snapshot WHERE spx IS NOT NULL ORDER BY date'
   ).all();
   return rs.results ?? [];
 }

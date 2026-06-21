@@ -8,6 +8,7 @@ import { STRESS_SCORE_CEILING, INGEST_STALE_HOURS, COVERAGE_FACTORS } from './co
 import { assessHealth } from './health';
 import { runBacktest } from './backtest';
 import { runWalkForward } from './walkforward';
+import { runRobustness } from './robustness';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -131,6 +132,16 @@ export default {
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
       return json(runWalkForward(snaps));
+    }
+    if (p === '/api/robustness') {
+      const rows = await loadBacktestRows(env.DB);
+      const snaps = rows
+        .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
+        .map((r: any) => ({
+          date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
+          regime: r.qe_qt_regime, vix: r.vix_eod,
+        }));
+      return json(runRobustness(snaps));
     }
     if (p === '/api/admin/refresh' && req.method === 'POST') {
       const auth = req.headers.get('authorization') ?? '';
