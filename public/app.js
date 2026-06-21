@@ -327,9 +327,13 @@ function renderAttribution(res) {
       + `<span class="ex-val ${cls}">${sign}${s.v.toFixed(2)}</span></div>`;
   }).join('');
 
+  const attrSum = res.attribution.reduce((s, a) => s + a.deltaContribution, 0);
+  const clampNote = Math.abs(attrSum - d) > 0.5 ? '<p class="ex-note">(含分数封顶调整)</p>' : '';
+
   return `<div class="ex-sub">这次为什么变(较${label})</div>`
     + `<div class="ex-head-line">基准 ${R.toFixed(1)} → 当前 ${C.toFixed(1)} <span class="${dCls}">(${dSign}${d.toFixed(1)})</span></div>`
-    + bars;
+    + bars
+    + clampNote;
 }
 
 // 因子贡献 = 离中性发散条
