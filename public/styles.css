@@ -129,3 +129,31 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .rb-table td.num,.rb-table th.num{text-align:right;font-variant-numeric:tabular-nums}
 .rb-concl{font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-top:14px}
 .rb-note{font-size:12px;color:var(--muted);margin:6px 0 0}
+
+/* ── Mobile / small-screen adaptation ───────────────────────────────────── */
+@media(max-width:760px){
+  .container{padding:14px}
+  .card{padding:16px;margin-bottom:14px}
+  /* header reflows: title on its own line, stats + nav wrap below, left-aligned */
+  .topbar{flex-wrap:wrap;justify-content:flex-start;row-gap:6px}
+  .topbar h1{flex:1 1 100%;font-size:18px}
+  /* verdict stacks: the big call above, regime context below (left-aligned) */
+  .verdict{flex-direction:column;align-items:flex-start;gap:8px}
+  .verdict-label{font-size:30px}
+  .verdict-sub{text-align:left;line-height:1.6}
+  /* guidance tier wraps instead of overflowing */
+  .guidance .g-tier{flex-wrap:wrap;gap:8px}
+  /* charts a touch shorter on phones */
+  #chart{height:260px}
+  /* segmented control: comfortable tap target (~40px tall) */
+  .seg button{padding:10px 16px}
+  /* wide regime tables scroll horizontally rather than break the card */
+  .rb-table{display:block;overflow-x:auto}
+}
+@media(max-width:380px){
+  .container{padding:11px}
+  .card{padding:14px}
+  .verdict-label{font-size:26px}
+  .score-num{font-size:34px}
+  .fb{grid-template-columns:80px 1fr 30px}
+}
