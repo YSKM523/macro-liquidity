@@ -90,3 +90,8 @@ export async function countSnapshots(db: D1Database): Promise<number> {
   const row = await db.prepare('SELECT COUNT(*) AS n FROM daily_snapshot').first<{ n: number }>();
   return row?.n ?? 0;
 }
+
+export async function snapshotOnOrBefore(db: D1Database, date: string) {
+  return db.prepare('SELECT * FROM daily_snapshot WHERE date <= ? ORDER BY date DESC LIMIT 1')
+    .bind(date).first();
+}
