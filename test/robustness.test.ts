@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mulberry32, nonOverlappingIC, maxDrawdown, turnover, regimeBreakdown } from '../src/robustness';
+import { mulberry32, nonOverlappingIC, maxDrawdown, turnover, regimeBreakdown, blockBootstrapIC, blockBootstrapSharpe } from '../src/robustness';
 
 function wkSnaps(n: number, scoreFn: (i: number) => number, spxFn: (i: number) => number, extra: (i: number) => any = () => ({})): any[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -55,5 +55,44 @@ describe('regimeBreakdown', () => {
     const out = regimeBreakdown(snaps, 13, s => s.regime ?? null);
     expect(Object.keys(out).sort()).toEqual(['A', 'B']);
     expect(Object.values(out).reduce((a, g) => a + g.n, 0)).toBeGreaterThan(0);
+  });
+});
+
+function noisyPairs(n: number, rng: () => number): { score: number; fwd: number }[] {
+  return Array.from({ length: n }, (_, i) => ({ score: i, fwd: i * 0.001 + (rng() - 0.5) * 0.05 }));
+}
+
+describe('blockBootstrapIC', () => {
+  it('ci ordered, p in [0,1], iters honored, positive synthetic edge', () => {
+    const r = blockBootstrapIC(noisyPairs(150, mulberry32(3)), 13, 500, mulberry32(7));
+    expect(r.ci_lo).toBeLessThanOrEqual(r.ci_hi);
+    expect(r.p_value).toBeGreaterThanOrEqual(0);
+    expect(r.p_value).toBeLessThanOrEqual(1);
+    expect(r.iters).toBe(500);
+    expect(r.point).toBeGreaterThan(0);
+  });
+  it('same seed → identical (reproducible)', () => {
+    const data = noisyPairs(150, mulberry32(3));
+    const a = blockBootstrapIC(data, 13, 300, mulberry32(99));
+    const b = blockBootstrapIC(data, 13, 300, mulberry32(99));
+    expect(a).toEqual(b);
+  });
+  it('n below threshold → iters 0, degenerate CI = point', () => {
+    const r = blockBootstrapIC(noisyPairs(10, mulberry32(3)), 13, 500, mulberry32(1));
+    expect(r.iters).toBe(0);
+    expect(r.ci_lo).toBe(r.point);
+    expect(r.ci_hi).toBe(r.point);
+  });
+});
+
+describe('blockBootstrapSharpe', () => {
+  it('ci ordered, reproducible, p in [0,1]', () => {
+    const rets = Array.from({ length: 150 }, (_, i) => 0.001 + ((i % 5) - 2) * 0.002);
+    const a = blockBootstrapSharpe(rets, 13, 300, mulberry32(5), 52);
+    const b = blockBootstrapSharpe(rets, 13, 300, mulberry32(5), 52);
+    expect(a).toEqual(b);
+    expect(a.ci_lo).toBeLessThanOrEqual(a.ci_hi);
+    expect(a.p_value).toBeGreaterThanOrEqual(0);
+    expect(a.p_value).toBeLessThanOrEqual(1);
   });
 });

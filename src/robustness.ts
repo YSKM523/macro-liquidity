@@ -1,5 +1,5 @@
 import type { BtSnap } from './backtest';
-import { spearman, forwardReturns, addDays } from './backtest';
+import { spearman, forwardReturns, addDays, mean, std } from './backtest';
 
 const fin = (x: number): number => (Number.isFinite(x) ? x : 0);
 
@@ -78,4 +78,67 @@ export function regimeBreakdown(
     out[lab] = { n: g.s.length, ic_spearman: fin(spearman(g.s, g.f)) };
   }
   return out;
+}
+
+export interface BootStat { point: number; ci_lo: number; ci_hi: number; p_value: number; iters: number }
+
+function percentile(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = (sorted.length - 1) * q;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+// Resample n indices by concatenating circular blocks of length blockLen.
+function blockResampleIndices(n: number, blockLen: number, rng: () => number): number[] {
+  const out: number[] = [];
+  while (out.length < n) {
+    const start = Math.floor(rng() * n);
+    for (let k = 0; k < blockLen && out.length < n; k++) out.push((start + k) % n);
+  }
+  return out;
+}
+
+const MIN_BOOT = 20;
+
+export function blockBootstrapIC(
+  pairs: { score: number; fwd: number }[], blockLen: number, iters: number, rng: () => number,
+): BootStat {
+  const n = pairs.length;
+  const scores = pairs.map(p => p.score);
+  const fwds = pairs.map(p => p.fwd);
+  const point = fin(spearman(scores, fwds));
+  if (n < Math.max(blockLen, MIN_BOOT)) {
+    return { point, ci_lo: point, ci_hi: point, p_value: point > 0 ? 0 : 1, iters: 0 };
+  }
+  const stats: number[] = [];
+  for (let b = 0; b < iters; b++) {
+    const idx = blockResampleIndices(n, blockLen, rng);
+    stats.push(fin(spearman(idx.map(i => scores[i]), idx.map(i => fwds[i]))));
+  }
+  stats.sort((a, b) => a - b);
+  const p_value = stats.filter(s => s <= 0).length / stats.length;
+  return { point, ci_lo: percentile(stats, 0.025), ci_hi: percentile(stats, 0.975), p_value, iters };
+}
+
+export function blockBootstrapSharpe(
+  rets: number[], blockLen: number, iters: number, rng: () => number, periodsPerYear: number,
+): BootStat {
+  const n = rets.length;
+  const sharpe = (xs: number[]): number => {
+    const s = std(xs);
+    return fin(s > 0 ? (mean(xs) / s) * Math.sqrt(periodsPerYear) : 0);
+  };
+  const point = sharpe(rets);
+  if (n < Math.max(blockLen, MIN_BOOT)) {
+    return { point, ci_lo: point, ci_hi: point, p_value: point > 0 ? 0 : 1, iters: 0 };
+  }
+  const stats: number[] = [];
+  for (let b = 0; b < iters; b++) {
+    stats.push(sharpe(blockResampleIndices(n, blockLen, rng).map(i => rets[i])));
+  }
+  stats.sort((a, b) => a - b);
+  const p_value = stats.filter(s => s <= 0).length / stats.length;
+  return { point, ci_lo: percentile(stats, 0.025), ci_hi: percentile(stats, 0.975), p_value, iters };
 }
