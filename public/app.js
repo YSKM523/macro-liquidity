@@ -48,6 +48,7 @@ async function main() {
   renderFactorTable(snapRes);
   renderChart((histRes && histRes.rows) || []);
   renderIngest(snapRes.ingest);
+  renderGlobal();
 }
 
 function showBanner(text) {
@@ -446,3 +447,49 @@ function robustConclusion(r) {
 }
 
 main().catch(e => { showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）'); });
+
+// ── 全球流动性卡(display-only)────────────────────────────────────────────
+async function renderGlobal() {
+  const card = document.getElementById('global-card');
+  const body = document.getElementById('global-body');
+  if (!card || !body) return;
+
+  let res;
+  try { res = await fetch('/api/global-liquidity').then(r => r.json()); }
+  catch { return; } // network failure → leave hidden, never invent numbers
+
+  if (!res || res.error || !res.latest || !res.series || !res.series.length) {
+    body.innerHTML = '<p class="muted" style="color:#697386;">数据不足(全球序列尚未摄取)</p>';
+    card.style.display = '';
+    return;
+  }
+
+  const L = res.latest;
+  const T = (b) => '$' + (b / 1000).toFixed(2) + 'T';
+  const dirCls = L.dir === 'UP' ? '#1A7F4B' : L.dir === 'DOWN' ? '#C0392B' : '#697386';
+  const dirTxt = L.dir === 'UP' ? '↑' : L.dir === 'DOWN' ? '↓' : '→';
+  const trend = L.trend13wPct == null ? '—' : (L.trend13wPct >= 0 ? '+' : '') + L.trend13wPct.toFixed(1) + '%';
+
+  body.innerHTML =
+    '<div style="font-size:1.6rem;font-weight:700;color:#1A1F36;">' + T(L.gl) +
+      ' <span style="font-size:1rem;font-weight:600;color:' + dirCls + ';">' + dirTxt + ' ' + trend + ' (13周)</span></div>' +
+    '<div style="font-size:0.85rem;color:#697386;margin-top:0.35rem;">' +
+      'Fed ' + T(L.fed) + ' (' + Math.round(L.fedPct * 100) + '%) · ' +
+      'ECB ' + T(L.ecb) + ' (' + Math.round(L.ecbPct * 100) + '%) · ' +
+      'BOJ ' + T(L.boj) + ' (' + Math.round(L.bojPct * 100) + '%)</div>';
+  card.style.display = '';
+
+  const el = document.getElementById('global-chart');
+  if (el && window.LightweightCharts) {
+    const chart = LightweightCharts.createChart(el, {
+      height: 220, layout: { background: { color: '#FFFFFF' }, textColor: '#697386' },
+      grid: { vertLines: { color: '#E3E8EE' }, horzLines: { color: '#E3E8EE' } },
+      rightPriceScale: { borderColor: '#E3E8EE' }, leftPriceScale: { visible: false },
+      timeScale: { borderColor: '#E3E8EE' },
+    });
+    const gl = chart.addLineSeries({ color: '#635BFF', priceScaleId: 'right', lineWidth: 2 });
+    gl.setData(res.series.map(p => ({ time: p.date, value: p.gl })));
+    chart.timeScale().fitContent();
+    new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+  }
+}
