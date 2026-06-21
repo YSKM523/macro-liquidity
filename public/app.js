@@ -279,6 +279,7 @@ function setupExplain() {
 
 function renderExplain(res) {
   const body = document.getElementById('explain-body');
+  if (!body) return;
   if (!res || res.error === 'no_data' || !res.current) {
     body.innerHTML = '<p class="ex-note">暂无数据</p>';
     return;
@@ -354,7 +355,12 @@ function divergingRow(label, value, max, key) {
 // 净流动性拆解 = 桥接图 WALCL − TGA − RRP = netliq
 function renderNetliq(nl, win) {
   if (!nl || !nl.current) return '';
-  const c = nl.current;
+  const c = {
+    walcl: nl.current.walcl ?? 0,
+    tga: nl.current.tga ?? 0,
+    rrp: nl.current.rrp ?? 0,
+    netliq: nl.current.netliq ?? 0,
+  };
   const r = (x) => Math.round(x).toLocaleString();
   const maxv = Math.max(Math.abs(c.walcl), 1);
   const w = (x) => Math.max(1, Math.min(100, Math.abs(x) / maxv * 100));
