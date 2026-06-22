@@ -12,6 +12,7 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .tb-market{color:var(--ink);font-size:13px;font-variant-numeric:tabular-nums;margin-top:6px}
 .tb-meta{color:var(--muted);font-size:12px;margin-top:3px}
 .tb-meta span+span::before{content:'·';margin:0 7px;color:var(--line)}
+.tb-live{font-size:11px;font-weight:600;color:var(--green);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-right:8px}
 .asof{color:var(--muted);font-size:13px}
 .card{background:var(--bg);border:1px solid var(--line);border-radius:8px;
   box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}

@@ -139,8 +139,13 @@ function renderVerdict(res) {
     const diffDays = Math.round((today.getTime() - snap.getTime()) / 86400000);
     const staleEl = document.getElementById('data-staleness');
     if (staleEl) {
-      staleEl.textContent = `数据截至 ${snapshotDate}(${diffDays} 天前)`;
-      staleEl.style.color = diffDays > 8 ? '#B7791F' : '';
+      if (diffDays > 8) {
+        staleEl.textContent = `FRED 宏观 · 截至 ${snapshotDate} · 已 ${diffDays} 天未更新`;
+        staleEl.style.color = '#B7791F';
+      } else {
+        staleEl.textContent = `FRED 宏观 · 截至 ${snapshotDate} · 周更(约周四)`;
+        staleEl.style.color = '';
+      }
     }
   }
 
@@ -150,7 +155,7 @@ function renderVerdict(res) {
   const coverageEl = document.getElementById('data-coverage');
   if (coverageEl && coverage != null) {
     const n = Math.round(coverage * total);
-    coverageEl.textContent = `${n}/${total} 因子有真实数据`;
+    coverageEl.textContent = `覆盖 ${n}/${total} 因子`;
     coverageEl.style.color = n < total ? '#B7791F' : '';
   }
 }
