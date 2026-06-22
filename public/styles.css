@@ -6,8 +6,12 @@
 body{margin:0;background:var(--surface);color:var(--ink);
   font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
 .container{max-width:1080px;margin:0 auto;padding:24px}
-.topbar{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:20px}
+.topbar{margin-bottom:20px}
+.tb-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .topbar h1{font-size:20px;margin:0}
+.tb-market{color:var(--ink);font-size:13px;font-variant-numeric:tabular-nums;margin-top:6px}
+.tb-meta{color:var(--muted);font-size:12px;margin-top:3px}
+.tb-meta span+span::before{content:'·';margin:0 7px;color:var(--line)}
 .asof{color:var(--muted);font-size:13px}
 .card{background:var(--bg);border:1px solid var(--line);border-radius:8px;
   box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;margin-bottom:20px}
@@ -134,9 +138,9 @@ body{margin:0;background:var(--surface);color:var(--ink);
 @media(max-width:760px){
   .container{padding:14px}
   .card{padding:16px;margin-bottom:14px}
-  /* header reflows: title on its own line, stats + nav wrap below, left-aligned */
-  .topbar{flex-wrap:wrap;justify-content:flex-start;row-gap:6px}
-  .topbar h1{flex:1 1 100%;font-size:18px}
+  /* compact header: smaller title; market + meta rows stack cleanly on their own */
+  .topbar h1{font-size:18px}
+  .tb-market{font-size:12.5px}
   /* verdict stacks: the big call above, regime context below (left-aligned) */
   .verdict{flex-direction:column;align-items:flex-start;gap:8px}
   .verdict-label{font-size:30px}

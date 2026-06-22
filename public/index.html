@@ -9,11 +9,15 @@
 <body>
   <main class="container">
     <header class="topbar">
-      <h1>美股流动性看板</h1>
-      <span class="asof" id="asof">—</span>
-      <span class="asof" id="data-staleness" style="font-size:0.78rem;margin-left:0.75rem;">—</span>
-      <span class="asof" id="data-coverage" style="font-size:0.78rem;margin-left:0.75rem;">—</span>
-      <a class="nav-link" href="/algorithm" style="margin-left:0.75rem;">算法说明 →</a>
+      <div class="tb-top">
+        <h1>美股流动性看板</h1>
+        <a class="nav-link" href="/algorithm">算法说明 →</a>
+      </div>
+      <div class="tb-market" id="asof">—</div>
+      <div class="tb-meta">
+        <span id="data-staleness">—</span>
+        <span id="data-coverage">—</span>
+      </div>
     </header>
 
     <section class="card verdict" id="verdict-card">
