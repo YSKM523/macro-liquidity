@@ -203,8 +203,9 @@ function renderScore(s) {
   if (!factors) return;
   for (const [k, label] of Object.entries(FACTOR_LABELS)) {
     const val = Math.round(factors[k] ?? 0);
+    const st = val >= 55 ? 'up' : val <= 45 ? 'down' : 'flat';
     const row = document.createElement('div'); row.className = 'fb';
-    row.innerHTML = `<span>${label}</span><span class="track"><span class="bar" style="width:${val}%"></span></span><span>${val}</span>`;
+    row.innerHTML = `<span>${label}</span><span class="track"><span class="bar ${st}" style="width:${val}%"></span></span><span class="fbv ${st}">${val}</span>`;
     host.appendChild(row);
   }
 }
