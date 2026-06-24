@@ -50,6 +50,8 @@ export default {
         getAllMeta(env.DB),
       ]);
       const ingest = {
+        ingest_at: meta.last_ingest_at ?? null,
+        last_attempt_at: meta.last_attempt_at ?? null,
         ingest_age_hours: meta.last_ingest_at
           ? (Date.now() - Date.parse(meta.last_ingest_at)) / 3600000
           : null,

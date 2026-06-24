@@ -72,6 +72,7 @@ async function main() {
   renderFactorTable(snapRes);
   renderChart((histRes && histRes.rows) || []);
   renderIngest(snapRes.ingest);
+  renderProvenance(snapRes);
   renderGlobal();
   setupAccordions();
 }
@@ -166,6 +167,9 @@ function renderGuidance(s) {
   card.style.display = '';
   const g = s.guidance;
 
+  // Whole-card recolor by tone (bull/neutral/bear/brake), keep base classes
+  card.className = 'card guidance ' + (g.tone || 'neutral');
+
   // Tier badge + tone color class
   const tierEl = document.getElementById('g-tier');
   tierEl.textContent = g.tierLabel;
@@ -190,6 +194,41 @@ function renderGuidance(s) {
 }
 
 function dirCn(d) { return { UP: '在升', DOWN: '在收', FLAT: '走平' }[d] || '—'; }
+
+// ── 数据来源与时效:逐层标注真实来源时间(全部取 API 真值,不估算)──────────
+function fmtTs(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
+}
+
+function provLayer(tag, title, src, asof) {
+  const cn = tag === 'live' ? '实时' : '周更';
+  return `<div class="prov-layer"><div class="prov-head"><span class="prov-tag ${tag}">${cn}</span><b>${title}</b></div>`
+    + `<div class="prov-src">${src}</div><div class="prov-asof">${asof}</div></div>`;
+}
+
+function renderProvenance(res) {
+  const card = document.getElementById('provenance-card');
+  const body = document.getElementById('provenance-body');
+  if (!card || !body) return;
+  const s = res.snapshot || {}, live = res.live || {}, ingest = res.ingest || {};
+  const macroDate = s.date || '—';
+  const ingestAt = fmtTs(ingest.ingest_at);
+  const liveAt = fmtTs(live.asof);
+  body.innerHTML =
+    provLayer('weekly', '宏观模型 · 打分 / 判定 / 净流动性',
+      '来源:FRED · 美联储 H.4.1 资产负债表(WALCL)、财政部 TGA、逆回购 RRP、SOFR−IORB、HY OAS、10Y(DGS10)、广义美元(DTWEXBGS)',
+      `数据截至 <b>${macroDate}</b>　·　最近摄取 <b>${ingestAt}</b>　·　每 3 小时;WALCL 周频(以周三为准,H.4.1 周四发布)`)
+    + provLayer('live', '实时行情 · 顶部 SPX / VIX / DXY / 10Y',
+      '来源:Yahoo Finance(^GSPC · ^VIX · DX-Y.NYB · ^TNX)',
+      `抓取于 <b>${liveAt}</b>　·　每次打开页面实时抓取`)
+    + provLayer('live', '实时风险覆盖 · stress / 判定降级',
+      '来源:Yahoo Finance 日线 · 近 5 日动量(SPX / VIX / 10Y / 美元)',
+      `计算于 <b>${liveAt}</b>　·　与行情同次抓取`);
+  card.style.display = '';
+}
 
 function renderScore(s) {
   if (!s) return;

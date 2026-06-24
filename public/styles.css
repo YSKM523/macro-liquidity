@@ -1,6 +1,9 @@
 :root{
   --bg:#FFFFFF; --surface:#F6F8FA; --ink:#1A1F36; --muted:#697386;
   --line:#E3E8EE; --accent:#635BFF; --green:#1A7F4B; --red:#C0392B; --amber:#B7791F;
+  --crimson:#9B2335;
+  /* deeper amber for solid fills so white text clears AA contrast */
+  --amber-deep:#946011;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--surface);color:var(--ink);
@@ -21,9 +24,15 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .verdict-label{font-size:34px;font-weight:700}
 .verdict-reason{color:var(--muted);margin-top:6px;font-size:14px}
 .verdict-sub{color:var(--ink);font-size:14px;text-align:right;line-height:1.7}
-.verdict.bull{border-left:4px solid var(--green)}
-.verdict.bear{border-left:4px solid var(--red)}
-.verdict.neutral{border-left:4px solid var(--amber)}
+/* whole-card recolor by status: solid status fill + white text */
+.verdict,.guidance{transition:background-color .35s ease,border-color .35s ease}
+.verdict.bull{background:var(--green)}
+.verdict.bear{background:var(--red)}
+.verdict.neutral{background:var(--amber-deep)}
+.verdict:is(.bull,.bear,.neutral){color:#fff;border-color:transparent;border-left:4px solid rgba(0,0,0,.18);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.verdict:is(.bull,.bear,.neutral) .verdict-label{color:#fff}
+.verdict:is(.bull,.bear,.neutral) .verdict-reason{color:rgba(255,255,255,.85)}
+.verdict:is(.bull,.bear,.neutral) .verdict-sub{color:rgba(255,255,255,.92)}
 .grid{display:grid;grid-template-columns:1fr 1.4fr;gap:20px}
 .grid .card{margin-bottom:0}
 .gauge{height:10px;background:var(--surface);border:1px solid var(--line);border-radius:999px;overflow:hidden}
@@ -32,7 +41,7 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .factor-bars{display:flex;flex-direction:column;gap:8px}
 .fb{display:grid;grid-template-columns:96px 1fr 32px;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .fb .track{height:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;overflow:hidden}
-.fb .bar{height:100%;background:var(--accent)}
+.fb .bar{display:block;height:100%;background:var(--accent)}
 .fb .bar.up{background:var(--green)} .fb .bar.down{background:var(--red)} .fb .bar.flat{background:var(--muted)}
 .fb .fbv.up{color:var(--green)} .fb .fbv.down{color:var(--red)}
 #chart{height:320px}
@@ -49,6 +58,19 @@ body{margin:0;background:var(--surface);color:var(--ink);
 @media(max-width:760px){.grid{grid-template-columns:1fr}}
 
 /* ── Guidance / Position Dial panel ─────────────────────────────────────── */
+.guidance.bull{background:var(--green)}
+.guidance.neutral{background:var(--amber-deep)}
+.guidance.bear{background:var(--red)}
+.guidance.brake{background:var(--crimson)}
+.guidance:is(.bull,.neutral,.bear,.brake){color:#fff;border-color:transparent;border-left:4px solid rgba(0,0,0,.18);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.guidance:is(.bull,.neutral,.bear,.brake) h2{color:rgba(255,255,255,.85)}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-badge{background:rgba(255,255,255,.2);color:#fff}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-exposure{color:#fff}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-lean{color:rgba(255,255,255,.82)}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-diverge{color:rgba(255,255,255,.9)}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-triggers li{color:rgba(255,255,255,.82)}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-triggers li.armed{color:#fff;border-left-color:rgba(255,255,255,.75)}
+.guidance:is(.bull,.neutral,.bear,.brake) .g-note{color:rgba(255,255,255,.7)}
 .guidance .g-tier{display:flex;align-items:center;gap:12px;margin-bottom:12px}
 .g-badge{display:inline-block;padding:4px 12px;border-radius:6px;font-weight:700;font-size:15px;color:#fff}
 .g-badge.bull{background:var(--green)}
@@ -62,6 +84,19 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .g-triggers li{font-size:13px;color:var(--muted);padding:4px 0}
 .g-triggers li.armed{font-weight:700;color:var(--ink);border-left:3px solid var(--amber);padding-left:8px}
 .g-note{font-size:0.75rem;color:var(--muted);margin:0}
+
+/* ── Provenance / data-freshness card ───────────────────────────────────── */
+.prov-layer{padding:13px 0;border-bottom:1px solid var(--line)}
+.prov-layer:first-child{padding-top:0}
+.prov-layer:last-child{border-bottom:none;padding-bottom:0}
+.prov-head{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.prov-head b{font-size:14px;color:var(--ink)}
+.prov-tag{font-size:11px;font-weight:700;padding:1px 8px;border-radius:4px;color:#fff;flex:none}
+.prov-tag.live{background:var(--green)}
+.prov-tag.weekly{background:var(--amber)}
+.prov-src{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.55}
+.prov-asof{font-size:12.5px;color:var(--ink);margin-top:4px;line-height:1.55}
+.prov-asof b{font-variant-numeric:tabular-nums;font-weight:700}
 
 /* ── Algorithm subpage (markdown prose) ─────────────────────────────────── */
 .nav-link{color:var(--accent);text-decoration:none;font-size:14px;font-weight:600}

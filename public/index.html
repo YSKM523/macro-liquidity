@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>美股流动性看板</title>
-  <link rel="stylesheet" href="/styles.css?v=0622b" />
+  <link rel="stylesheet" href="/styles.css?v=0624c" />
 </head>
 <body>
   <main class="container">
@@ -25,7 +25,7 @@
       <div class="verdict-main">
         <div class="verdict-label" id="verdict-label">—</div>
         <div class="verdict-reason" id="verdict-reason">加载中…</div>
-        <div id="stress-note" style="display:none;font-size:0.78rem;color:#B7791F;margin-top:0.25rem;"></div>
+        <div id="stress-note" style="display:none;font-size:0.78rem;color:rgba(255,255,255,.85);margin-top:0.25rem;"></div>
       </div>
       <div class="verdict-sub" id="regime-sub"></div>
     </section>
@@ -87,9 +87,15 @@
       <div id="global-chart" style="height:220px;margin-top:0.75rem;"></div>
       <p class="muted" style="font-size:0.78rem;margin-top:0.5rem;color:#697386;">display-only:全球央行流动性对美股是弱信号(实测 IC≈0.08 不显著),仅作宏观背景,不参与 0-100 分。</p>
     </section>
+
+    <section class="card collapsible" id="provenance-card">
+      <h2>数据来源与时效 · 各层最新时间</h2>
+      <div id="provenance-body"></div>
+      <p class="muted" style="font-size:0.75rem;margin-top:0.75rem;color:#697386;">时间为你本地时区;时间戳取自 API 真值(宏观摄取时刻 last_ingest_at、行情抓取时刻 asof),非估算。</p>
+    </section>
   </main>
 
   <script src="/vendor/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=0622b"></script>
+  <script src="/app.js?v=0624c"></script>
 </body>
 </html>
