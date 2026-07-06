@@ -1,101 +1,154 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh" class="dashboard-doc">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>美股流动性看板</title>
-  <link rel="stylesheet" href="/styles.css?v=0624c" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css?v=0624g" />
 </head>
-<body>
-  <main class="container">
+<body class="dashboard-page">
+  <main class="command-shell">
     <header class="topbar">
       <div class="tb-top">
-        <h1>美股流动性看板</h1>
+        <div>
+          <p class="eyebrow">Macro Liquidity Command</p>
+          <h1>美股流动性看板</h1>
+        </div>
         <a class="nav-link" href="/algorithm">算法说明 →</a>
       </div>
-      <div class="tb-market"><span class="tb-live">实时</span><span id="asof">—</span></div>
-      <div class="tb-meta" title="顶部行情为实时(每次打开抓取);下方为 FRED 宏观数据 —— 核心的美联储资产负债表(WALCL)按周更新,通常周四出 H.4.1">
-        <span id="data-staleness">—</span>
-        <span id="data-coverage">—</span>
+      <div class="tb-status">
+        <div class="tb-market"><span class="tb-live">实时</span><span id="asof">—</span></div>
+        <div class="tb-meta" title="顶部行情为实时(每次打开抓取);下方为 FRED 宏观数据 —— 核心的美联储资产负债表(WALCL)按周更新,通常周四出 H.4.1">
+          <span id="data-staleness">—</span>
+          <span id="data-coverage">—</span>
+        </div>
       </div>
     </header>
 
-    <section class="card verdict" id="verdict-card">
-      <div id="stress-banner" style="display:none;background:#B7791F;color:#fff;padding:0.5rem 0.75rem;border-radius:4px;margin-bottom:0.75rem;font-size:0.85rem;font-weight:600;"></div>
-      <div class="verdict-main">
-        <div class="verdict-label" id="verdict-label">—</div>
-        <div class="verdict-reason" id="verdict-reason">加载中…</div>
-        <div id="stress-note" style="display:none;font-size:0.78rem;color:rgba(255,255,255,.85);margin-top:0.25rem;"></div>
+    <section class="command-center" aria-label="宏观流动性指挥舱">
+      <div class="command-column decision-column">
+        <section class="decision-panel panel card verdict" id="verdict-card">
+          <div id="stress-banner" class="stress-banner" style="display:none"></div>
+          <div class="decision-hero">
+            <div>
+              <div class="panel-kicker">Current Regime</div>
+              <div class="verdict-main">
+                <div class="verdict-label" id="verdict-label">—</div>
+                <div class="verdict-reason" id="verdict-reason">加载中…</div>
+                <div id="stress-note" class="stress-note" style="display:none"></div>
+              </div>
+            </div>
+            <div class="regime-token" aria-hidden="true">LIVE</div>
+          </div>
+          <div class="score-block" id="score-card">
+            <div class="score-topline">
+              <span>顺风指数</span>
+              <strong id="score-num">—</strong>
+            </div>
+            <div class="gauge"><div class="gauge-fill" id="score-gauge"></div></div>
+            <div class="score-scale"><span>风险</span><span>顺风</span></div>
+          </div>
+          <div class="state-grid" id="regime-sub">
+            <div class="state-tile"><span>资产负债表</span><b>—</b></div>
+            <div class="state-tile"><span>净流动性</span><b>—</b></div>
+            <div class="state-tile state-wide"><span>政策阶段</span><b>—</b></div>
+          </div>
+          <section class="guidance" id="guidance-card" style="display:none">
+            <div class="guidance-headline">
+              <h2>操作建议</h2>
+              <span>仓位旋钮</span>
+            </div>
+            <div class="guidance-mosaic">
+              <div class="action-tile">
+                <span class="tile-label">建议档位</span>
+                <span class="g-badge" id="g-tier">—</span>
+              </div>
+              <div class="action-tile">
+                <span class="tile-label">仓位</span>
+                <span class="g-exposure" id="g-exposure"></span>
+              </div>
+              <div class="action-tile action-wide">
+                <span class="tile-label">偏向</span>
+                <span class="g-lean" id="g-lean"></span>
+              </div>
+            </div>
+            <div class="g-diverge" id="g-diverge" style="display:none"></div>
+            <div class="trigger-card">
+              <span class="tile-label">触发器</span>
+              <ul class="g-triggers" id="g-triggers"></ul>
+            </div>
+            <p class="g-note">弱信号风险旋钮,非择时工具;偏空=减仓不是做空;结合你自己的止损与选股。</p>
+          </section>
+        </section>
+
+        <section class="card collapsible" id="provenance-card">
+          <h2>数据来源与时效 · 各层最新时间</h2>
+          <div id="provenance-body"></div>
+          <p class="muted">时间为你本地时区;时间戳取自 API 真值(宏观摄取时刻 last_ingest_at、行情抓取时刻 asof),非估算。</p>
+        </section>
       </div>
-      <div class="verdict-sub" id="regime-sub"></div>
-    </section>
 
-    <section class="card guidance" id="guidance-card" style="display:none">
-      <h2>操作建议 · 仓位旋钮</h2>
-      <div class="g-tier"><span class="g-badge" id="g-tier">—</span><span class="g-exposure" id="g-exposure"></span></div>
-      <div class="g-lean" id="g-lean"></div>
-      <div class="g-diverge" id="g-diverge" style="display:none"></div>
-      <ul class="g-triggers" id="g-triggers"></ul>
-      <p class="g-note">弱信号风险旋钮,非择时工具;偏空=减仓不是做空;结合你自己的止损与选股。</p>
-    </section>
+      <div class="command-column primary-column">
+        <section class="chart-panel panel card chart-card">
+          <div class="chart-head">
+            <div>
+              <div class="panel-kicker">Primary Screen</div>
+              <h2>净流动性 vs 标普500</h2>
+            </div>
+            <div class="chart-legend">
+              <span class="leg"><i class="sw" style="background:#7C6DFF"></i>净流动性<span class="leg-axis">左轴·十亿$</span><b id="leg-nl"></b></span>
+              <span class="leg"><i class="sw" style="background:#E9EEF8"></i>标普500<span class="leg-axis">右轴</span><b id="leg-spx"></b></span>
+            </div>
+          </div>
+          <div id="chart"></div>
+        </section>
 
-    <div class="grid">
-      <section class="card">
-        <h2>顺风指数</h2>
-        <div class="gauge"><div class="gauge-fill" id="score-gauge"></div></div>
-        <div class="score-num" id="score-num">—</div>
-        <div class="factor-bars" id="factor-bars"></div>
-      </section>
-      <section class="card chart-card">
-        <h2>净流动性 vs 标普500</h2>
-        <div class="chart-legend">
-          <span class="leg"><i class="sw" style="background:#635BFF"></i>净流动性<span class="leg-axis">左轴·十亿$</span><b id="leg-nl"></b></span>
-          <span class="leg"><i class="sw" style="background:#1A1F36"></i>标普500<span class="leg-axis">右轴</span><b id="leg-spx"></b></span>
-        </div>
-        <div id="chart"></div>
-      </section>
-    </div>
+        <section class="card collapsible" id="explain-card" style="display:none">
+          <div class="explain-head">
+            <h2>分数归因 · 为什么是这个分</h2>
+            <div class="seg" id="explain-window">
+              <button type="button" data-window="1w" class="active">1周</button>
+              <button type="button" data-window="1m">1月</button>
+              <button type="button" data-window="3m">3月</button>
+            </div>
+          </div>
+          <div id="explain-body"></div>
+        </section>
 
-    <section class="card collapsible" id="explain-card" style="display:none">
-      <div class="explain-head">
-        <h2>分数归因 · 为什么是这个分</h2>
-        <div class="seg" id="explain-window">
-          <button type="button" data-window="1w" class="active">1周</button>
-          <button type="button" data-window="1m">1月</button>
-          <button type="button" data-window="3m">3月</button>
-        </div>
+        <section class="card collapsible" id="robust-card" style="display:none">
+          <h2>回测稳健性 · 防样本结构高估</h2>
+          <div id="robust-body"></div>
+        </section>
       </div>
-      <div id="explain-body"></div>
-    </section>
 
-    <section class="card collapsible" id="factor-card">
-      <h2>因子明细</h2>
-      <table class="factor-table" id="factor-table">
-        <thead><tr><th>因子</th><th>读数</th><th>状态</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="muted" style="font-size:0.75rem;margin-top:0.5rem;color:#697386;">注:顶部/此处美元为 ICE DXY(实时,仅展示);打分用的是 FRED 广义美元 DTWEXBGS(可回溯),两者走势一致、绝对值不同。</p>
-    </section>
+      <div class="command-column factor-column">
+        <section class="factor-panel panel card">
+          <div class="panel-kicker">Factor Wall</div>
+          <h2>9 因子状态</h2>
+          <div class="factor-bars" id="factor-bars"></div>
+        </section>
 
-    <section class="card collapsible" id="robust-card" style="display:none">
-      <h2>回测稳健性 · 防样本结构高估</h2>
-      <div id="robust-body"></div>
-    </section>
-    <section class="card collapsible" id="global-card" style="display:none">
-      <h2>全球流动性(Fed+ECB+BOJ)· 不进打分</h2>
-      <div id="global-body"></div>
-      <div id="global-chart" style="height:220px;margin-top:0.75rem;"></div>
-      <p class="muted" style="font-size:0.78rem;margin-top:0.5rem;color:#697386;">display-only:全球央行流动性对美股是弱信号(实测 IC≈0.08 不显著),仅作宏观背景,不参与 0-100 分。</p>
-    </section>
+        <section class="card collapsible" id="factor-card">
+          <h2>因子明细</h2>
+          <table class="factor-table" id="factor-table">
+            <thead><tr><th>因子</th><th>读数</th><th>状态</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="muted">注:顶部/此处美元为 ICE DXY(实时,仅展示);打分用的是 FRED 广义美元 DTWEXBGS(可回溯),两者走势一致、绝对值不同。</p>
+        </section>
 
-    <section class="card collapsible" id="provenance-card">
-      <h2>数据来源与时效 · 各层最新时间</h2>
-      <div id="provenance-body"></div>
-      <p class="muted" style="font-size:0.75rem;margin-top:0.75rem;color:#697386;">时间为你本地时区;时间戳取自 API 真值(宏观摄取时刻 last_ingest_at、行情抓取时刻 asof),非估算。</p>
+        <section class="card collapsible" id="global-card" style="display:none">
+          <h2>全球流动性(Fed+ECB+BOJ)· 不进打分</h2>
+          <div id="global-body"></div>
+          <div id="global-chart"></div>
+          <p class="muted">display-only:全球央行流动性对美股是弱信号(实测 IC≈0.08 不显著),仅作宏观背景,不参与 0-100 分。</p>
+        </section>
+      </div>
     </section>
   </main>
 
   <script src="/vendor/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=0624c"></script>
+  <script src="/app.js?v=0624g"></script>
 </body>
 </html>

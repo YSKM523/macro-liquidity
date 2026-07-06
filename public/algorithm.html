@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>算法说明 · 美股流动性看板</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css?v=0624g" />
 </head>
 <body>
   <main class="container">
@@ -24,7 +25,14 @@
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
       .then(function (md) {
         marked.setOptions({ gfm: true, breaks: false });
-        document.getElementById('doc').innerHTML = marked.parse(md);
+        var doc = document.getElementById('doc');
+        doc.innerHTML = marked.parse(md);
+        doc.querySelectorAll('table').forEach(function (table) {
+          var wrap = document.createElement('div');
+          wrap.className = 'table-scroll';
+          table.parentNode.insertBefore(wrap, table);
+          wrap.appendChild(table);
+        });
       })
       .catch(function (e) {
         document.getElementById('doc').textContent = '加载失败:' + e.message + ' —— 可直接看 /algorithm.md';

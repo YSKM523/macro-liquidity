@@ -14,11 +14,22 @@ import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 
+const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#F6F8FA"/><path d="M14 43h36" stroke="#1A1F36" stroke-width="4" stroke-linecap="round"/><path d="M16 39c7-14 15-20 24-20 5 0 9 2 12 5" fill="none" stroke="#635BFF" stroke-width="5" stroke-linecap="round"/><path d="M37 20l12 1-5 11" fill="none" stroke="#1A7F4B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     try {
     const url = new URL(req.url);
     const p = url.pathname;
+
+    if (p === '/favicon.ico' || p === '/favicon.svg') {
+      return new Response(faviconSvg, {
+        headers: {
+          'content-type': 'image/svg+xml; charset=utf-8',
+          'cache-control': 'public, max-age=31536000, immutable',
+        },
+      });
+    }
 
     if (p === '/api/health' || p === '/health') {
       try {

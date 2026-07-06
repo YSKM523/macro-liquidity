@@ -23,6 +23,18 @@ let explainData = null;
 const REGIME_AXIS_LABEL = { balance_sheet: '资产负债表', covid: 'COVID 前后', qt: 'QT 前后', vix: 'VIX 风险档' };
 const REGIME_BUCKET_LABEL = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住', pre: '前', post: '后', low: '低波', high: '高波' };
 
+function toneForRegime(regime) {
+  return { EXPANDING: 'bull', CONTRACTING: 'bear', FLAT: 'neutral' }[regime] || 'neutral';
+}
+
+function toneForDirection(dir) {
+  return { UP: 'bull', DOWN: 'bear', FLAT: 'neutral' }[dir] || 'neutral';
+}
+
+function toneForPolicy(policy) {
+  return { QE: 'bull', QT: 'bear', RESERVE_MGMT: 'neutral', NEUTRAL: 'neutral' }[policy] || 'neutral';
+}
+
 // 移动端折叠次要卡片(规整:顶部只留决策区,分析类点击标题展开)
 let glChart = null;
 function setupAccordions() {
@@ -41,7 +53,10 @@ function setupAccordions() {
       chev.textContent = collapsed ? '▸' : '▾';
       if (!collapsed && card.id === 'global-card' && glChart) {
         const gel = document.getElementById('global-chart');
-        if (gel) { glChart.applyOptions({ width: gel.clientWidth }); glChart.timeScale().fitContent(); }
+        if (gel) {
+          glChart.applyOptions({ width: gel.clientWidth, height: Math.max(110, gel.clientHeight || 180) });
+          glChart.timeScale().fitContent();
+        }
       }
     });
   });
@@ -104,6 +119,7 @@ function renderVerdict(res) {
   const card = document.getElementById('verdict-card');
   const macroV = s.verdict || 'NEUTRAL';
   const displayV = s.display_verdict || macroV;
+  card.classList.remove('bull', 'bear', 'neutral');
   card.classList.add(VERDICT_CLASS[displayV]);
   document.getElementById('verdict-label').textContent = VERDICT_CN[displayV] || '—';
   document.getElementById('verdict-reason').textContent = s.reason || '';
@@ -126,8 +142,14 @@ function renderVerdict(res) {
     note.style.display = 'none';
   }
   const policy = s.policy_regime ? (POLICY_CN[s.policy_regime] || s.policy_regime) : '—';
-  document.getElementById('regime-sub').innerHTML =
-    `资产负债表:&nbsp;<b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b><br>净流动性:&nbsp;<b>${dirCn(s.netliq_dir)}</b><br>政策阶段:&nbsp;<b>${policy}</b>`;
+  const regimeHost = document.getElementById('regime-sub');
+  if (regimeHost) {
+    regimeHost.innerHTML = [
+      `<div class="state-tile ${toneForRegime(s.qe_qt_regime)}"><span>资产负债表</span><b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b></div>`,
+      `<div class="state-tile ${toneForDirection(s.netliq_dir)}"><span>净流动性</span><b>${dirCn(s.netliq_dir)}</b></div>`,
+      `<div class="state-tile state-wide ${toneForPolicy(s.policy_regime)}"><span>政策阶段</span><b>${policy}</b></div>`,
+    ].join('');
+  }
   const live = res.live || {};
   document.getElementById('asof').textContent =
     `SPX ${fmt(live.spx)} · VIX ${fmt(live.vix)} · DXY ${fmt(live.dxy)} · 10Y ${fmt(live.us10y)}%`;
@@ -167,8 +189,8 @@ function renderGuidance(s) {
   card.style.display = '';
   const g = s.guidance;
 
-  // Whole-card recolor by tone (bull/neutral/bear/brake), keep base classes
-  card.className = 'card guidance ' + (g.tone || 'neutral');
+  // Tone is styling state only; keep layout classes intact.
+  card.dataset.tone = g.tone || 'neutral';
 
   // Tier badge + tone color class
   const tierEl = document.getElementById('g-tier');
@@ -176,7 +198,7 @@ function renderGuidance(s) {
   tierEl.className = 'g-badge ' + g.tone;
 
   document.getElementById('g-exposure').textContent = g.exposure;
-  document.getElementById('g-lean').textContent = '偏向:' + g.lean;
+  document.getElementById('g-lean').textContent = g.lean;
 
   const divergeEl = document.getElementById('g-diverge');
   if (g.divergence) {
@@ -268,19 +290,22 @@ function renderFactorTable(res) {
 function renderChart(rows) {
   const el = document.getElementById('chart');
   const chart = LightweightCharts.createChart(el, {
-    height: 320, layout: { background: { color: '#FFFFFF' }, textColor: '#697386' },
-    grid: { vertLines: { color: '#E3E8EE' }, horzLines: { color: '#E3E8EE' } },
-    rightPriceScale: { borderColor: '#E3E8EE' }, leftPriceScale: { visible: true, borderColor: '#E3E8EE' },
-    timeScale: { borderColor: '#E3E8EE' },
+    height: Math.max(260, el.clientHeight || 360), layout: { background: { color: '#0B1220' }, textColor: '#8FA1C7' },
+    grid: { vertLines: { color: '#1E2A40' }, horzLines: { color: '#1E2A40' } },
+    rightPriceScale: { borderColor: '#35435E' }, leftPriceScale: { visible: true, borderColor: '#35435E' },
+    timeScale: { borderColor: '#35435E' },
   });
-  const spx = chart.addLineSeries({ color: '#1A1F36', priceScaleId: 'right', lineWidth: 2 });
-  const nl = chart.addLineSeries({ color: '#635BFF', priceScaleId: 'left', lineWidth: 2 });
+  const spx = chart.addLineSeries({ color: '#E9EEF8', priceScaleId: 'right', lineWidth: 2 });
+  const nl = chart.addLineSeries({ color: '#7C6DFF', priceScaleId: 'left', lineWidth: 2 });
   const spxData = rows.filter(r => r.spx != null).map(r => ({ time: r.date, value: r.spx }));
   const nlData = rows.filter(r => r.netliq != null).map(r => ({ time: r.date, value: r.netliq }));
   spx.setData(spxData);
   nl.setData(nlData);
   chart.timeScale().fitContent();
-  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+  new ResizeObserver(() => chart.applyOptions({
+    width: el.clientWidth,
+    height: Math.max(260, el.clientHeight || 320),
+  })).observe(el);
 
   // Legend values: latest by default, hovered value on crosshair move
   const legNl = document.getElementById('leg-nl');
@@ -541,9 +566,9 @@ async function renderGlobal() {
   const trend = L.trend13wPct == null ? '—' : (L.trend13wPct >= 0 ? '+' : '') + L.trend13wPct.toFixed(1) + '%';
 
   body.innerHTML =
-    '<div style="font-size:1.6rem;font-weight:700;color:#1A1F36;">' + T(L.gl) +
+    '<div style="font-size:1.6rem;font-weight:700;color:var(--panel-ink);">' + T(L.gl) +
       ' <span style="font-size:1rem;font-weight:600;color:' + dirCls + ';">' + dirTxt + ' ' + trend + ' (13周)</span></div>' +
-    '<div style="font-size:0.85rem;color:#697386;margin-top:0.35rem;">' +
+    '<div style="font-size:0.85rem;color:var(--panel-muted);margin-top:0.35rem;">' +
       'Fed ' + T(L.fed) + ' (' + Math.round(L.fedPct * 100) + '%) · ' +
       'ECB ' + T(L.ecb) + ' (' + Math.round(L.ecbPct * 100) + '%) · ' +
       'BOJ ' + T(L.boj) + ' (' + Math.round(L.bojPct * 100) + '%)</div>';
@@ -552,14 +577,17 @@ async function renderGlobal() {
   const el = document.getElementById('global-chart');
   if (el && window.LightweightCharts) {
     glChart = LightweightCharts.createChart(el, {
-      height: 220, layout: { background: { color: '#FFFFFF' }, textColor: '#697386' },
-      grid: { vertLines: { color: '#E3E8EE' }, horzLines: { color: '#E3E8EE' } },
-      rightPriceScale: { borderColor: '#E3E8EE' }, leftPriceScale: { visible: false },
-      timeScale: { borderColor: '#E3E8EE' },
+      height: Math.max(110, el.clientHeight || 220), layout: { background: { color: '#0B1220' }, textColor: '#8FA1C7' },
+      grid: { vertLines: { color: '#1E2A40' }, horzLines: { color: '#1E2A40' } },
+      rightPriceScale: { borderColor: '#35435E' }, leftPriceScale: { visible: false },
+      timeScale: { borderColor: '#35435E' },
     });
-    const gl = glChart.addLineSeries({ color: '#635BFF', priceScaleId: 'right', lineWidth: 2 });
+    const gl = glChart.addLineSeries({ color: '#7C6DFF', priceScaleId: 'right', lineWidth: 2 });
     gl.setData(res.series.map(p => ({ time: p.date, value: p.gl })));
     glChart.timeScale().fitContent();
-    new ResizeObserver(() => glChart.applyOptions({ width: el.clientWidth })).observe(el);
+    new ResizeObserver(() => glChart.applyOptions({
+      width: el.clientWidth,
+      height: Math.max(110, el.clientHeight || 180),
+    })).observe(el);
   }
 }
