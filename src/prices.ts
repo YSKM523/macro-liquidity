@@ -4,6 +4,50 @@ export interface LiveStress {
   stressed: boolean;
   reasons: string[];
   signals: { vix: number|null; spx5d: number|null; us10y5d: number|null; dxy5d: number|null };
+  thresholds: { vix: number; spxDd: number; y10: number; dxy: number };
+}
+
+export interface ObsPoint { date: string; value: number }
+
+export function parseYahooDailyObs(json: any): ObsPoint[] {
+  const r = json?.chart?.result?.[0];
+  const ts: unknown[] = Array.isArray(r?.timestamp) ? r.timestamp : [];
+  const closes: unknown[] = Array.isArray(r?.indicators?.quote?.[0]?.close) ? r.indicators.quote[0].close : [];
+  const out: ObsPoint[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const t = ts[i], c = closes[i];
+    if (typeof t === 'number' && typeof c === 'number' && Number.isFinite(c)) {
+      out.push({ date: new Date(t * 1000).toISOString().slice(0, 10), value: c });
+    }
+  }
+  return out;
+}
+
+/**
+ * Chain market-index returns onto the end of a slower official series.
+ * Anchor = nearest market obs on/before the base's last date; each later market
+ * date extends the base at base_last * (mkt / anchor). Levels stay on the base's
+ * scale, so DXY (~98) can extend DTWEXBGS (~120) without a level break.
+ */
+export function spliceSeries(base: ObsPoint[], market: ObsPoint[]): ObsPoint[] {
+  if (base.length === 0 || market.length === 0) return base;
+  const mkt = [...market].sort((a, b) => a.date < b.date ? -1 : 1);
+  const last = base[base.length - 1];
+  let anchor: ObsPoint | undefined;
+  for (const o of mkt) { if (o.date <= last.date) anchor = o; else break; }
+  if (!anchor || anchor.value === 0) return base;
+  const ext = mkt.filter(o => o.date > last.date)
+    .map(o => ({ date: o.date, value: last.value * (o.value / anchor!.value) }));
+  return ext.length ? [...base, ...ext] : base;
+}
+
+export async function fetchDxyDaily(): Promise<ObsPoint[]> {
+  try {
+    const u = 'https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?interval=1d&range=1mo';
+    const r = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) return [];
+    return parseYahooDailyObs(await r.json());
+  } catch { return []; }
 }
 
 export function normalizeTnx(raw: number): number {
@@ -99,5 +143,10 @@ export function evaluateLiveStress(s: StressSeries, t = STRESS): LiveStress {
   if (us10y5d != null && us10y5d > t.y10) reasons.push(`10Y 5日 +${us10y5d.toFixed(2)}pp`);
   if (dxy5d != null && dxy5d > t.dxy) reasons.push(`美元 5日 +${(dxy5d * 100).toFixed(1)}%`);
 
-  return { stressed: reasons.length > 0, reasons, signals: { vix, spx5d, us10y5d, dxy5d } };
+  return {
+    stressed: reasons.length > 0,
+    reasons,
+    signals: { vix, spx5d, us10y5d, dxy5d },
+    thresholds: { vix: t.vix, spxDd: t.spxDd, y10: t.y10, dxy: t.dxy },
+  };
 }

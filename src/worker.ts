@@ -1,5 +1,5 @@
 import type { Env } from './service';
-import { runIngest } from './service';
+import { runIngest, scheduledIngest } from './service';
 import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots, snapshotOnOrBefore, loadSeriesMap } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -178,7 +178,7 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runIngest(env, false).then(() => undefined).catch(() => undefined));
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(scheduledIngest(event.cron, env).catch(() => undefined));
   },
 };

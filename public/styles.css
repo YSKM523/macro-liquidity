@@ -46,8 +46,19 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .verdict.bear::before{background:#8E3D35}
 .verdict.neutral::before{background:#8C6425}
 .decision-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;width:100%;align-items:start}
-.regime-token{padding:4px 7px;border:1px solid #35435E;border-radius:5px;color:#B9C7E6;background:var(--panel-raised);font-size:10px;font-weight:900;letter-spacing:.12em}
-.verdict-label{font-size:clamp(48px,5.6vw,82px);font-weight:850;line-height:.88;letter-spacing:0;color:var(--panel-ink)}
+.regime-token{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid #35435E;border-radius:999px;color:#B9C7E6;background:var(--panel-raised);font-size:10px;font-weight:900;letter-spacing:.12em}
+.regime-token::before{content:"";width:6px;height:6px;border-radius:999px;background:#536582;flex:none}
+.verdict.bull .regime-token{color:#A7F3C6;border-color:var(--good-line);background:var(--good-bg)}
+.verdict.bear .regime-token{color:#FFC0B9;border-color:var(--bad-line);background:var(--bad-bg)}
+.verdict.neutral .regime-token{color:#F8D38D;border-color:var(--warn-line);background:var(--warn-bg)}
+.verdict.bull .regime-token::before{background:#76E0A1}
+.verdict.bear .regime-token::before{background:#FF9388}
+.verdict.neutral .regime-token::before{background:#F4B458}
+.verdict-main{margin-top:8px}
+.verdict-label{font-size:clamp(48px,5.6vw,82px);font-weight:850;line-height:.95;letter-spacing:0;color:var(--panel-ink)}
+.verdict.bull .verdict-label{color:#7CE0A6}
+.verdict.bear .verdict-label{color:#FF9C90}
+.verdict.neutral .verdict-label{color:#F4B458}
 .verdict-reason{color:#CED8ED;margin-top:8px;font-size:13px;line-height:1.45}
 .stress-banner{background:#8C6425;color:#fff;padding:8px 10px;border-radius:4px;font-size:13px;font-weight:700}
 .stress-note{font-size:12px;color:#C8D2E7;margin-top:5px}
@@ -320,3 +331,9 @@ body{margin:0;background:var(--surface);color:var(--ink);
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
 }
+
+/* stress 实时读数(触发器下方一行,可核验「未触发」) */
+.g-triggers li.stress-readouts{display:flex;flex-wrap:wrap;gap:4px 10px;color:#8DA0BF;font-size:11px;border-top:1px solid #25324A;padding-top:6px;margin-top:2px}
+.stress-readouts .sr-item{white-space:nowrap;font-variant-numeric:tabular-nums}
+.stress-readouts .sr-item b{color:#DCE6F5;font-weight:750}
+.stress-readouts .sr-item i{font-style:normal;color:#7488A8}

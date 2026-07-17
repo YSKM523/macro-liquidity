@@ -122,6 +122,8 @@ function renderVerdict(res) {
   card.classList.remove('bull', 'bear', 'neutral');
   card.classList.add(VERDICT_CLASS[displayV]);
   document.getElementById('verdict-label').textContent = VERDICT_CN[displayV] || '—';
+  const token = document.getElementById('regime-token');
+  if (token) token.textContent = displayV;
   document.getElementById('verdict-reason').textContent = s.reason || '';
 
   // Live stress overlay
@@ -213,6 +215,21 @@ function renderGuidance(s) {
     const cls = t.armed ? 'armed' : '';
     return `<li class="${cls}"><b>${t.label}</b> · ${t.detail}</li>`;
   }).join('');
+
+  // 实时读数 vs 触发线:让「未触发」可核验(数据来自 live_stress,每次打开页面实时抓)
+  const st = s.live_stress;
+  if (st && st.signals && st.thresholds) {
+    const sig = st.signals, th = st.thresholds;
+    const sgn = v => v >= 0 ? '+' : '−';
+    const pct = v => v == null ? '—' : sgn(v) + Math.abs(v * 100).toFixed(1) + '%';
+    const pp = v => v == null ? '—' : sgn(v) + Math.abs(v).toFixed(2) + 'pp';
+    const num = v => v == null ? '—' : v.toFixed(1);
+    triggersList.innerHTML += `<li class="stress-readouts">实时读数`
+      + ` <span class="sr-item">VIX <b>${num(sig.vix)}</b><i>/线 ${th.vix}</i></span>`
+      + ` <span class="sr-item">SPX 5日 <b>${pct(sig.spx5d)}</b><i>/线 ${(th.spxDd * 100).toFixed(0)}%</i></span>`
+      + ` <span class="sr-item">10Y 5日 <b>${pp(sig.us10y5d)}</b><i>/线 +${th.y10}pp</i></span>`
+      + ` <span class="sr-item">DXY 5日 <b>${pct(sig.dxy5d)}</b><i>/线 +${(th.dxy * 100).toFixed(0)}%</i></span></li>`;
+  }
 }
 
 function dirCn(d) { return { UP: '在升', DOWN: '在收', FLAT: '走平' }[d] || '—'; }

@@ -57,3 +57,9 @@ export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade 
 
 // cron 每 3h 跑一次；上次成功摄取超过这个小时数 → 判为不健康(容忍漏 1 拍)。
 export const INGEST_STALE_HOURS = 6;
+
+// Ingest 加固:主 cron 之外有一条 hourly 重试 cron(见 wrangler.toml),
+// 仅在上次失败或成功摄取超过 RETRY_MAX_AGE_HOURS 时补跑;连续第 2 次失败发邮件告警(限频)。
+export const MAIN_CRON = '0 */3 * * *';
+export const RETRY_MAX_AGE_HOURS = 4;
+export const ALERT_MIN_INTERVAL_HOURS = 12;

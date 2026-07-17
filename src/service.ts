@@ -1,12 +1,15 @@
 import { fetchFredSeries } from './fred';
-import { SERIES_IDS } from './config';
-import { maxObsDate, upsertObservations, loadSeriesMap, upsertSnapshot, setMeta } from './db';
+import { SERIES_IDS, MAIN_CRON, RETRY_MAX_AGE_HOURS, ALERT_MIN_INTERVAL_HOURS } from './config';
+import { maxObsDate, upsertObservations, loadSeriesMap, upsertSnapshot, setMeta, getAllMeta } from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
+import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
+import { spliceSeries, fetchDxyDaily } from './prices';
 
 export interface Env {
   DB: D1Database; ASSETS: Fetcher;
   FRED_API_KEY: string; ADMIN_TOKEN: string; START_DATE: string;
+  RESEND_API_KEY?: string; EMAIL_FROM?: string; ALERT_EMAIL_TO?: string;
 }
 
 function eachDay(from: string, to: string): string[] {
@@ -16,6 +19,7 @@ function eachDay(from: string, to: string): string[] {
 }
 
 export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated: number; snapshots: number }> {
+  const prevMeta = await getAllMeta(env.DB);
   await setMeta(env.DB, 'last_attempt_at', new Date().toISOString());
   try {
     // 1) pull FRED incrementally
@@ -29,6 +33,8 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
     }
     // 2) rebuild snapshots
     const m = await loadSeriesMap(env.DB);
+    // DTWEXBGS 官方发布滞后约一周;用 DXY 日线按比例链到末端参与打分(仅内存,行情失败则跳过)。
+    m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], await fetchDxyDaily());
     const lastWalcl = (m.WALCL ?? []).at(-1)?.date;
     let snapshots = 0;
     if (lastWalcl) {
@@ -53,10 +59,52 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
     await setMeta(env.DB, 'last_snapshots', String(snapshots));
     return { updated, snapshots };
   } catch (e) {
+    const errMsg = String((e as any)?.message ?? e);
     await setMeta(env.DB, 'last_status', 'error');
-    await setMeta(env.DB, 'last_error', String((e as any)?.message ?? e));
+    await setMeta(env.DB, 'last_error', errMsg);
+    const now = new Date().toISOString();
+    if (shouldAlert({
+      prevStatus: prevMeta.last_status ?? null,
+      attemptOk: false,
+      lastAlertAt: prevMeta.last_alert_at ?? null,
+      now,
+      minIntervalHours: ALERT_MIN_INTERVAL_HOURS,
+    })) {
+      const sent = await sendAlertEmail(env, buildAlertEmail({
+        error: errMsg, lastIngestAt: prevMeta.last_ingest_at ?? null, now,
+      }));
+      if (sent) await setMeta(env.DB, 'last_alert_at', now);
+    }
     throw e;
   }
+}
+
+// Alerting must never mask the ingest error — swallow every failure here.
+async function sendAlertEmail(env: Env, m: { subject: string; text: string }): Promise<boolean> {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.ALERT_EMAIL_TO) return false;
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: env.EMAIL_FROM, to: [env.ALERT_EMAIL_TO], subject: m.subject, text: m.text }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+/** Cron entry: the main cron always ingests; the retry cron only when unhealthy/stale. */
+export async function scheduledIngest(cron: string, env: Env): Promise<void> {
+  if (cron !== MAIN_CRON) {
+    const meta = await getAllMeta(env.DB);
+    const retry = shouldRetryIngest({
+      lastStatus: meta.last_status ?? null,
+      lastIngestAt: meta.last_ingest_at ?? null,
+      now: new Date().toISOString(),
+      maxAgeHours: RETRY_MAX_AGE_HOURS,
+    });
+    if (!retry) return;
+  }
+  await runIngest(env, false);
 }
 
 function addDays(date: string, days: number): string {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeTnx, parseYahooQuote, parseStooqCsv, parseYahooCloses, evaluateLiveStress } from '../src/prices';
+import { normalizeTnx, parseYahooQuote, parseStooqCsv, parseYahooCloses, parseYahooDailyObs, spliceSeries, evaluateLiveStress } from '../src/prices';
 import type { StressSeries } from '../src/prices';
 
 describe('price parsing', () => {
@@ -101,5 +101,71 @@ describe('evaluateLiveStress', () => {
     expect(result.signals.spx5d).toBeNull();
     expect(result.signals.us10y5d).toBeNull();
     expect(result.signals.dxy5d).toBeNull();
+  });
+});
+
+describe('evaluateLiveStress thresholds', () => {
+  it('exposes the thresholds it evaluated against', () => {
+    const s: StressSeries = { spx: [100], vix: [15], us10y: [4.2], dxy: [98] };
+    const r = evaluateLiveStress(s);
+    expect(r.thresholds).toEqual({ vix: 28, spxDd: -0.04, y10: 0.25, dxy: 0.02 });
+  });
+});
+
+describe('parseYahooDailyObs', () => {
+  it('pairs timestamps with closes as UTC dates, skipping nulls', () => {
+    const json = {
+      chart: {
+        result: [{
+          timestamp: [1784073600, 1784160000, 1784246400], // 2026-07-15/16/17 00:00 UTC
+          indicators: { quote: [{ close: [98.2, null, 97.5] }] },
+        }],
+      },
+    };
+    expect(parseYahooDailyObs(json)).toEqual([
+      { date: '2026-07-15', value: 98.2 },
+      { date: '2026-07-17', value: 97.5 },
+    ]);
+  });
+  it('returns empty on malformed shape', () => {
+    expect(parseYahooDailyObs(null)).toEqual([]);
+    expect(parseYahooDailyObs({ chart: { result: null } })).toEqual([]);
+  });
+});
+
+describe('spliceSeries', () => {
+  const base = [
+    { date: '2026-07-08', value: 120 },
+    { date: '2026-07-10', value: 121 },
+  ];
+  it('chains market returns onto the last base level', () => {
+    const market = [
+      { date: '2026-07-10', value: 98.0 },
+      { date: '2026-07-14', value: 99.96 },
+      { date: '2026-07-15', value: 96.04 },
+    ];
+    const out = spliceSeries(base, market);
+    expect(out).toHaveLength(4);
+    expect(out[0]).toEqual(base[0]);
+    expect(out[2].date).toBe('2026-07-14');
+    expect(out[2].value).toBeCloseTo(121 * (99.96 / 98.0));
+    expect(out[3].value).toBeCloseTo(121 * (96.04 / 98.0));
+  });
+  it('uses nearest market obs on/before the base end as anchor', () => {
+    const market = [
+      { date: '2026-07-09', value: 100 },
+      { date: '2026-07-14', value: 102 },
+    ];
+    const out = spliceSeries(base, market);
+    expect(out).toHaveLength(3);
+    expect(out[2].value).toBeCloseTo(121 * 1.02);
+  });
+  it('returns base unchanged when market has no anchor overlap', () => {
+    const market = [{ date: '2026-07-14', value: 102 }];
+    expect(spliceSeries(base, market)).toEqual(base);
+  });
+  it('returns base unchanged on empty inputs', () => {
+    expect(spliceSeries(base, [])).toEqual(base);
+    expect(spliceSeries([], [{ date: '2026-07-14', value: 1 }])).toEqual([]);
   });
 });

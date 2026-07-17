@@ -5,13 +5,16 @@
 > 部署：`wrangler deploy`（**改前端记得 bump `?v=` 版本号**，否则缓存不更新）
 > API：`/api/health | /api/explain | /api/robustness | /api/global-liquidity`
 
-_最后更新：2026-07-06（本轮一屏 dashboard 重排、移动端与 favicon 修复后刷新）_
+_最后更新：2026-07-17（三项优化已部署上线：ingest 重试+告警、DXY 拼接、stress 实时读数）_
 
 ## 当前状态
-- 分支：`main`；本轮目标是把首页改成更紧凑的全屏 dashboard，32 寸 / 27 寸桌面视口无需上下滚动即可看完整核心信息。
-- 线上版本：`https://macro-liquidity-dashboard.pp-account.workers.dev/`，最近部署 ID `5861236d-91b7-4533-8ef6-e2fd7c92fe1f`。
-- 前端缓存版本：`styles.css?v=0624g`、`app.js?v=0624g`。
-- 已修复：手机横向滚动、favicon、首页全屏 command center、左侧 Primary Screen 细分小卡片、去除红色细线、去除渐变/透明 UI 风格。
+- **2026-07-17 三项优化已部署**（版本 ID `9979e093-4492-4ee1-bad4-89b71f68e20b`，`?v=0717a`；未 commit）。线上验证：readouts 行渲染真实数值、桌面 1280+移动 390 无横向溢出、0 console error；DXY 拼接生效（dxy_eod 07-15=119.94，dollar factor 17.4→42.4，score 59.1→63.6）；两条 cron 均注册。**Resend 三 secret 未配（RESEND_API_KEY/EMAIL_FROM/ALERT_EMAIL_TO），邮件告警静默停用，重试 cron 已生效**：
+  1. **Ingest 加固**（`src/pipeline.ts` + service/worker/config/wrangler.toml）：新增 hourly 重试 cron `30 * * * *`（仅上次失败或成功摄取 >4h 时补跑，`shouldRetryIngest`）；连续第 2 次失败经 Resend 发邮件告警（`shouldAlert`，12h 限频，meta `last_alert_at`）。**部署时需 `wrangler secret put` 三个：`RESEND_API_KEY`（TCF worker 同款 key，本地无存档需用户提供）、`EMAIL_FROM`、`ALERT_EMAIL_TO`**；不配则告警静默降级、重试仍生效。
+  2. **DXY 拼接**（`spliceSeries`/`fetchDxyDaily` in prices.ts，接在 runIngest）：DTWEXBGS 官方滞后约 1 周，用 Yahoo DX-Y.NYB 日线按比例链到序列末端参与打分（仅内存，行情失败自动跳过）；snapshot 日期上限是 WALCL 最新日，故不会用到盘中值。
+  3. **stress 实时读数**（前端）：触发器区块末尾新增一行 `实时读数 VIX x/线 28 · SPX5日 …`（`live_stress.signals` + 新增 `thresholds` 字段），让「未触发」可核验。`?v=0717a`。
+- 背景事件：2026-07-17 早 FRED RRPONTSYD 502 致 ingest 卡 stale 5.5h，人工 `POST /api/admin/refresh` 恢复——上述第 1 项就是针对此事故。
+- 工作区另有 07-14 的 Current Regime 卡片优化（状态色大字/`#regime-token` chip/kicker 重叠修复）**未 commit**（用户未要求），线上是 `?v=0714a`（版本 ID `833f298a`）。
+- 历史已修复：手机横向滚动、favicon、首页全屏 command center、左侧 Primary Screen 细分小卡片、去除红色细线、去除渐变/透明 UI 风格。
 
 ## 验证记录
 - `env -u NODE_OPTIONS npm test`：13 个测试文件、248 个测试通过。
@@ -25,4 +28,5 @@ _最后更新：2026-07-06（本轮一屏 dashboard 重排、移动端与 favico
 - 姊妹项目：加拿大版 `~/ca-liquidity-dashboard`（`ca-liquidity-dashboard.pp-account.workers.dev`，BoC 结算余额 + TSX + CAD/USD）；诚实结论 = 无显著 alpha（IC≈0）的弱宏观监控（`project_ca_liquidity_dashboard`）。
 
 ## 下一步
-- 无已知阻塞；后续如果继续微调前端，记得同步 bump `?v=` 并重新部署。
+- 配 Resend 三 secret 以启用邮件告警：`npx wrangler secret put RESEND_API_KEY / EMAIL_FROM / ALERT_EMAIL_TO`（key 需用户从 resend.com 取，与 TCF worker 同一账号）。
+- 后续微调前端记得 bump `?v=`。

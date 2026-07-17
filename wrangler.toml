@@ -13,7 +13,7 @@ database_id = "5ee92b9b-eb8e-4c34-9479-b0838fa113fb"
 migrations_dir = "migrations"
 
 [triggers]
-crons = ["0 */3 * * *"]
+crons = ["0 */3 * * *", "30 * * * *"]  # 主 cron 3h + hourly 重试(仅不健康时补跑)
 
 [vars]
 START_DATE = "2016-01-01"
