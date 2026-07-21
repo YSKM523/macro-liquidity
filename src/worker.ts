@@ -1,6 +1,15 @@
 import type { Env } from './service';
 import { runIngest, scheduledIngest } from './service';
-import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots, snapshotOnOrBefore, loadSeriesMap } from './db';
+import {
+  latestOfficialSnapshot,
+  latestNowcastSnapshot,
+  officialSnapshotHistory,
+  loadBacktestRows,
+  getAllMeta,
+  countOfficialSnapshots,
+  officialSnapshotOnOrBefore,
+  loadSeriesMap,
+} from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
 import { policyRegime, deriveDecisionState } from './metrics';
@@ -25,6 +34,37 @@ function parseJsonObject(value: unknown): Record<string, unknown> {
   }
 }
 
+function presentSnapshot(row: unknown, stress: ReturnType<typeof evaluateLiveStress>, channel: 'OFFICIAL' | 'PROVISIONAL') {
+  if (!row) return null;
+  const r: any = row;
+  const decisionStatus: DecisionStatus = r.decision_status === 'OK' ? 'OK' : 'DATA_INCOMPLETE';
+  const persistedScore = decisionStatus === 'OK' && typeof r.score === 'number' ? r.score : null;
+  const persistedVerdict = decisionStatus === 'OK' ? r.verdict : null;
+  const decision = deriveDecisionState({
+    score: persistedScore,
+    previousVerdict: persistedVerdict,
+    netliqDir: r.netliq_dir,
+    qeQtRegime: r.qe_qt_regime,
+    stressStatus: stress.status,
+    decisionStatus,
+  });
+  return {
+    ...r,
+    channel_status: channel,
+    score: persistedScore,
+    verdict: persistedVerdict,
+    decision_status: decisionStatus,
+    factor_quality: parseJsonObject(r.factor_quality_json),
+    freshness: parseJsonObject(r.freshness_json),
+    policy_regime: decisionStatus === 'OK' ? policyRegime(r.qe_qt_regime, r.date) : null,
+    reason: decision.reason,
+    display_verdict: decision.displayVerdict,
+    live_stress: stress,
+    guidance: decision.guidance,
+    coverage_total: COVERAGE_FACTORS.length,
+  };
+}
+
 const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#F6F8FA"/><path d="M14 43h36" stroke="#1A1F36" stroke-width="4" stroke-linecap="round"/><path d="M16 39c7-14 15-20 24-20 5 0 9 2 12 5" fill="none" stroke="#635BFF" stroke-width="5" stroke-linecap="round"/><path d="M37 20l12 1-5 11" fill="none" stroke="#1A7F4B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 export default {
@@ -45,9 +85,9 @@ export default {
     if (p === '/api/health' || p === '/health') {
       try {
         const [row, meta, count] = await Promise.all([
-          latestSnapshot(env.DB),
+          latestOfficialSnapshot(env.DB),
           getAllMeta(env.DB),
-          countSnapshots(env.DB),
+          countOfficialSnapshots(env.DB),
         ]);
         const h = assessHealth({
           dataDate: (row as any)?.date ?? null,
@@ -66,8 +106,9 @@ export default {
       }
     }
     if (p === '/api/snapshot') {
-      const [row, live, stress, meta] = await Promise.all([
-        latestSnapshot(env.DB),
+      const [officialRow, nowcastRow, live, stress, meta] = await Promise.all([
+        latestOfficialSnapshot(env.DB),
+        latestNowcastSnapshot(env.DB),
         fetchLivePrices(new Date().toISOString()),
         fetchStressSeries().then(s => evaluateLiveStress(s)),
         getAllMeta(env.DB),
@@ -80,41 +121,17 @@ export default {
           : null,
         ingest_status: meta.last_status ?? null,
       };
-      if (!row) return json({ snapshot: null, live, ingest, error: 'no_data' });
-      const r: any = row;
-      const decisionStatus: DecisionStatus = r.decision_status === 'OK' ? 'OK' : 'DATA_INCOMPLETE';
-      const persistedScore = decisionStatus === 'OK' && typeof r.score === 'number' ? r.score : null;
-      const persistedVerdict = decisionStatus === 'OK' ? r.verdict : null;
-      const decision = deriveDecisionState({
-        score: persistedScore,
-        previousVerdict: persistedVerdict,
-        netliqDir: r.netliq_dir,
-        qeQtRegime: r.qe_qt_regime,
-        stressStatus: stress.status,
-        decisionStatus,
-      });
-      const snap = {
-        ...r,
-        score: persistedScore,
-        verdict: persistedVerdict,
-        decision_status: decisionStatus,
-        factor_quality: parseJsonObject(r.factor_quality_json),
-        freshness: parseJsonObject(r.freshness_json),
-        policy_regime: decisionStatus === 'OK' ? policyRegime(r.qe_qt_regime, r.date) : null,
-        reason: decision.reason,
-        display_verdict: decision.displayVerdict,
-        live_stress: stress,
-        guidance: decision.guidance,
-        coverage_total: COVERAGE_FACTORS.length,
-      };
-      return json({ snapshot: snap, live, ingest });
+      const official = presentSnapshot(officialRow, stress, 'OFFICIAL');
+      const nowcast = presentSnapshot(nowcastRow, stress, 'PROVISIONAL');
+      if (!official && !nowcast) return json({ official: null, nowcast: null, live, ingest, error: 'no_data' });
+      return json({ official, nowcast, live, ingest });
     }
     if (p === '/api/explain') {
       const wparam = url.searchParams.get('window');
       const window = (wparam === '1m' || wparam === '3m') ? wparam : '1w';
       const days = window === '3m' ? 91 : window === '1m' ? 30 : 7;
 
-      const cur: any = await latestSnapshot(env.DB);
+      const cur: any = await latestOfficialSnapshot(env.DB);
       if (!cur) return json({ window, error: 'no_data' });
       if (cur.decision_status !== 'OK') {
         return json({
@@ -127,7 +144,7 @@ export default {
 
       const refDate = new Date(new Date(cur.date + 'T00:00:00Z').getTime() - days * 86400000)
         .toISOString().slice(0, 10);
-      const refRow: any = await snapshotOnOrBefore(env.DB, refDate);
+      const refRow: any = await officialSnapshotOnOrBefore(env.DB, refDate);
       const reference = (refRow && refRow.decision_status === 'OK' && refRow.date !== cur.date) ? refRow : null;
 
       const curFactors = JSON.parse(cur.factors_json ?? '{}');
@@ -160,7 +177,7 @@ export default {
     if (p === '/api/history') {
       const to = url.searchParams.get('to') ?? '2100-01-01';
       const from = url.searchParams.get('from') ?? '1900-01-01';
-      return json({ rows: await snapshotHistory(env.DB, from, to) });
+      return json({ rows: await officialSnapshotHistory(env.DB, from, to) });
     }
     if (p === '/api/prices') {
       return json(await fetchLivePrices(new Date().toISOString()));

@@ -4,6 +4,14 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-05 — Official weekly snapshots and daily nowcasts
+
+- Split persisted model output into official `model_snapshot_weekly` and provisional `nowcast_snapshot_daily` channels.
+- Routed full rebuilds exclusively to official weekly storage and incremental refreshes exclusively to daily nowcast storage.
+- Restricted history, explanation, backtest, walk-forward, and robustness reads to official weekly snapshots.
+- Returned explicit `official` and `nowcast` snapshot API fields and labeled both channels in the dashboard.
+- Added a conservative WALCL-cadence legacy migration while retaining `daily_snapshot` as a read-only compatibility source.
+
 ### PR-04 — Per-series freshness and factor data quality
 
 - Added frequency-aware freshness rules and explicit factor quality states.

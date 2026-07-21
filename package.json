@@ -10,7 +10,7 @@
     "migrate:local": "wrangler d1 migrations apply macro_liquidity --local",
     "migrate:remote": "wrangler d1 migrations apply macro_liquidity --remote",
     "migrate:list": "wrangler d1 migrations list macro_liquidity --remote",
-    "export:snapshots": "wrangler d1 execute macro_liquidity --remote --json --command \"SELECT date, factors_json, spx, qe_qt_regime, vix_eod FROM daily_snapshot WHERE spx IS NOT NULL ORDER BY date\" > scripts/data/snapshots.json"
+    "export:snapshots": "wrangler d1 execute macro_liquidity --remote --json --command \"SELECT date, factors_json, spx, qe_qt_regime, vix_eod FROM model_snapshot_weekly WHERE decision_status = 'OK' AND spx IS NOT NULL ORDER BY date\" > scripts/data/snapshots.json"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

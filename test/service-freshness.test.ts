@@ -4,7 +4,7 @@ import type { SeriesMap, Snapshot } from '../src/metrics';
 const DATE = '2024-07-24';
 const state = vi.hoisted(() => ({
   seriesMap: {} as SeriesMap,
-  snapshots: new Map<string, Snapshot>(),
+  nowcasts: new Map<string, Snapshot>(),
 }));
 
 vi.mock('../src/fred', () => ({ fetchFredSeries: vi.fn(async () => []) }));
@@ -13,15 +13,17 @@ vi.mock('../src/prices', () => ({
   spliceSeries: vi.fn((official: unknown[]) => official),
 }));
 vi.mock('../src/db', () => ({
+  decisionWeek: (date: string) => date,
   maxObsDate: vi.fn(async () => DATE),
   upsertObservations: vi.fn(async () => undefined),
   loadSeriesMap: vi.fn(async () => state.seriesMap),
-  upsertSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
-    state.snapshots.set(snapshot.date, structuredClone(snapshot));
+  upsertOfficialSnapshot: vi.fn(async () => undefined),
+  upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+    state.nowcasts.set(snapshot.date, structuredClone(snapshot));
   }),
   setMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
-  snapshotBefore: vi.fn(async () => null),
+  officialSnapshotBefore: vi.fn(async () => null),
 }));
 
 import { runIngest } from '../src/service';
@@ -55,14 +57,14 @@ const env = {
 beforeEach(() => {
   vi.clearAllMocks();
   state.seriesMap = completeMap();
-  state.snapshots.clear();
+  state.nowcasts.clear();
 });
 
 describe('incremental ingest current as-of', () => {
   it('persists a current incomplete snapshot when WALCL has halted beyond its freshness limit', async () => {
     await runIngest(env, false, new Date('2024-08-05T12:00:00.000Z'));
 
-    const newest = state.snapshots.get('2024-08-05')!;
+    const newest = state.nowcasts.get('2024-08-05')!;
     expect(newest).toBeDefined();
     expect(newest.freshness.WALCL.status).toBe('STALE');
     expect(newest.decisionStatus).toBe('DATA_INCOMPLETE');
@@ -73,7 +75,7 @@ describe('incremental ingest current as-of', () => {
   it('keeps a current complete feed decision valid', async () => {
     await runIngest(env, false, new Date('2024-07-24T12:00:00.000Z'));
 
-    expect(state.snapshots.get(DATE)?.decisionStatus).toBe('OK');
-    expect(state.snapshots.get(DATE)?.verdict).not.toBeNull();
+    expect(state.nowcasts.get(DATE)?.decisionStatus).toBe('OK');
+    expect(state.nowcasts.get(DATE)?.verdict).not.toBeNull();
   });
 });

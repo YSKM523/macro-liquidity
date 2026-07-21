@@ -28,11 +28,21 @@
 
     <section class="command-center" aria-label="宏观流动性指挥舱">
       <div class="command-column decision-column">
-        <section class="decision-panel panel card verdict" id="verdict-card">
-          <div id="stress-banner" class="stress-banner" style="display:none"></div>
-          <div class="decision-hero">
-            <div>
-              <div class="panel-kicker">Current Regime</div>
+         <section class="decision-panel panel card verdict" id="verdict-card">
+           <div id="stress-banner" class="stress-banner" style="display:none"></div>
+           <div class="snapshot-channels" aria-label="信号频率">
+             <div class="snapshot-channel official-channel">
+               <span>正式信号</span>
+               <b id="official-channel-value">—</b>
+             </div>
+             <div class="snapshot-channel nowcast-channel">
+               <span>周中预估 <i>PROVISIONAL</i></span>
+               <b id="nowcast-channel-value">—</b>
+             </div>
+           </div>
+           <div class="decision-hero">
+             <div>
+               <div class="panel-kicker" id="current-channel">Current Regime</div>
               <div class="verdict-main">
                 <div class="verdict-label" id="verdict-label">—</div>
                 <div class="verdict-reason" id="verdict-reason">加载中…</div>

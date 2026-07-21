@@ -13,6 +13,11 @@ const dbState = vi.hoisted(() => ({
     factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
   } as any,
+  nowcast: {
+    date: '2026-07-21', score: 61, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
+    reason: 'provisional macro estimate', coverage: 1, decision_status: 'OK', channel_status: 'PROVISIONAL',
+    factor_quality_json: '{}', freshness_json: '{}',
+  } as any,
   reference: null as any,
   meta: {} as Record<string, string>,
 }));
@@ -24,11 +29,16 @@ vi.mock('../src/service', () => ({
 
 vi.mock('../src/db', () => ({
   latestSnapshot: vi.fn(async () => dbState.row),
+  latestOfficialSnapshot: vi.fn(async () => dbState.row),
+  latestNowcastSnapshot: vi.fn(async () => dbState.nowcast),
   getAllMeta: vi.fn(async () => dbState.meta),
   countSnapshots: vi.fn(async () => 1),
+  countOfficialSnapshots: vi.fn(async () => 1),
   snapshotHistory: vi.fn(async () => []),
+  officialSnapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => []),
   snapshotOnOrBefore: vi.fn(async () => dbState.reference),
+  officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
 }));
 
@@ -49,9 +59,26 @@ beforeEach(() => {
     factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
   };
+  dbState.nowcast = {
+    date: '2026-07-21', score: 61, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
+    reason: 'provisional macro estimate', coverage: 1, decision_status: 'OK', channel_status: 'PROVISIONAL',
+    factor_quality_json: '{}', freshness_json: '{}',
+  };
   dbState.reference = null;
   dbState.meta = {};
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
+});
+
+describe('/api/snapshot explicit channels', () => {
+  it('returns official and provisional nowcast snapshots separately', async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
+    const body = await response.json() as any;
+
+    expect(body.official.date).toBe('2026-07-15');
+    expect(body.nowcast.date).toBe('2026-07-21');
+    expect(body.nowcast.channel_status).toBe('PROVISIONAL');
+    expect(body.snapshot).toBeUndefined();
+  });
 });
 
 afterEach(() => {
@@ -72,17 +99,17 @@ describe('/api/snapshot persisted macro quality', () => {
     const response = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
     const body = await response.json() as any;
 
-    expect(body.snapshot.decision_status).toBe('DATA_INCOMPLETE');
-    expect(body.snapshot.score).toBeNull();
-    expect(body.snapshot.verdict).toBeNull();
-    expect(body.snapshot.display_verdict).toBe('UNKNOWN');
-    expect(body.snapshot.reason).toContain('宏观数据不完整');
-    expect(body.snapshot.guidance.tone).toBe('unknown');
-    expect(body.snapshot.guidance.exposure).not.toMatch(/加仓|\+/);
-    expect(JSON.stringify(body.snapshot.guidance)).not.toContain('未触发');
-    expect(body.snapshot.factor_quality.netliqTrend.asOf).toBe('2026-07-01');
-    expect(body.snapshot.freshness.WDTGAL.observationDate).toBe('2026-07-01');
-    expect(body.snapshot.policy_regime).toBeNull();
+    expect(body.official.decision_status).toBe('DATA_INCOMPLETE');
+    expect(body.official.score).toBeNull();
+    expect(body.official.verdict).toBeNull();
+    expect(body.official.display_verdict).toBe('UNKNOWN');
+    expect(body.official.reason).toContain('宏观数据不完整');
+    expect(body.official.guidance.tone).toBe('unknown');
+    expect(body.official.guidance.exposure).not.toMatch(/加仓|\+/);
+    expect(JSON.stringify(body.official.guidance)).not.toContain('未触发');
+    expect(body.official.factor_quality.netliqTrend.asOf).toBe('2026-07-01');
+    expect(body.official.freshness.WDTGAL.observationDate).toBe('2026-07-01');
+    expect(body.official.policy_regime).toBeNull();
   });
 
   it('does not use an incomplete reference returned by the explain lookup', async () => {
@@ -151,10 +178,10 @@ describe('/api/snapshot persisted macro quality', () => {
     const response = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
     const body = await response.json() as any;
 
-    expect(body.snapshot.decision_status).toBe('DATA_INCOMPLETE');
-    expect(body.snapshot.display_verdict).toBe('UNKNOWN');
-    expect(body.snapshot.factor_quality).toEqual({});
-    expect(body.snapshot.freshness).toEqual({});
+    expect(body.official.decision_status).toBe('DATA_INCOMPLETE');
+    expect(body.official.display_verdict).toBe('UNKNOWN');
+    expect(body.official.factor_quality).toEqual({});
+    expect(body.official.freshness).toEqual({});
   });
 });
 
@@ -164,13 +191,13 @@ describe('/api/snapshot live stress status', () => {
     const body = await response.json() as any;
 
     expect(response.status).toBe(200);
-    expect(body.snapshot.score).toBe(60);
-    expect(body.snapshot.verdict).toBe('BULLISH');
-    expect(body.snapshot.live_stress.status).toBe('UNKNOWN');
-    expect(body.snapshot.display_verdict).toBe('UNKNOWN');
-    expect(body.snapshot.guidance.tierLabel).toBe('实时风险层不可用');
-    expect(body.snapshot.guidance.exposure).not.toContain('+15~20pp');
-    expect(body.snapshot.guidance.triggers[1].detail).not.toContain('当前未触发');
+    expect(body.official.score).toBe(60);
+    expect(body.official.verdict).toBe('BULLISH');
+    expect(body.official.live_stress.status).toBe('UNKNOWN');
+    expect(body.official.display_verdict).toBe('UNKNOWN');
+    expect(body.official.guidance.tierLabel).toBe('实时风险层不可用');
+    expect(body.official.guidance.exposure).not.toContain('+15~20pp');
+    expect(body.official.guidance.triggers[1].detail).not.toContain('当前未触发');
   });
 });
 

@@ -2,19 +2,26 @@ import { describe, expect, it, vi } from 'vitest';
 // The project tsconfig intentionally only loads Workers types; this test runs in Vitest's Node runtime.
 // @ts-ignore
 import { existsSync, readFileSync } from 'node:fs';
-import { loadBacktestRows, snapshotBefore, snapshotHistory, snapshotOnOrBefore, upsertSnapshot } from '../src/db';
+import * as snapshotDb from '../src/db';
+import {
+  loadBacktestRows,
+  officialSnapshotBefore,
+  officialSnapshotHistory,
+  officialSnapshotOnOrBefore,
+  upsertOfficialSnapshot,
+} from '../src/db';
 
-describe('snapshotBefore', () => {
+describe('officialSnapshotBefore', () => {
   it('loads the nearest snapshot strictly before the rebuild start date', async () => {
     const first = vi.fn(async () => ({ date: '2024-05-08', verdict: 'BULLISH' }));
     const bind = vi.fn(() => ({ first }));
     const prepare = vi.fn(() => ({ bind }));
     const db = { prepare } as unknown as D1Database;
 
-    const row = await snapshotBefore(db, '2024-05-15');
+    const row = await officialSnapshotBefore(db, '2024-05-15');
 
     expect(prepare).toHaveBeenCalledWith(
-      "SELECT * FROM daily_snapshot WHERE date < ? AND decision_status = 'OK' AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1",
+      "SELECT * FROM model_snapshot_weekly WHERE date < ? AND decision_status = 'OK' AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1",
     );
     expect(bind).toHaveBeenCalledWith('2024-05-15');
     expect(row).toEqual({ date: '2024-05-08', verdict: 'BULLISH' });
@@ -25,11 +32,65 @@ describe('snapshotBefore', () => {
     const prepare = vi.fn(() => ({ bind: vi.fn(() => ({ first })) }));
     const db = { prepare } as unknown as D1Database;
 
-    await snapshotBefore(db, '2024-05-15');
+    await officialSnapshotBefore(db, '2024-05-15');
 
     const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(sql).toContain("decision_status = 'OK'");
     expect(sql).toContain('verdict IS NOT NULL');
+  });
+});
+
+describe('official and nowcast snapshot channels', () => {
+  it('provides explicit writers for official weekly and provisional daily storage', async () => {
+    expect(typeof (snapshotDb as any).upsertOfficialSnapshot).toBe('function');
+    expect(typeof (snapshotDb as any).upsertNowcastSnapshot).toBe('function');
+
+    const run = vi.fn(async () => undefined);
+    const bind = vi.fn(() => ({ run }));
+    const prepare = vi.fn(() => ({ bind }));
+    const db = { prepare } as unknown as D1Database;
+    const snapshot = {
+      date: '2024-07-24', walcl: 6000, tga: 700, rrp: 100, repo: 0, netliq: 5200,
+      netliqTrend: 5100, sofrIorb: 0, hyOas: 3, dgs10: 4, dxy: 100, vix: 15,
+      bsImpulse: 'FLAT', netliqDir: 'UP', verdict: 'BULLISH', score: 60,
+      factors: {}, factorResults: {}, freshness: {}, decisionStatus: 'OK',
+      p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 1,
+    } as any;
+
+    await (snapshotDb as any).upsertOfficialSnapshot(db, snapshot, 5000);
+    expect((prepare.mock.calls as unknown as Array<[string]>)[0][0]).toContain('INSERT INTO model_snapshot_weekly');
+    expect(bind.mock.calls[0]).toContain('2024-07-22');
+
+    await (snapshotDb as any).upsertNowcastSnapshot(db, snapshot, 5000);
+    expect((prepare.mock.calls as unknown as Array<[string]>)[1][0]).toContain('INSERT INTO nowcast_snapshot_daily');
+    expect(bind.mock.calls[1]).toContain('PROVISIONAL');
+  });
+
+  it('loads official analytics exclusively from weekly storage', async () => {
+    const all = vi.fn(async () => ({ results: [] }));
+    const prepare = vi.fn(() => ({ all }));
+    const db = { prepare } as unknown as D1Database;
+
+    await loadBacktestRows(db);
+
+    const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    expect(sql).toContain('FROM model_snapshot_weekly');
+    expect(sql).not.toContain('daily_snapshot');
+    expect(sql).not.toContain('nowcast_snapshot_daily');
+  });
+
+  it('creates frequency-safe tables and migrates only WALCL-cadence legacy rows', () => {
+    expect(existsSync('migrations/0005_official_nowcast.sql')).toBe(true);
+    if (!existsSync('migrations/0005_official_nowcast.sql')) return;
+    const migration = readFileSync('migrations/0005_official_nowcast.sql', 'utf8');
+
+    expect(migration).toMatch(/CREATE TABLE IF NOT EXISTS model_snapshot_weekly/i);
+    expect(migration).toMatch(/decision_week\s+TEXT\s+NOT NULL\s+UNIQUE/i);
+    expect(migration).toMatch(/CREATE TABLE IF NOT EXISTS nowcast_snapshot_daily/i);
+    expect(migration).toMatch(/channel_status\s+TEXT\s+NOT NULL\s+DEFAULT\s+'PROVISIONAL'/i);
+    expect(migration).toMatch(/series_id\s*=\s*'WALCL'/i);
+    expect(migration).toMatch(/o\.date\s*=\s*d\.date/i);
+    expect(migration).not.toMatch(/DROP TABLE\s+daily_snapshot/i);
   });
 });
 
@@ -39,7 +100,7 @@ describe('historical snapshot consumers', () => {
     const prepare = vi.fn(() => ({ bind: vi.fn(() => ({ first })) }));
     const db = { prepare } as unknown as D1Database;
 
-    await snapshotOnOrBefore(db, '2024-05-15');
+    await officialSnapshotOnOrBefore(db, '2024-05-15');
 
     const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(sql).toContain("decision_status = 'OK'");
@@ -62,7 +123,7 @@ describe('historical snapshot consumers', () => {
     const prepare = vi.fn(() => ({ bind }));
     const db = { prepare } as unknown as D1Database;
 
-    await snapshotHistory(db, '2024-01-01', '2024-12-31');
+    await officialSnapshotHistory(db, '2024-01-01', '2024-12-31');
 
     const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(sql).toContain('decision_status');
@@ -94,7 +155,7 @@ describe('snapshot quality persistence', () => {
       p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 0.875,
     } as any;
 
-    await upsertSnapshot(db, snapshot, 5000);
+    await upsertOfficialSnapshot(db, snapshot, 5000);
 
     const preparedSql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(preparedSql).toContain('decision_status');

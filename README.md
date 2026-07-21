@@ -21,7 +21,7 @@
 flowchart LR
   FRED["FRED API（宏观序列，唯一真相源）"] -->|"cron 每 3 小时"| W["Cloudflare Worker"]
   YH["Yahoo / Stooq（实时价格，仅展示）"] -->|"每次请求"| W
-  W -->|"读写"| D1[("D1：observations / daily_snapshot")]
+  W -->|"读写"| D1[("D1：observations / official weekly / daily nowcast")]
   W --> ST["Static Assets：public/ 前端"]
   W -->|"/api/*"| U["用户浏览器"]
   ST --> U
@@ -29,7 +29,7 @@ flowchart LR
 
 - **单个 Cloudflare Worker** 托管前端(Workers Static Assets)、`/api/*` 接口和每日 `cron`。
 - **FRED = 历史与逻辑的唯一真相源**;实时价格(Yahoo 主 / Stooq 备)只贴顶部当前数字、**不入库**(口径隔离)。
-- **D1**(SQLite)存观测值与每日快照;`cron` 每 3 小时增量更新。
+- **D1**(SQLite)分别存观测值、正式周频快照与 `PROVISIONAL` 日频 nowcast；`cron` 每 3 小时增量更新 nowcast，正式历史只由全量重建写入。
 
 ---
 
@@ -162,7 +162,7 @@ public/           前端：index.html / app.js / styles.css / algorithm.html
 docs/             ALGORITHM.md（算法全文）/ ROADMAP / qeqt（分析师评审）
 scripts/          全球流动性长史研究（离线，Fed+ECB+BOJ vs SPX）
 test/             Vitest
-migrations/       D1 schema（observations + daily_snapshot）
+migrations/       D1 schema（observations + official weekly + provisional daily nowcast）
 ```
 
 ---
@@ -171,8 +171,8 @@ migrations/       D1 schema（observations + daily_snapshot）
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/snapshot` | 当前裁决 + 因子 + guidance + live_stress |
-| `GET /api/history?from=YYYY-MM-DD` | 净流动性 / SPX 历史(画图用) |
+| `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress |
+| `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
 | `GET /api/prices` | 实时价格(Yahoo/Stooq) |
 | `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |
 | `GET /api/walkforward` | 样本外三臂裁决 |

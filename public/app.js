@@ -76,20 +76,40 @@ async function main() {
     showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）');
     return;
   }
-  if (!snapRes || !snapRes.snapshot || snapRes.error === 'no_data') {
+  const active = snapRes && (snapRes.nowcast || snapRes.official);
+  if (!snapRes || !active || snapRes.error === 'no_data') {
     showBanner('暂无数据（数据库为空或正在初始化）');
     renderIngest(snapRes && snapRes.ingest);
     return;
   }
-  renderVerdict(snapRes);
-  renderGuidance(snapRes.snapshot);
-  renderScore(snapRes.snapshot);
-  renderFactorTable(snapRes);
+  const activeRes = { ...snapRes, snapshot: active };
+  renderSnapshotChannels(snapRes);
+  renderVerdict(activeRes);
+  renderGuidance(active);
+  renderScore(active);
+  renderFactorTable(activeRes);
   renderChart((histRes && histRes.rows) || []);
   renderIngest(snapRes.ingest);
-  renderProvenance(snapRes);
+  renderProvenance(activeRes);
   renderGlobal();
   setupAccordions();
+}
+
+function channelSummary(snapshot) {
+  if (!snapshot) return '暂无';
+  const verdict = VERDICT_CN[snapshot.display_verdict || snapshot.verdict] || '—';
+  return `${snapshot.date || '—'} · ${verdict}`;
+}
+
+function renderSnapshotChannels(snapRes) {
+  const official = snapRes.official;
+  const nowcast = snapRes.nowcast;
+  const officialEl = document.getElementById('official-channel-value');
+  const nowcastEl = document.getElementById('nowcast-channel-value');
+  if (officialEl) officialEl.textContent = channelSummary(official);
+  if (nowcastEl) nowcastEl.textContent = channelSummary(nowcast);
+  const current = document.getElementById('current-channel');
+  if (current) current.textContent = nowcast ? '周中预估 · PROVISIONAL' : '正式信号 · OFFICIAL';
 }
 
 function showBanner(text) {

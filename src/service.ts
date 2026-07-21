@@ -1,6 +1,16 @@
 import { fetchFredSeries } from './fred';
 import { SERIES_IDS, MAIN_CRON, RETRY_MAX_AGE_HOURS, ALERT_MIN_INTERVAL_HOURS } from './config';
-import { maxObsDate, upsertObservations, loadSeriesMap, upsertSnapshot, setMeta, getAllMeta, snapshotBefore } from './db';
+import {
+  maxObsDate,
+  upsertObservations,
+  loadSeriesMap,
+  upsertOfficialSnapshot,
+  upsertNowcastSnapshot,
+  setMeta,
+  getAllMeta,
+  officialSnapshotBefore,
+  decisionWeek,
+} from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
 import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
@@ -16,6 +26,12 @@ function eachDay(from: string, to: string): string[] {
   const out: string[] = []; const d = new Date(from + 'T00:00:00Z'); const end = new Date(to + 'T00:00:00Z');
   while (d <= end) { out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
   return out;
+}
+
+function oneDecisionPerWeek(dates: string[]): string[] {
+  const latestByWeek = new Map<string, string>();
+  for (const date of dates.slice().sort()) latestByWeek.set(decisionWeek(date), date);
+  return [...latestByWeek.values()];
 }
 
 export async function runIngest(
@@ -42,18 +58,22 @@ export async function runIngest(
     const lastWalcl = (m.WALCL ?? []).at(-1)?.date;
     let snapshots = 0;
     if (lastWalcl) {
-      // Full rebuild samples at the weekly WALCL cadence the macro data actually moves on.
-      // The daily cron (rebuildAll=false) keeps the most recent 14 days at daily granularity.
+      // Full rebuild emits one official decision per Monday-based WALCL week.
+      // The daily cron emits only provisional nowcasts for the recent window.
       const currentAsOf = now.toISOString().slice(0, 10);
       const dates = rebuildAll
-        ? (m.WALCL ?? []).map(o => o.date).filter(d => d <= lastWalcl)
+        ? oneDecisionPerWeek((m.WALCL ?? []).map(o => o.date).filter(d => d <= lastWalcl))
         : eachDay(addDays(currentAsOf, -14), currentAsOf);
-      const prior = rebuildAll ? null : await snapshotBefore(env.DB, dates[0]);
+      const prior = dates.length > 0 ? await officialSnapshotBefore(env.DB, dates[0]) : null;
       let prev: Verdict | undefined = prior?.verdict ?? undefined;
       for (const date of dates) {
         if (asOf(m.WALCL ?? [], date) == null) continue;
         const snap = computeSnapshot(m, date, prev);
-        await upsertSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
+        if (rebuildAll) {
+          await upsertOfficialSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
+        } else {
+          await upsertNowcastSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
+        }
         if (snap.verdict != null) prev = snap.verdict;
         snapshots++;
       }

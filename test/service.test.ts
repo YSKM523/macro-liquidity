@@ -4,6 +4,7 @@ import type { SeriesMap, Snapshot, Verdict } from '../src/metrics';
 const state = vi.hoisted(() => ({
   seriesMap: {} as SeriesMap,
   snapshots: new Map<string, any>(),
+  nowcasts: new Map<string, any>(),
   incompleteDates: new Set<string>(),
 }));
 
@@ -17,15 +18,23 @@ vi.mock('../src/prices', () => ({
 }));
 
 vi.mock('../src/db', () => ({
+  decisionWeek: (date: string) => {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  },
   maxObsDate: vi.fn(async () => '2024-05-29'),
   upsertObservations: vi.fn(async () => undefined),
   loadSeriesMap: vi.fn(async () => state.seriesMap),
-  upsertSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+  upsertOfficialSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
     state.snapshots.set(snapshot.date, structuredClone(snapshot));
+  }),
+  upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+    state.nowcasts.set(snapshot.date, structuredClone(snapshot));
   }),
   setMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
-  snapshotBefore: vi.fn(async (_db: unknown, date: string) => {
+  officialSnapshotBefore: vi.fn(async (_db: unknown, date: string) => {
     const priorDate = [...state.snapshots.keys()]
       .filter(candidate => candidate < date)
       .sort()
@@ -137,6 +146,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.seriesMap = makeSeriesMap();
   state.snapshots.clear();
+  state.nowcasts.clear();
   state.incompleteDates.clear();
 });
 
@@ -146,8 +156,8 @@ describe('runIngest hysteresis continuity', () => {
 
     await runIngest(env, false, new Date('2024-05-29T12:00:00.000Z'));
 
-    expect(state.snapshots.get('2024-05-15')?.verdict).toBe('BULLISH');
-    expect(state.snapshots.get('2024-05-29')?.verdict).toBe('BULLISH');
+    expect(state.nowcasts.get('2024-05-15')?.verdict).toBe('BULLISH');
+    expect(state.nowcasts.get('2024-05-29')?.verdict).toBe('BULLISH');
   });
 
   it('keeps overlapping official snapshot outputs identical after incremental rebuild', async () => {
