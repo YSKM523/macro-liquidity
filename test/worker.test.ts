@@ -28,16 +28,12 @@ vi.mock('../src/service', () => ({
 }));
 
 vi.mock('../src/db', () => ({
-  latestSnapshot: vi.fn(async () => dbState.row),
   latestOfficialSnapshot: vi.fn(async () => dbState.row),
   latestNowcastSnapshot: vi.fn(async () => dbState.nowcast),
   getAllMeta: vi.fn(async () => dbState.meta),
-  countSnapshots: vi.fn(async () => 1),
   countOfficialSnapshots: vi.fn(async () => 1),
-  snapshotHistory: vi.fn(async () => []),
   officialSnapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => []),
-  snapshotOnOrBefore: vi.fn(async () => dbState.reference),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
 }));

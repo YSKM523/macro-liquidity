@@ -76,14 +76,14 @@ async function main() {
     showBanner('⚠️ 加载失败，稍后重试（' + (e && e.message ? e.message : '网络错误') + '）');
     return;
   }
-  const active = snapRes && (snapRes.nowcast || snapRes.official);
+  const active = snapRes && selectPrimarySnapshot(snapRes.official, snapRes.nowcast);
   if (!snapRes || !active || snapRes.error === 'no_data') {
     showBanner('暂无数据（数据库为空或正在初始化）');
     renderIngest(snapRes && snapRes.ingest);
     return;
   }
   const activeRes = { ...snapRes, snapshot: active };
-  renderSnapshotChannels(snapRes);
+  renderSnapshotChannels(snapRes, active);
   renderVerdict(activeRes);
   renderGuidance(active);
   renderScore(active);
@@ -95,13 +95,19 @@ async function main() {
   setupAccordions();
 }
 
+function selectPrimarySnapshot(official, nowcast) {
+  if (!official) return nowcast;
+  if (!nowcast) return official;
+  return nowcast.date >= official.date ? nowcast : official;
+}
+
 function channelSummary(snapshot) {
   if (!snapshot) return '暂无';
   const verdict = VERDICT_CN[snapshot.display_verdict || snapshot.verdict] || '—';
   return `${snapshot.date || '—'} · ${verdict}`;
 }
 
-function renderSnapshotChannels(snapRes) {
+function renderSnapshotChannels(snapRes, active) {
   const official = snapRes.official;
   const nowcast = snapRes.nowcast;
   const officialEl = document.getElementById('official-channel-value');
@@ -109,7 +115,7 @@ function renderSnapshotChannels(snapRes) {
   if (officialEl) officialEl.textContent = channelSummary(official);
   if (nowcastEl) nowcastEl.textContent = channelSummary(nowcast);
   const current = document.getElementById('current-channel');
-  if (current) current.textContent = nowcast ? '周中预估 · PROVISIONAL' : '正式信号 · OFFICIAL';
+  if (current) current.textContent = active === nowcast ? '周中预估 · PROVISIONAL' : '正式信号 · OFFICIAL';
 }
 
 function showBanner(text) {

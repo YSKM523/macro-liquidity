@@ -160,7 +160,7 @@ describe('runIngest hysteresis continuity', () => {
     expect(state.nowcasts.get('2024-05-29')?.verdict).toBe('BULLISH');
   });
 
-  it('keeps overlapping official snapshot outputs identical after incremental rebuild', async () => {
+  it('calculates same-date incremental nowcasts consistently with a full official rebuild', async () => {
     await runIngest(env, true);
     const fields = ['score', 'verdict', 'netliqDir', 'bsImpulse', 'factors', 'reason'] as const;
     const official = new Map(
@@ -173,7 +173,7 @@ describe('runIngest hysteresis continuity', () => {
     await runIngest(env, false, new Date('2024-05-29T12:00:00.000Z'));
 
     for (const [date, expected] of official) {
-      const actual = state.snapshots.get(date);
+      const actual = state.nowcasts.get(date);
       expect(Object.fromEntries(fields.map(field => [field, actual?.[field]]))).toEqual(expected);
     }
   });

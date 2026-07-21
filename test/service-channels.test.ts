@@ -24,7 +24,6 @@ vi.mock('../src/db', () => ({
   maxObsDate: vi.fn(async () => '2024-01-10'),
   upsertObservations: vi.fn(async () => undefined),
   loadSeriesMap: vi.fn(async () => state.seriesMap),
-  upsertSnapshot: vi.fn(async () => undefined),
   upsertOfficialSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
     state.officialWrites.push(snapshot.date);
     state.official.set(snapshot.date, structuredClone(snapshot));
@@ -35,7 +34,6 @@ vi.mock('../src/db', () => ({
   }),
   setMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
-  snapshotBefore: vi.fn(async () => ({ verdict: state.priorVerdict })),
   officialSnapshotBefore: vi.fn(async () => ({ verdict: state.priorVerdict })),
 }));
 vi.mock('../src/metrics', async importOriginal => {

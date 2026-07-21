@@ -106,3 +106,47 @@ No production state was changed because nothing was deployed and remote D1 was n
 - Report/status: this documentation commit.
 - Expected final state after committing this report: clean tracked worktree on `codex/pr-05-official-nowcast`.
 - `package-lock.json` contained dependency-platform metadata churn unrelated to PR-05; it was inspected, excluded, and restored. PR-05 adds no dependency.
+
+## 12. Review fixes
+
+Resolved the PR-05 review findings without changing formulas, weights, thresholds, migration scope, remote state, or deployment state:
+
+- The frontend now selects a provisional nowcast as the primary card only when `nowcast.date >= official.date`. A newer official snapshot remains primary, while both official and nowcast summaries are still rendered and the current-channel label follows the selected primary record.
+- Removed obsolete ambiguous database API exports from the service-channel and worker test mocks.
+- Strengthened the PR-01 consistency regression to compare full-rebuild official fields with independently calculated incremental nowcast fields on the same dates, instead of re-reading unchanged official rows.
+
+Review-fix RED command:
+
+```text
+env -u NODE_OPTIONS npm test -- test/ui-channels.test.ts
+```
+
+Observed RED: exit 1; 1 test failed and 1 passed. The behavioral test delivered official `2026-07-21` and nowcast `2026-07-20`, and failed because the primary renderer received the older provisional nowcast.
+
+Review-fix focused GREEN command:
+
+```text
+env -u NODE_OPTIONS npm test -- test/ui-channels.test.ts test/service.test.ts test/service-channels.test.ts test/worker.test.ts
+```
+
+Observed GREEN: exit 0; 4/4 test files passed, 16/16 tests passed.
+
+Fresh full verification after the fixes:
+
+```text
+env -u NODE_OPTIONS npm test
+```
+
+Result: exit 0; 22/22 test files passed, 341/341 tests passed.
+
+```text
+env -u NODE_OPTIONS npx tsc --noEmit
+```
+
+Result: exit 0 with no diagnostics.
+
+```text
+git diff --check
+```
+
+Result: exit 0 with no output.
