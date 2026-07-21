@@ -24,6 +24,8 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .eyebrow{margin:0 0 4px;color:var(--panel-muted);text-transform:uppercase;letter-spacing:.14em;font-size:11px;font-weight:700}
 .tb-status{display:flex;align-items:center;justify-content:flex-end;gap:18px;flex-wrap:wrap;text-align:right}
 .tb-market{color:var(--panel-ink);font-size:13px;font-variant-numeric:tabular-nums}
+.tb-market-times{display:flex;gap:12px;font-size:11px;color:var(--panel-muted);flex-wrap:wrap}
+.tb-market-times b{color:var(--panel-ink);font-weight:600}
 .tb-meta{color:var(--panel-muted);font-size:12px}
 .tb-meta span+span::before{content:'·';margin:0 7px;color:#536582}
 .tb-live{font-size:11px;font-weight:700;color:#A9F5C8;border:1px solid #247052;background:#0D2B23;border-radius:4px;padding:1px 6px;margin-right:8px}
@@ -158,6 +160,8 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .prov-src{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.55}
 .prov-asof{font-size:12.5px;color:var(--ink);margin-top:4px;line-height:1.55}
 .prov-asof b{font-variant-numeric:tabular-nums;font-weight:700}
+.quote-prov{display:grid;grid-template-columns:38px repeat(4,minmax(0,1fr)) auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line);font-size:10px}
+.quote-prov:last-child{border-bottom:0}.quote-prov span{min-width:0}.quote-quality{font-weight:700}.quote-quality.ok{color:var(--green)}.quote-quality.stale,.quote-quality.divergent,.quote-quality.failed{color:var(--amber)}
 
 /* ── Algorithm subpage (markdown prose) ─────────────────────────────────── */
 .nav-link{color:var(--accent);text-decoration:none;font-size:14px;font-weight:600}

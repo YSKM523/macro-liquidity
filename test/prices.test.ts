@@ -1,22 +1,272 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeTnx, parseYahooQuote, parseStooqCsv, parseYahooCloses, parseYahooDailyObs, spliceSeries, evaluateLiveStress } from '../src/prices';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { normalizeTnx, parseYahooQuote, parseStooqCsv, parseYahooCloses, parseYahooDailyObs, spliceSeries, evaluateLiveStress, fetchLivePrices, fetchStressSeries, fetchDxyDaily, YahooMarketDataProvider } from '../src/prices';
 import type { StressSeries } from '../src/prices';
 
 describe('price parsing', () => {
+  it('Yahoo quote preserves provider market time separately from fetch time', () => {
+    const fetchedAt = '2026-07-19T12:00:00.000Z';
+    const json = {
+      chart: {
+        result: [{
+          meta: {
+            regularMarketPrice: 5123.45,
+            regularMarketTime: 1784318400,
+            marketState: 'CLOSED',
+            exchangeDataDelayedBy: 15,
+          },
+        }],
+      },
+    };
+
+    expect((parseYahooQuote as any)(json, fetchedAt)).toEqual({
+      value: 5123.45,
+      sourceTimestamp: '2026-07-17T20:00:00.000Z',
+      fetchedAt,
+      marketState: 'CLOSED',
+      isDelayed: true,
+      sourceName: 'Yahoo Finance',
+    });
+  });
+
   it('normalizeTnx handles both 43.0 and 4.30 conventions', () => {
     expect(normalizeTnx(43.0)).toBeCloseTo(4.30);
     expect(normalizeTnx(4.30)).toBeCloseTo(4.30);
   });
   it('parseYahooQuote reads regularMarketPrice', () => {
-    const json = { chart: { result: [{ meta: { regularMarketPrice: 5123.45 } }] } };
-    expect(parseYahooQuote(json)).toBeCloseTo(5123.45);
+    const json = { chart: { result: [{ meta: { regularMarketPrice: 5123.45, regularMarketTime: 1784318400 } }] } };
+    expect(parseYahooQuote(json, '2026-07-19T12:00:00.000Z')?.value).toBeCloseTo(5123.45);
   });
   it('parseYahooQuote returns null on error shape', () => {
-    expect(parseYahooQuote({ chart: { error: 'x', result: null } })).toBeNull();
+    expect(parseYahooQuote({ chart: { error: 'x', result: null } }, '2026-07-19T12:00:00.000Z')).toBeNull();
   });
   it('parseStooqCsv reads close column', () => {
     const csv = 'Symbol,Date,Time,Open,High,Low,Close,Volume\n^SPX,2024-06-18,22:00:00,5100,5130,5090,5123.45,0\n';
-    expect(parseStooqCsv(csv)).toBeCloseTo(5123.45);
+    expect((parseStooqCsv as any)(csv, '2024-06-19T01:00:00.000Z')).toEqual({
+      value: 5123.45,
+      sourceTimestamp: '2024-06-18T22:00:00.000Z',
+      fetchedAt: '2024-06-19T01:00:00.000Z',
+      marketState: 'UNKNOWN',
+      isDelayed: true,
+      sourceName: 'Stooq',
+    });
+  });
+});
+
+function yahooChart(
+  value: number,
+  sourceSeconds: number,
+  closes = [100, 101, 102, 103, 104, 105],
+) {
+  return {
+    chart: {
+      result: [{
+        meta: {
+          regularMarketPrice: value,
+          regularMarketTime: sourceSeconds,
+          marketState: 'CLOSED',
+          exchangeDataDelayedBy: 0,
+        },
+        timestamp: closes.map((_, i) => sourceSeconds - (closes.length - 1 - i) * 86400),
+        indicators: { quote: [{ close: closes }] },
+      }],
+    },
+  };
+}
+
+function stooqQuote(symbol: string, date: string, time: string, value: number) {
+  return `Symbol,Date,Time,Open,High,Low,Close,Volume\n${symbol},${date},${time},${value},${value},${value},${value},0\n`;
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('provider fallback and provenance', () => {
+  it('uses the timestamp paired with the last valid Yahoo history close', async () => {
+    const fetchFn = vi.fn(async () => Response.json({ chart: { result: [{
+      timestamp: [1784232000, 1784318400],
+      indicators: { quote: [{ close: [100, null] }] },
+      meta: { marketState: 'CLOSED' },
+    }] } }));
+    const provider = new YahooMarketDataProvider(fetchFn as any);
+
+    const result = await provider.fetchHistory({
+      symbol: '^GSPC', fetchedAt: '2026-07-17T22:00:00.000Z',
+    });
+
+    expect(result.sourceTimestamp).toBe('2026-07-16T20:00:00.000Z');
+    expect(result.points).toEqual([{ date: '2026-07-16', value: 100 }]);
+  });
+
+  it('does not compare quote levels from different market dates', async () => {
+    const fetchedAt = '2026-07-20T12:00:00.000Z';
+    const yahooFriday = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('%5EGSPC') || url.includes('^GSPC')) return Response.json(yahooChart(6000, yahooFriday));
+      if (url.includes('stooq.com') && url.includes('%5Espx')) {
+        return new Response(stooqQuote('^SPX', '2026-07-16', '20:00:00', 5000));
+      }
+      if (url.includes('stooq.com')) return new Response('', { status: 503 });
+      return Response.json(yahooChart(url.includes('TNX') ? 43 : 100, yahooFriday));
+    }));
+
+    const result = await fetchLivePrices(fetchedAt);
+
+    expect(result.quotes.spx.status).toBe('OK');
+    expect(result.spx).toBe(6000);
+  });
+
+  it('keeps a Friday market timestamp when fetched on Sunday', async () => {
+    const fetchedAt = '2026-07-19T12:00:00.000Z';
+    const friday = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('stooq.com')) return new Response('', { status: 503 });
+      return Response.json(yahooChart(url.includes('TNX') ? 43 : 100, friday));
+    }));
+
+    const result = await fetchLivePrices(fetchedAt);
+
+    expect((result as any).fetchedAt).toBe(fetchedAt);
+    expect((result as any).asofSemantics).toBe('FETCH_TIME');
+    expect((result as any).quotes.spx.sourceTimestamp).toBe('2026-07-17T20:00:00.000Z');
+    expect((result as any).quotes.spx.status).toBe('OK');
+  });
+
+  it('uses named fallbacks for both DXY and 10Y when Yahoo fails', async () => {
+    const fetchedAt = '2026-07-17T22:00:00.000Z';
+    const friday = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('DX-Y.NYB') || url.includes('%5ETNX') || url.includes('^TNX')) {
+        return new Response('', { status: 503 });
+      }
+      if (url.includes('stooq.com') && url.includes('dx.f')) {
+        return new Response(stooqQuote('DX.F', '2026-07-17', '20:00:00', 98.2));
+      }
+      if (url.includes('api.stlouisfed.org') && url.includes('DGS10')) {
+        return Response.json({ observations: [{ date: '2026-07-17', value: '4.25' }] });
+      }
+      if (url.includes('stooq.com')) return new Response('', { status: 503 });
+      return Response.json(yahooChart(100, friday));
+    }));
+
+    const result = await (fetchLivePrices as any)(fetchedAt, { fredApiKey: 'test' });
+
+    expect(result.dxy).toBeCloseTo(98.2);
+    expect(result.us10y).toBeCloseTo(4.25);
+    expect(result.quotes.dxy).toMatchObject({ status: 'OK', sourceName: 'Stooq', fallbackUsed: true });
+    expect(result.quotes.us10y).toMatchObject({ status: 'OK', sourceName: 'FRED', fallbackUsed: true });
+  });
+
+  it('marks a comparable primary/secondary quote disagreement as SOURCE_DIVERGENCE', async () => {
+    const fetchedAt = '2026-07-17T22:00:00.000Z';
+    const friday = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('%5EGSPC') || url.includes('^GSPC')) return Response.json(yahooChart(6000, friday));
+      if (url.includes('stooq.com') && url.includes('%5Espx')) {
+        return new Response(stooqQuote('^SPX', '2026-07-17', '20:00:00', 5000));
+      }
+      if (url.includes('stooq.com')) return new Response('', { status: 503 });
+      return Response.json(yahooChart(url.includes('TNX') ? 43 : 100, friday));
+    }));
+
+    const result = await fetchLivePrices(fetchedAt);
+
+    expect((result as any).quotes.spx).toMatchObject({
+      status: 'DIVERGENT', reasonCode: 'SOURCE_DIVERGENCE', fallbackUsed: false,
+    });
+    expect(result.spx).toBeNull();
+  });
+
+  it('uses history fallbacks and keeps live stress available', async () => {
+    const fetchedAt = '2026-07-17T22:00:00.000Z';
+    const friday = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('query1.finance.yahoo.com')) return new Response('', { status: 503 });
+      if (url.includes('api.stlouisfed.org')) {
+        return Response.json({ observations: [
+          { date: '2026-07-10', value: '4.00' }, { date: '2026-07-11', value: '4.02' },
+          { date: '2026-07-12', value: '4.04' }, { date: '2026-07-13', value: '4.06' },
+          { date: '2026-07-16', value: '4.08' }, { date: '2026-07-17', value: '4.10' },
+        ] });
+      }
+      if (url.includes('stooq.com')) {
+        const symbol = url.includes('vix') ? '^VIX' : url.includes('dx.f') ? 'DX.F' : '^SPX';
+        const base = symbol === '^VIX' ? 15 : symbol === 'DX.F' ? 98 : 5000;
+        const rows = Array.from({ length: 6 }, (_, i) => `${symbol},2026-07-${String(10 + i).padStart(2, '0')},20:00:00,${base+i},${base+i},${base+i},${base+i},0`).join('\n');
+        return new Response(`Symbol,Date,Time,Open,High,Low,Close,Volume\n${rows}\n`);
+      }
+      return Response.json(yahooChart(100, friday));
+    }));
+
+    const series = await (fetchStressSeries as any)({ fetchedAt, fredApiKey: 'test' });
+    const stress = evaluateLiveStress(series);
+
+    expect(stress.status).not.toBe('UNKNOWN');
+    expect((series as any).inputs.dxy).toMatchObject({ sourceName: 'Stooq', fallbackUsed: true, status: 'OK' });
+    expect((series as any).inputs.us10y).toMatchObject({ sourceName: 'FRED', fallbackUsed: true, status: 'OK' });
+  });
+
+  it('compares histories only on their shared dates rather than unrelated provider ranges', async () => {
+    const fetchedAt = '2026-07-17T22:00:00.000Z';
+    const end = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    const closes = [100, 101, 102, 103, 104, 105];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('api.stlouisfed.org')) return new Response('', { status: 503 });
+      if (url.includes('query1.finance.yahoo.com')) return Response.json(yahooChart(105, end, closes));
+      const symbol = url.includes('vix') ? '^VIX' : url.includes('dx.f') ? 'DX.F' : '^SPX';
+      const unrelated = `${symbol},2020-01-02,20:00:00,1,1,1,1,0`;
+      const shared = closes.map((value, i) =>
+        `${symbol},2026-07-${String(12 + i).padStart(2, '0')},20:00:00,${value},${value},${value},${value},0`,
+      ).join('\n');
+      return new Response(`Symbol,Date,Time,Open,High,Low,Close,Volume\n${unrelated}\n${shared}\n`);
+    }));
+
+    const series = await (fetchStressSeries as any)({ fetchedAt });
+
+    expect(series.inputs.spx.status).toBe('OK');
+    expect(series.inputs.dxy.status).toBe('OK');
+    expect(series.spx.at(-1)).toBe(105);
+  });
+
+  it.each(['FAILED', 'STALE', 'DIVERGENT'] as const)('fails stress closed when a required history is %s', (status) => {
+    const complete: any = {
+      spx: [5000, 5010, 5020, 5030, 5040, 5050],
+      vix: [14, 15, 14, 15, 14, 15],
+      us10y: [4.2, 4.2, 4.2, 4.2, 4.2, 4.2],
+      dxy: [103, 103, 103, 103, 103, 103],
+      inputs: {
+        spx: { status: 'OK' }, vix: { status: 'OK' }, us10y: { status: 'OK' },
+        dxy: { status, reasonCode: status === 'DIVERGENT' ? 'SOURCE_DIVERGENCE' : undefined },
+      },
+    };
+
+    const result = evaluateLiveStress(complete);
+
+    expect(result.status).toBe('UNKNOWN');
+    expect(result.unavailable.join(' ')).toContain(status);
+  });
+
+  it('extends DXY daily through Stooq without changing point scale', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('yahoo')) return new Response('', { status: 503 });
+      return new Response(
+        'Symbol,Date,Time,Open,High,Low,Close,Volume\n'
+        + 'DX.F,2026-07-16,20:00:00,98,98,98,98,0\n'
+        + 'DX.F,2026-07-17,20:00:00,99,99,99,99,0\n',
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const points = await (fetchDxyDaily as any)({ fetchedAt: '2026-07-17T22:00:00.000Z' });
+
+    expect(points).toEqual([{ date: '2026-07-16', value: 98 }, { date: '2026-07-17', value: 99 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([input]) => /DX-Y\.NYB|dx\.f/.test(String(input)))).toBe(true);
   });
 });
 

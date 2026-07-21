@@ -254,6 +254,41 @@ describe('/api/snapshot live stress status', () => {
   });
 });
 
+describe('/api/prices provider metadata', () => {
+  it('keeps numeric fields and exposes source/fetch/provider/fallback metadata', async () => {
+    const sourceSeconds = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('DX-Y.NYB') || url.includes('%5ETNX') || url.includes('^TNX')) {
+        return new Response('', { status: 503 });
+      }
+      if (url.includes('stooq.com') && url.includes('dx.f')) {
+        return new Response('Symbol,Date,Time,Open,High,Low,Close,Volume\nDX.F,2026-07-17,20:00:00,98.2,98.2,98.2,98.2,0\n');
+      }
+      if (url.includes('api.stlouisfed.org') && url.includes('DGS10')) {
+        return Response.json({ observations: [{ date: '2026-07-17', value: '4.25' }] });
+      }
+      if (url.includes('stooq.com')) return new Response('', { status: 503 });
+      return Response.json({ chart: { result: [{ meta: {
+        regularMarketPrice: 5000, regularMarketTime: sourceSeconds,
+        marketState: 'CLOSED', exchangeDataDelayedBy: 0,
+      } }] } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await worker.fetch(new Request('https://example.test/api/prices'), env);
+    const body = await response.json() as any;
+
+    expect(body).toMatchObject({ dxy: 98.2, us10y: 4.25, asofSemantics: 'FETCH_TIME' });
+    expect(body.quotes.dxy).toMatchObject({ sourceName: 'Stooq', fallbackUsed: true, status: 'OK' });
+    expect(body.quotes.us10y).toMatchObject({ sourceName: 'FRED', fallbackUsed: true, status: 'OK' });
+    expect(body.quotes.spx).toMatchObject({
+      sourceTimestamp: '2026-07-17T20:00:00.000Z', marketState: 'CLOSED', sourceName: 'Yahoo Finance',
+    });
+    expect(body.quotes.spx.fetchedAt).not.toBe(body.quotes.spx.sourceTimestamp);
+  });
+});
+
 describe('/api/health persisted decision quality', () => {
   it('returns 503 for a fresh successful ingest whose latest snapshot is incomplete', async () => {
     dbState.row = { ...dbState.row, decision_status: 'DATA_INCOMPLETE', score: null, verdict: null };

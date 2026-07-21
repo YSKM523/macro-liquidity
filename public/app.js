@@ -196,6 +196,11 @@ function renderVerdict(res) {
   const live = res.live || {};
   document.getElementById('asof').textContent =
     `SPX ${fmt(live.spx)} · VIX ${fmt(live.vix)} · DXY ${fmt(live.dxy)} · 10Y ${fmt(live.us10y)}%`;
+  const quoteTimes = Object.values(live.quotes || {}).map(q => q && q.sourceTimestamp).filter(Boolean).sort();
+  const marketSourceTime = document.getElementById('market-source-time');
+  const marketFetchTime = document.getElementById('market-fetch-time');
+  if (marketSourceTime) marketSourceTime.textContent = fmtTs(quoteTimes.at(-1));
+  if (marketFetchTime) marketFetchTime.textContent = fmtTs(live.fetchedAt);
 
   // Staleness: days since snapshot.date
   const snapshotDate = s.date || '';
@@ -289,6 +294,26 @@ function provLayer(tag, title, src, asof) {
     + `<div class="prov-src">${src}</div><div class="prov-asof">${asof}</div></div>`;
 }
 
+function quoteQuality(quote) {
+  if (!quote) return 'FAILED';
+  if (quote.status === 'DIVERGENT') return `DIVERGENT · ${quote.reasonCode || 'SOURCE_DIVERGENCE'}`;
+  if (quote.fallbackUsed) return `${quote.status} · FALLBACK`;
+  return quote.status || 'FAILED';
+}
+
+function quoteRows(live) {
+  const labels = { spx: 'SPX', vix: 'VIX', dxy: 'DXY', us10y: '10Y' };
+  return Object.entries(labels).map(([key, label]) => {
+    const quote = (live.quotes || {})[key] || {};
+    return `<div class="quote-prov"><b>${label}</b>`
+      + `<span>行情时间 ${fmtTs(quote.sourceTimestamp)}</span>`
+      + `<span>抓取时间 ${fmtTs(quote.fetchedAt || live.fetchedAt)}</span>`
+      + `<span>数据源 ${quote.sourceName || '—'}${quote.fallbackUsed ? '（备用源）' : ''}</span>`
+      + `<span>市场状态 ${quote.marketState || 'UNKNOWN'}${quote.isDelayed ? ' · 延迟' : ''}</span>`
+      + `<span class="quote-quality ${String(quote.status || 'FAILED').toLowerCase()}">${quoteQuality(quote)}</span></div>`;
+  }).join('');
+}
+
 function renderProvenance(res) {
   const card = document.getElementById('provenance-card');
   const body = document.getElementById('provenance-body');
@@ -296,7 +321,7 @@ function renderProvenance(res) {
   const s = res.snapshot || {}, live = res.live || {}, ingest = res.ingest || {};
   const macroDate = s.date || '—';
   const ingestAt = fmtTs(ingest.ingest_at);
-  const liveAt = fmtTs(live.asof);
+  const liveAt = fmtTs(live.fetchedAt);
   const provisional = res.snapshotChannel === 'nowcast';
   const macroTag = provisional ? 'provisional' : 'weekly';
   const macroTitle = provisional ? '宏观模型 · 周中预估' : '宏观模型 · 正式信号';
@@ -308,11 +333,11 @@ function renderProvenance(res) {
       '来源:FRED · 美联储 H.4.1 资产负债表(WALCL)、财政部 TGA、逆回购 RRP、SOFR−IORB、HY OAS、10Y(DGS10)、广义美元(DTWEXBGS)',
       `数据截至 <b>${macroDate}</b>　·　最近摄取 <b>${ingestAt}</b>　·　${macroCadence}`)
     + provLayer('live', '实时行情 · 顶部 SPX / VIX / DXY / 10Y',
-      '来源:Yahoo Finance(^GSPC · ^VIX · DX-Y.NYB · ^TNX)',
-      `抓取于 <b>${liveAt}</b>　·　每次打开页面实时抓取`)
+      quoteRows(live),
+      `本次抓取 <b>${liveAt}</b>　·　状态为 FALLBACK / STALE / DIVERGENT 时显式降级`)
     + provLayer('live', '实时风险覆盖 · stress / 判定降级',
-      '来源:Yahoo Finance 日线 · 近 5 日动量(SPX / VIX / 10Y / 美元)',
-      `计算于 <b>${liveAt}</b>　·　与行情同次抓取`);
+      quoteRows({ quotes: (s.live_stress || {}).inputs || {}, fetchedAt: live.fetchedAt }),
+      `计算抓取时间 <b>${liveAt}</b>　·　任一必需输入 FAILED / STALE / DIVERGENT 时风险层关闭`);
   card.style.display = '';
 }
 

@@ -121,8 +121,8 @@ export default {
       const [officialRow, nowcastRow, live, stress, meta, ingestRuns] = await Promise.all([
         latestOfficialSnapshot(env.DB),
         latestNowcastSnapshot(env.DB),
-        fetchLivePrices(new Date().toISOString()),
-        fetchStressSeries().then(s => evaluateLiveStress(s)),
+        fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }),
+        fetchStressSeries({ fredApiKey: env.FRED_API_KEY }).then(s => evaluateLiveStress(s)),
         getAllMeta(env.DB),
         ingestRunSummary(env.DB),
       ]);
@@ -194,7 +194,7 @@ export default {
       return json({ rows: await officialSnapshotHistory(env.DB, from, to) });
     }
     if (p === '/api/prices') {
-      return json(await fetchLivePrices(new Date().toISOString()));
+      return json(await fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }));
     }
     if (p === '/api/backtest') {
       const rows = await loadBacktestRows(env.DB);

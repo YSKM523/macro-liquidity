@@ -72,6 +72,26 @@ export const STRESS = {
 } as const;
 export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade (strong regime beats short noise)
 
+// Market-data quality gates only. These tolerances decide whether two providers
+// agree and whether a source observation is usable; they do not affect Champion
+// factor scores, verdict bands, exposure tiers, or the stress trigger levels.
+export const MARKET_DATA_QUALITY = {
+  quoteMaxAgeBusinessDays: 2,
+  historyMaxAgeBusinessDays: 4,
+  quoteRelativeTolerance: {
+    spx: 0.01,
+    vix: 0.05,
+    dxy: 0.02,
+    us10y: 0.03,
+  },
+  historyReturnTolerance: {
+    spx: 0.01,
+    vix: 0.05,
+    dxy: 0.01,
+    us10y: 0.10,
+  },
+} as const;
+
 // cron 每 3h 跑一次；上次成功摄取超过这个小时数 → 判为不健康(容忍漏 1 拍)。
 export const INGEST_STALE_HOURS = 6;
 

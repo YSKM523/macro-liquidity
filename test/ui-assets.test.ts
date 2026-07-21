@@ -127,8 +127,24 @@ describe('static UI assets', () => {
     expect(js).toContain('实时风险层不可用');
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
-    expect(html).toContain('/styles.css?v=0721c');
-    expect(html).toContain('/app.js?v=0721d');
+    expect(html).toContain('/styles.css?v=0721d');
+    expect(html).toContain('/app.js?v=0721e');
+  });
+
+  it('renders market time separately from fetch and provider quality metadata', () => {
+    const html = read('public/index.html');
+    const js = read('public/app.js');
+
+    expect(html).toContain('行情时间');
+    expect(html).toContain('抓取时间');
+    expect(js).toContain('sourceTimestamp');
+    expect(js).toContain('fetchedAt');
+    expect(js).toContain('marketState');
+    expect(js).toContain('sourceName');
+    expect(js).toContain('fallbackUsed');
+    expect(js).toContain("status === 'DIVERGENT'");
+    expect(js).toContain('SOURCE_DIVERGENCE');
+    expect(js).not.toContain('行情同次抓取');
   });
 
   it('sizes charts from their rendered container', () => {

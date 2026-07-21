@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>美股流动性看板</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/styles.css?v=0721c" />
+  <link rel="stylesheet" href="/styles.css?v=0721d" />
 </head>
 <body class="dashboard-page">
   <main class="command-shell">
@@ -18,7 +18,8 @@
         <a class="nav-link" href="/algorithm">算法说明 →</a>
       </div>
       <div class="tb-status">
-        <div class="tb-market"><span class="tb-live">实时</span><span id="asof">—</span></div>
+        <div class="tb-market"><span class="tb-live">行情</span><span id="asof">—</span></div>
+        <div class="tb-market-times"><span>行情时间 <b id="market-source-time">—</b></span><span>抓取时间 <b id="market-fetch-time">—</b></span></div>
         <div class="tb-meta" title="顶部行情为实时(每次打开抓取);下方为 FRED 宏观数据 —— 核心的美联储资产负债表(WALCL)按周更新,通常周四出 H.4.1">
           <span id="data-staleness">—</span>
           <span id="data-coverage">—</span>
@@ -95,7 +96,7 @@
         <section class="card collapsible" id="provenance-card">
           <h2>数据来源与时效 · 各层最新时间</h2>
           <div id="provenance-body"></div>
-          <p class="muted">时间为你本地时区;时间戳取自 API 真值(宏观摄取时刻 last_ingest_at、行情抓取时刻 asof),非估算。</p>
+          <p class="muted">时间为你本地时区；行情时间来自 provider 的市场观测，抓取时间来自 fetchedAt，二者不互相替代。</p>
         </section>
       </div>
 
@@ -159,6 +160,6 @@
   </main>
 
   <script src="/vendor/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=0721d"></script>
+  <script src="/app.js?v=0721e"></script>
 </body>
 </html>
