@@ -14,7 +14,7 @@
 | PR-02 | 已完成 | `ce7da2b` | 决策状态机与 45/50/55 边界统一 |
 | PR-03 | 已完成 | `1c53681` | 实时 Stress 改为 NORMAL/STRESSED/UNKNOWN 并 fail closed |
 | PR-04 | 已完成 | `6367de0`–`19ceabc` | 独立 freshness、FactorResult、DATA_INCOMPLETE 与质量传播 |
-| PR-05 | 已完成 | 本分支 PR-05 提交 | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
+| PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
 | PR-06～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
