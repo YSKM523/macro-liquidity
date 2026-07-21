@@ -1722,10 +1722,13 @@ feat: atomic ingest runs and staging activation
 - [x] `ingest_series_attempts` 与 run-scoped `staging_observations`
 - [x] 单个 ACTIVE run 与 `observations` 兼容生产视图的原子激活
 - [x] 带过期时间、owner-scoped release 的数据库并发锁
+- [x] 租约覆盖激活后的读取、外部 DXY、每次 snapshot 写入、metadata 与最终化
 - [x] 手动 HTTP 409 与 scheduled typed conflict
-- [x] fetch / validation / activation 故障回滚测试
+- [x] fetch 前创建 series attempt，fetch / 结构校验 / staging 失败均持久化 FAILED
+- [x] batch 内数据库 guard 阻止缺失或非 RUNNING target 的 promotion / ACTIVE demotion
 - [x] 激活后才重建快照，且 full→official、incremental→nowcast 不变
-- [x] health / snapshot API 暴露 ACTIVE 与最近 FAILED run
+- [x] ACTIVE run 持久化 snapshot PENDING / SUCCEEDED / FAILED、完成时间、错误与数量
+- [x] health / snapshot API 暴露 ACTIVE、最近 FAILED run 与 snapshot outcome
 - [x] 本地 migration、全量测试与 TypeScript strict 验证
 
 ---

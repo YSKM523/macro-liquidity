@@ -20,10 +20,15 @@ import {
   releaseIngestLock,
   renewIngestLock,
   createIngestRun,
+  startSeriesAttempt,
   stageSeriesAttempt,
+  failSeriesAttempt,
+  validateSeriesRows,
   validateIngestRun,
   activateIngestRun,
   failIngestRun,
+  completeIngestSnapshots,
+  failIngestSnapshots,
 } from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
@@ -79,11 +84,18 @@ export async function runIngest(
 
   let prevMeta: Record<string, string> = {};
   let runCreated = false;
+  let activated = false;
+  let snapshots = 0;
   let failedStep = 'initialization';
   let failedSeries: string | undefined;
   try {
     prevMeta = await getAllMeta(env.DB);
+    await renewOwnedLease(env.DB, runId);
+    failedStep = 'metadata';
+    await renewOwnedLease(env.DB, runId);
     await setMeta(env.DB, 'last_attempt_at', nowIso);
+    failedStep = 'initialization';
+    await renewOwnedLease(env.DB, runId);
     await createIngestRun(env.DB, runId, rebuildAll ? 'FULL' : 'INCREMENTAL', nowIso);
     runCreated = true;
 
@@ -91,15 +103,31 @@ export async function runIngest(
     let updated = 0;
     for (const id of SERIES_IDS) {
       failedSeries = id;
-      failedStep = 'fetch';
-      const last = await maxObsDate(env.DB, id);
-      const from = last ?? env.START_DATE;
-      const rows = await fetchFredSeries(id, from, env.FRED_API_KEY);
-      failedStep = 'staging';
-      await stageSeriesAttempt(env.DB, runId, id, rows, nowIso);
-      updated += rows.length;
-      failedStep = 'lock';
+      failedStep = 'series-read';
       await renewOwnedLease(env.DB, runId);
+      const last = await maxObsDate(env.DB, id);
+      await renewOwnedLease(env.DB, runId);
+      const from = last ?? env.START_DATE;
+      await startSeriesAttempt(env.DB, runId, id, new Date().toISOString());
+      try {
+        failedStep = 'fetch';
+        const rows = await fetchFredSeries(id, from, env.FRED_API_KEY);
+        failedStep = 'lock';
+        await renewOwnedLease(env.DB, runId);
+        failedStep = 'structural';
+        validateSeriesRows(id, rows);
+        failedStep = 'staging';
+        await stageSeriesAttempt(env.DB, runId, id, rows);
+        updated += rows.length;
+      } catch (error) {
+        const originalMessage = String((error as any)?.message ?? error);
+        try {
+          await failSeriesAttempt(env.DB, runId, id, originalMessage, new Date().toISOString());
+        } catch {
+          // Attempt auditing is best-effort here; never replace the operation failure.
+        }
+        throw error;
+      }
     }
     failedSeries = undefined;
     failedStep = 'validation';
@@ -109,15 +137,21 @@ export async function runIngest(
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     failedStep = 'activation';
-    await activateIngestRun(env.DB, runId, nowIso);
+    await activateIngestRun(env.DB, runId, new Date().toISOString());
+    activated = true;
 
     // 3) Rebuild snapshots only from the newly activated production view.
-    failedStep = 'snapshot';
+    failedStep = 'snapshot-read';
     const m = await loadSeriesMap(env.DB);
+    failedStep = 'lock';
+    await renewOwnedLease(env.DB, runId);
     // DTWEXBGS 官方发布滞后约一周;用 DXY 日线按比例链到末端参与打分(仅内存,行情失败则跳过)。
-    m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], await fetchDxyDaily());
+    failedStep = 'dxy-fetch';
+    const dxy = await fetchDxyDaily();
+    failedStep = 'lock';
+    await renewOwnedLease(env.DB, runId);
+    m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], dxy);
     const lastWalcl = (m.WALCL ?? []).at(-1)?.date;
-    let snapshots = 0;
     if (lastWalcl) {
       // Full rebuild emits one official decision per Monday-based WALCL week.
       // The daily cron emits only provisional nowcasts for the recent window.
@@ -128,15 +162,24 @@ export async function runIngest(
       let prev: Verdict | undefined;
       let officialAnchors = new Map<string, Verdict>();
       if (!rebuildAll && dates.length > 0) {
+        failedStep = 'snapshot-read';
         const prior = await officialSnapshotBefore(env.DB, dates[0]);
+        failedStep = 'lock';
+        await renewOwnedLease(env.DB, runId);
         prev = prior?.verdict ?? undefined;
+        failedStep = 'snapshot-read';
         const anchors = await officialVerdictAnchors(env.DB, dates[0], dates.at(-1)!);
+        failedStep = 'lock';
+        await renewOwnedLease(env.DB, runId);
         officialAnchors = new Map(anchors.map(anchor => [anchor.date, anchor.verdict]));
       }
       for (const date of dates) {
         if (asOf(m.WALCL ?? [], date) == null) continue;
         if (!rebuildAll) prev = officialAnchors.get(date) ?? prev;
         const snap = computeSnapshot(m, date, prev);
+        failedStep = 'lock';
+        await renewOwnedLease(env.DB, runId);
+        failedStep = 'snapshot';
         if (rebuildAll) {
           await upsertOfficialSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
         } else {
@@ -146,38 +189,77 @@ export async function runIngest(
         snapshots++;
       }
     }
-    await setMeta(env.DB, 'last_ingest_at', nowIso);
-    await setMeta(env.DB, 'last_status', 'ok');
-    await setMeta(env.DB, 'last_error', '');
-    await setMeta(env.DB, 'last_updated', String(updated));
-    await setMeta(env.DB, 'last_snapshots', String(snapshots));
+    failedStep = 'metadata';
+    const successAt = new Date().toISOString();
+    const successMeta: Array<[string, string]> = [
+      ['last_ingest_at', successAt],
+      ['last_status', 'ok'],
+      ['last_error', ''],
+      ['last_updated', String(updated)],
+      ['last_snapshots', String(snapshots)],
+    ];
+    for (const [key, value] of successMeta) {
+      await renewOwnedLease(env.DB, runId);
+      failedStep = 'metadata';
+      await setMeta(env.DB, key, value);
+    }
+    failedStep = 'lock';
+    await renewOwnedLease(env.DB, runId);
+    failedStep = 'snapshot-finalization';
+    await completeIngestSnapshots(env.DB, runId, snapshots, new Date().toISOString());
     return { status: 'active', runId, updated, snapshots };
   } catch (e) {
     const errMsg = String((e as any)?.message ?? e);
     if (runCreated) {
       try {
-        await failIngestRun(env.DB, runId, {
-          step: failedStep,
-          seriesId: failedSeries,
-          error: errMsg,
-        }, nowIso);
+        if (activated) {
+          await failIngestSnapshots(env.DB, runId, {
+            step: failedStep,
+            error: errMsg,
+            snapshotCount: snapshots,
+          }, new Date().toISOString());
+        } else {
+          await failIngestRun(env.DB, runId, {
+            step: failedStep,
+            seriesId: failedSeries,
+            error: errMsg,
+          }, new Date().toISOString());
+        }
       } catch {
         // Preserve the original failure; the lease expiry prevents a permanent lock.
       }
     }
-    await setMeta(env.DB, 'last_status', 'error');
-    await setMeta(env.DB, 'last_error', errMsg);
-    if (shouldAlert({
-      prevStatus: prevMeta.last_status ?? null,
-      attemptOk: false,
-      lastAlertAt: prevMeta.last_alert_at ?? null,
-      now: nowIso,
-      minIntervalHours: ALERT_MIN_INTERVAL_HOURS,
-    })) {
-      const sent = await sendAlertEmail(env, buildAlertEmail({
-        error: errMsg, lastIngestAt: prevMeta.last_ingest_at ?? null, now: nowIso,
-      }));
-      if (sent) await setMeta(env.DB, 'last_alert_at', nowIso);
+    let stillOwnsLease = false;
+    try {
+      await renewOwnedLease(env.DB, runId);
+      stillOwnsLease = true;
+    } catch {
+      // A former owner must not overwrite the current owner's global health metadata.
+    }
+    if (stillOwnsLease) {
+      try {
+        await renewOwnedLease(env.DB, runId);
+        await setMeta(env.DB, 'last_status', 'error');
+        await renewOwnedLease(env.DB, runId);
+        await setMeta(env.DB, 'last_error', errMsg);
+        if (shouldAlert({
+          prevStatus: prevMeta.last_status ?? null,
+          attemptOk: false,
+          lastAlertAt: prevMeta.last_alert_at ?? null,
+          now: nowIso,
+          minIntervalHours: ALERT_MIN_INTERVAL_HOURS,
+        })) {
+          const sent = await sendAlertEmail(env, buildAlertEmail({
+            error: errMsg, lastIngestAt: prevMeta.last_ingest_at ?? null, now: nowIso,
+          }));
+          if (sent) {
+            await renewOwnedLease(env.DB, runId);
+            await setMeta(env.DB, 'last_alert_at', new Date().toISOString());
+          }
+        }
+      } catch {
+        // Preserve the original ingest failure if health metadata or alert auditing fails.
+      }
     }
     throw e;
   } finally {

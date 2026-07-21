@@ -4,11 +4,21 @@ import type { Obs, SeriesMap, Snapshot } from '../src/metrics';
 
 const state = vi.hoisted(() => ({
   fetchFailureSeries: null as string | null,
+  invalidSeries: null as string | null,
+  stagingFailureSeries: null as string | null,
+  attemptAuditFailure: false,
   activationFailure: false,
   lockAcquired: true,
   leaseRenewed: true,
+  leaseFailureAfterEvent: null as string | null,
+  snapshotWriteFailure: false,
+  metaFailureKey: null as string | null,
   activeSeries: new Set<string>(),
   staged: [] as Array<{ seriesId: string; rows: Obs[] }>,
+  attemptFailures: [] as Array<{ seriesId: string; error: string; completedAt: string }>,
+  snapshotFailures: [] as Array<{ step: string; error: string; completedAt: string }>,
+  activationCompletedAt: null as string | null,
+  runFailureCompletedAt: null as string | null,
   events: [] as string[],
   failed: [] as Array<{ step: string; seriesId?: string; error: string }>,
   seriesMap: {
@@ -22,12 +32,13 @@ vi.mock('../src/fred', () => ({
   fetchFredSeries: vi.fn(async (seriesId: string) => {
     state.events.push(`fetch:${seriesId}`);
     if (seriesId === state.fetchFailureSeries) throw new Error(`fetch failed: ${seriesId}`);
+    if (seriesId === state.invalidSeries) return [{ date: 'not-a-date', value: 1 }];
     return seriesId === 'WALCL' ? [] : [{ date: '2024-01-03', value: 1 }];
   }),
 }));
 
 vi.mock('../src/prices', () => ({
-  fetchDxyDaily: vi.fn(async () => []),
+  fetchDxyDaily: vi.fn(async () => { state.events.push('fetch-dxy'); return []; }),
   spliceSeries: vi.fn((official: unknown[]) => official),
 }));
 
@@ -36,29 +47,62 @@ vi.mock('../src/db', async importOriginal => {
   return {
     ...actual,
     getAllMeta: vi.fn(async () => ({})),
-    setMeta: vi.fn(async () => undefined),
+    setMeta: vi.fn(async (_db: unknown, key: string) => {
+      state.events.push(`meta:${key}`);
+      if (key === state.metaFailureKey) throw new Error(`meta failed: ${key}`);
+    }),
     maxObsDate: vi.fn(async () => '2024-01-03'),
-    upsertObservations: vi.fn(async () => undefined),
     acquireIngestLock: vi.fn(async () => state.lockAcquired),
-    renewIngestLock: vi.fn(async () => { state.events.push('renew'); return state.leaseRenewed; }),
+    renewIngestLock: vi.fn(async () => {
+      const previous = state.events.at(-1);
+      state.events.push('renew');
+      if (previous === state.leaseFailureAfterEvent) state.leaseRenewed = false;
+      return state.leaseRenewed;
+    }),
     releaseIngestLock: vi.fn(async () => { state.events.push('release'); return true; }),
     createIngestRun: vi.fn(async () => { state.events.push('create'); }),
-    stageSeriesAttempt: vi.fn(async (_db: unknown, runId: string, seriesId: string, rows: Obs[]) => {
+    startSeriesAttempt: vi.fn(async (_db: unknown, _runId: string, seriesId: string, startedAt: string) => {
+      state.events.push(`attempt-start:${seriesId}:${startedAt}`);
+    }),
+    failSeriesAttempt: vi.fn(async (_db: unknown, _runId: string, seriesId: string, error: string, completedAt: string) => {
+      state.events.push(`attempt-failed:${seriesId}`);
+      if (state.attemptAuditFailure) throw new Error('attempt audit failed');
+      state.attemptFailures.push({ seriesId, error, completedAt });
+    }),
+    stageSeriesAttempt: vi.fn(async (_db: unknown, _runId: string, seriesId: string, rows: Obs[], completedAt: string) => {
+      if (seriesId === state.stagingFailureSeries) throw new Error(`staging failed: ${seriesId}`);
       state.staged.push({ seriesId, rows: structuredClone(rows) });
-      state.events.push(`stage:${seriesId}:${rows.length}`);
+      state.events.push(`stage:${seriesId}:${rows.length}:${completedAt}`);
     }),
     validateIngestRun: vi.fn(async () => { state.events.push('validate'); }),
-    activateIngestRun: vi.fn(async () => {
+    activateIngestRun: vi.fn(async (_db: unknown, _runId: string, completedAt: string) => {
+      state.activationCompletedAt = completedAt;
       state.events.push('activate');
       if (state.activationFailure) throw new Error('activation failed');
     }),
-    failIngestRun: vi.fn(async (_db: unknown, _runId: string, failure: { step: string; seriesId?: string; error: string }) => {
+    failIngestRun: vi.fn(async (_db: unknown, _runId: string, failure: { step: string; seriesId?: string; error: string }, completedAt: string) => {
+      state.runFailureCompletedAt = completedAt;
       state.failed.push(failure);
       state.events.push(`failed:${failure.step}`);
     }),
     loadSeriesMap: vi.fn(async () => { state.events.push('load-active'); return state.seriesMap; }),
     upsertOfficialSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => { state.events.push(`official:${snapshot.date}`); }),
-    upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => { state.events.push(`nowcast:${snapshot.date}`); }),
+    upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+      state.events.push(`nowcast:${snapshot.date}`);
+      if (state.snapshotWriteFailure) throw new Error('snapshot write failed');
+    }),
+    completeIngestSnapshots: vi.fn(async (_db: unknown, _runId: string, count: number, completedAt: string) => {
+      state.events.push(`snapshots-succeeded:${count}:${completedAt}`);
+    }),
+    failIngestSnapshots: vi.fn(async (
+      _db: unknown,
+      _runId: string,
+      failure: { step: string; error: string; snapshotCount: number },
+      completedAt: string,
+    ) => {
+      state.snapshotFailures.push({ ...failure, completedAt });
+      state.events.push(`snapshots-failed:${failure.step}`);
+    }),
     officialSnapshotBefore: vi.fn(async () => null),
     officialVerdictAnchors: vi.fn(async () => []),
   };
@@ -78,7 +122,7 @@ vi.mock('../src/metrics', async importOriginal => {
 });
 
 import { runIngest, scheduledIngest } from '../src/service';
-import { failIngestRun } from '../src/db';
+import { failIngestRun, failIngestSnapshots, failSeriesAttempt } from '../src/db';
 
 const env = {
   DB: {} as D1Database,
@@ -91,11 +135,21 @@ const env = {
 beforeEach(() => {
   vi.clearAllMocks();
   state.fetchFailureSeries = null;
+  state.invalidSeries = null;
+  state.stagingFailureSeries = null;
+  state.attemptAuditFailure = false;
   state.activationFailure = false;
   state.lockAcquired = true;
   state.leaseRenewed = true;
+  state.leaseFailureAfterEvent = null;
+  state.snapshotWriteFailure = false;
+  state.metaFailureKey = null;
   state.activeSeries = new Set(SERIES_IDS);
   state.staged = [];
+  state.attemptFailures = [];
+  state.snapshotFailures = [];
+  state.activationCompletedAt = null;
+  state.runFailureCompletedAt = null;
   state.events = [];
   state.failed = [];
 });
@@ -107,12 +161,42 @@ describe('atomic ingest orchestration', () => {
     await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z'))).rejects.toThrow(SERIES_IDS[1]);
 
     expect(state.events).toContain('create');
+    expect(state.events.findIndex(event => event.startsWith(`attempt-start:${SERIES_IDS[1]}:`)))
+      .toBeLessThan(state.events.indexOf(`fetch:${SERIES_IDS[1]}`));
+    expect(failSeriesAttempt).toHaveBeenCalled();
+    expect(state.attemptFailures).toEqual([
+      expect.objectContaining({ seriesId: SERIES_IDS[1], error: `fetch failed: ${SERIES_IDS[1]}` }),
+    ]);
+    expect(state.attemptFailures[0].completedAt).not.toBe('2024-01-10T12:00:00.000Z');
     expect(failIngestRun).toHaveBeenCalled();
     expect(state.failed).toEqual([expect.objectContaining({ step: 'fetch', seriesId: SERIES_IDS[1] })]);
+    expect(state.runFailureCompletedAt).not.toBe('2024-01-10T12:00:00.000Z');
     expect(state.events).not.toContain('activate');
     expect(state.events.some(event => event.startsWith('official:') || event.startsWith('nowcast:'))).toBe(false);
     expect(state.events).not.toContain('load-active');
     expect(state.events.at(-1)).toBe('release');
+  });
+
+  it.each([
+    ['structural validation', () => { state.invalidSeries = SERIES_IDS[0]; }, 'structural'],
+    ['staging', () => { state.stagingFailureSeries = SERIES_IDS[0]; }, 'staging'],
+  ])('closes the series attempt as FAILED when %s fails', async (_label, arrange, failedStep) => {
+    arrange();
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z'))).rejects.toThrow();
+
+    expect(state.attemptFailures).toEqual([
+      expect.objectContaining({ seriesId: SERIES_IDS[0], error: expect.any(String), completedAt: expect.any(String) }),
+    ]);
+    expect(state.failed).toEqual([expect.objectContaining({ step: failedStep, seriesId: SERIES_IDS[0] })]);
+  });
+
+  it('preserves the fetch exception when the FAILED-attempt audit write also fails', async () => {
+    state.fetchFailureSeries = SERIES_IDS[0];
+    state.attemptAuditFailure = true;
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z')))
+      .rejects.toThrow(`fetch failed: ${SERIES_IDS[0]}`);
   });
 
   it('marks activation failure FAILED and never writes snapshots afterward', async () => {
@@ -133,19 +217,58 @@ describe('atomic ingest orchestration', () => {
     expect(state.events.filter(event => event === 'activate')).toHaveLength(1);
     expect(state.events.indexOf('activate')).toBeLessThan(state.events.indexOf('load-active'));
     expect(state.events.some(event => event.startsWith('nowcast:'))).toBe(true);
+    expect(state.events.some(event => event.startsWith('snapshots-succeeded:'))).toBe(true);
+    expect(state.activationCompletedAt).not.toBe('2024-01-10T12:00:00.000Z');
     expect(result).toEqual(expect.objectContaining({ status: 'active', runId: expect.any(String) }));
+  });
+
+  it('renews ownership after active reads and DXY fetch, before every snapshot write and finalization', async () => {
+    await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
+
+    const load = state.events.indexOf('load-active');
+    const dxy = state.events.indexOf('fetch-dxy');
+    expect(state.events[load + 1]).toBe('renew');
+    expect(state.events[dxy + 1]).toBe('renew');
+    for (const [index, event] of state.events.entries()) {
+      if (event.startsWith('nowcast:') || event.startsWith('official:') || event.startsWith('snapshots-succeeded:')) {
+        expect(state.events[index - 1]).toBe('renew');
+      }
+      if (event.startsWith('meta:last_')) expect(state.events[index - 1]).toBe('renew');
+    }
+  });
+
+  it('stops snapshot writes and records FAILED when ownership is lost after the DXY fetch', async () => {
+    state.leaseFailureAfterEvent = 'fetch-dxy';
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z'))).rejects.toThrow(/lease.*lost/i);
+
+    expect(state.events.some(event => event.startsWith('nowcast:') || event.startsWith('official:'))).toBe(false);
+    expect(failIngestSnapshots).toHaveBeenCalled();
+    expect(state.snapshotFailures).toEqual([expect.objectContaining({ step: 'lock' })]);
+  });
+
+  it.each([
+    ['snapshot write', () => { state.snapshotWriteFailure = true; }, 'snapshot'],
+    ['success metadata', () => { state.metaFailureKey = 'last_ingest_at'; }, 'metadata'],
+  ])('records the ACTIVE run snapshot outcome FAILED after a %s failure', async (_label, arrange, failedStep) => {
+    arrange();
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z'))).rejects.toThrow();
+
+    expect(failIngestRun).not.toHaveBeenCalled();
+    expect(state.snapshotFailures).toEqual([expect.objectContaining({ step: failedStep })]);
   });
 
   it('records a successful zero-row current series attempt', async () => {
     await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
 
     expect(state.staged).toContainEqual({ seriesId: 'WALCL', rows: [] });
-    expect(state.events).toContain('stage:WALCL:0');
+    expect(state.events.some(event => event.startsWith('stage:WALCL:0:'))).toBe(true);
     expect(state.events).toContain('validate');
   });
 
   it('renews the owned lease while progressing and aborts if ownership is lost', async () => {
-    state.leaseRenewed = false;
+    state.leaseFailureAfterEvent = `fetch:${SERIES_IDS[0]}`;
 
     await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z'))).rejects.toThrow(/lease.*lost/i);
 

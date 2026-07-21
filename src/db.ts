@@ -7,16 +7,6 @@ export async function maxObsDate(db: D1Database, seriesId: string): Promise<stri
   return row?.d ?? null;
 }
 
-export async function upsertObservations(db: D1Database, seriesId: string, rows: Obs[]): Promise<void> {
-  if (rows.length === 0) return;
-  const stmt = db.prepare(
-    'INSERT INTO observations (series_id, date, value) VALUES (?, ?, ?) ' +
-    'ON CONFLICT(series_id, date) DO UPDATE SET value = excluded.value'
-  );
-  const batch = rows.map(r => stmt.bind(seriesId, r.date, r.value));
-  for (let i = 0; i < batch.length; i += 100) await db.batch(batch.slice(i, i + 100));
-}
-
 export type IngestRunState = 'RUNNING' | 'ACTIVE' | 'FAILED' | 'SUPERSEDED';
 
 export interface IngestSeriesAttempt {
@@ -81,7 +71,7 @@ export async function createIngestRun(
   ).bind(runId, mode, startedAt).run();
 }
 
-function assertStagedRows(seriesId: string, rows: Obs[]): void {
+export function validateSeriesRows(seriesId: string, rows: Obs[]): void {
   for (const row of rows) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(row.value)) {
       throw new Error(`${seriesId} staged an invalid observation`);
@@ -89,20 +79,26 @@ function assertStagedRows(seriesId: string, rows: Obs[]): void {
   }
 }
 
+export async function startSeriesAttempt(
+  db: D1Database,
+  runId: string,
+  seriesId: string,
+  startedAt: string,
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO ingest_series_attempts
+       (run_id, series_id, status, started_at, row_count)
+     VALUES (?, ?, 'RUNNING', ?, 0)`
+  ).bind(runId, seriesId, startedAt).run();
+}
+
 export async function stageSeriesAttempt(
   db: D1Database,
   runId: string,
   seriesId: string,
   rows: Obs[],
-  now: string,
+  completedAt?: string,
 ): Promise<void> {
-  assertStagedRows(seriesId, rows);
-  await db.prepare(
-    `INSERT INTO ingest_series_attempts
-       (run_id, series_id, status, started_at, row_count)
-     VALUES (?, ?, 'RUNNING', ?, 0)`
-  ).bind(runId, seriesId, now).run();
-
   if (rows.length > 0) {
     const statement = db.prepare(
       `INSERT INTO staging_observations (run_id, series_id, date, value)
@@ -115,11 +111,31 @@ export async function stageSeriesAttempt(
     }
   }
 
-  await db.prepare(
+  const result = await db.prepare(
     `UPDATE ingest_series_attempts
      SET status = 'SUCCEEDED', completed_at = ?, row_count = ?
-     WHERE run_id = ? AND series_id = ?`
-  ).bind(now, rows.length, runId, seriesId).run();
+     WHERE run_id = ? AND series_id = ? AND status = 'RUNNING'`
+  ).bind(completedAt ?? new Date().toISOString(), rows.length, runId, seriesId).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`${seriesId} has no RUNNING ingest attempt to complete`);
+  }
+}
+
+export async function failSeriesAttempt(
+  db: D1Database,
+  runId: string,
+  seriesId: string,
+  error: string,
+  completedAt: string,
+): Promise<void> {
+  const result = await db.prepare(
+    `UPDATE ingest_series_attempts
+     SET status = 'FAILED', completed_at = ?, error = ?
+     WHERE run_id = ? AND series_id = ? AND status = 'RUNNING'`
+  ).bind(completedAt, error, runId, seriesId).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`${seriesId} has no RUNNING ingest attempt to fail`);
+  }
 }
 
 export function validateSeriesAttempts(
@@ -167,26 +183,72 @@ export async function activateIngestRun(
   runId: string,
   completedAt: string,
 ): Promise<void> {
-  await db.batch([
+  const results = await db.batch([
     db.prepare(
       `INSERT INTO observations (series_id, date, value)
-       SELECT series_id, date, value FROM staging_observations
-       WHERE run_id = ? AND 1 = 1
+       SELECT staged.series_id, staged.date, staged.value FROM staging_observations staged
+       WHERE staged.run_id = ?
+         AND EXISTS (
+           SELECT 1 FROM ingest_runs target
+           WHERE target.run_id = ? AND target.state = 'RUNNING'
+         )
        ON CONFLICT(series_id, date) DO UPDATE SET value = excluded.value`
-    ).bind(runId),
+    ).bind(runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET state = 'SUPERSEDED'
-       WHERE state = 'ACTIVE' AND run_id <> ?`
-    ).bind(runId),
+       WHERE state = 'ACTIVE' AND run_id <> ?
+         AND EXISTS (
+           SELECT 1 FROM ingest_runs target
+           WHERE target.run_id = ? AND target.state = 'RUNNING'
+         )`
+    ).bind(runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET
          state = 'ACTIVE', completed_at = ?,
+         snapshot_state = 'PENDING', snapshot_completed_at = NULL,
+         snapshot_error = NULL, snapshot_count = 0,
          row_count = (SELECT COUNT(*) FROM staging_observations WHERE run_id = ?),
          series_count = (SELECT COUNT(*) FROM ingest_series_attempts
                          WHERE run_id = ? AND status = 'SUCCEEDED')
        WHERE run_id = ? AND state = 'RUNNING'`
     ).bind(completedAt, runId, runId, runId),
   ]);
+  if (Number((results[2]?.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`ingest run ${runId} must be RUNNING before activation`);
+  }
+}
+
+export async function completeIngestSnapshots(
+  db: D1Database,
+  runId: string,
+  snapshotCount: number,
+  completedAt: string,
+): Promise<void> {
+  const result = await db.prepare(
+    `UPDATE ingest_runs SET
+       snapshot_state = 'SUCCEEDED', snapshot_completed_at = ?,
+       snapshot_error = NULL, snapshot_count = ?
+     WHERE run_id = ? AND state = 'ACTIVE' AND snapshot_state = 'PENDING'`
+  ).bind(completedAt, snapshotCount, runId).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`active ingest run ${runId} has no pending snapshot outcome`);
+  }
+}
+
+export async function failIngestSnapshots(
+  db: D1Database,
+  runId: string,
+  failure: Pick<IngestFailure, 'step' | 'error'> & { snapshotCount: number },
+  completedAt: string,
+): Promise<void> {
+  const result = await db.prepare(
+    `UPDATE ingest_runs SET
+       snapshot_state = 'FAILED', snapshot_completed_at = ?, snapshot_error = ?, snapshot_count = ?
+     WHERE run_id = ? AND state IN ('ACTIVE', 'SUPERSEDED') AND snapshot_state = 'PENDING'`
+  ).bind(completedAt, `${failure.step}: ${failure.error}`, failure.snapshotCount, runId).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`ingest run ${runId} has no pending snapshot outcome to fail`);
+  }
 }
 
 export async function failIngestRun(
@@ -198,12 +260,14 @@ export async function failIngestRun(
   await db.prepare(
     `UPDATE ingest_runs SET
        state = 'FAILED', completed_at = ?, failed_step = ?, failed_series = ?, error = ?,
+       snapshot_state = 'FAILED', snapshot_completed_at = ?, snapshot_error = ?,
        row_count = (SELECT COUNT(*) FROM staging_observations WHERE run_id = ?),
        series_count = (SELECT COUNT(*) FROM ingest_series_attempts
                        WHERE run_id = ? AND status = 'SUCCEEDED')
      WHERE run_id = ? AND state = 'RUNNING'`
   ).bind(
     completedAt, failure.step, failure.seriesId ?? null, failure.error,
+    completedAt, `not activated: ${failure.error}`,
     runId, runId, runId,
   ).run();
 }
@@ -214,12 +278,14 @@ export async function ingestRunSummary(db: D1Database): Promise<{
 }> {
   const [active, latestFailed] = await Promise.all([
     db.prepare(
-      `SELECT run_id, state, mode, started_at, completed_at, row_count, series_count
+      `SELECT run_id, state, mode, started_at, completed_at, row_count, series_count,
+              snapshot_state, snapshot_completed_at, snapshot_error, snapshot_count
        FROM ingest_runs WHERE state = 'ACTIVE' LIMIT 1`
     ).first<Record<string, unknown>>(),
     db.prepare(
       `SELECT run_id, state, mode, started_at, completed_at, failed_step, failed_series,
-              error, row_count, series_count
+              error, row_count, series_count,
+              snapshot_state, snapshot_completed_at, snapshot_error, snapshot_count
        FROM ingest_runs WHERE state = 'FAILED' ORDER BY started_at DESC LIMIT 1`
     ).first<Record<string, unknown>>(),
   ]);

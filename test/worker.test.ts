@@ -37,8 +37,14 @@ vi.mock('../src/db', () => ({
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
   ingestRunSummary: vi.fn(async () => ({
-    active: { run_id: 'active-1', state: 'ACTIVE', row_count: 20, series_count: 18 },
-    latestFailed: { run_id: 'failed-1', state: 'FAILED', failed_step: 'fetch', failed_series: 'SOFR' },
+    active: {
+      run_id: 'active-1', state: 'ACTIVE', row_count: 20, series_count: 18,
+      snapshot_state: 'FAILED', snapshot_error: 'snapshot write failed', snapshot_count: 2,
+    },
+    latestFailed: {
+      run_id: 'failed-1', state: 'FAILED', failed_step: 'fetch', failed_series: 'SOFR',
+      snapshot_state: 'FAILED', snapshot_error: 'not activated', snapshot_count: 0,
+    },
   })),
 }));
 
@@ -80,7 +86,22 @@ describe('/api/snapshot explicit channels', () => {
     expect(body.nowcast.channel_status).toBe('PROVISIONAL');
     expect(body.snapshot).toBeUndefined();
     expect(body.ingest.runs.active).toMatchObject({ run_id: 'active-1', state: 'ACTIVE' });
+    expect(body.ingest.runs.active).toMatchObject({ snapshot_state: 'FAILED', snapshot_count: 2 });
     expect(body.ingest.runs.latestFailed).toMatchObject({ run_id: 'failed-1', failed_series: 'SOFR' });
+  });
+});
+
+describe('/api/health ingest snapshot outcome', () => {
+  it('exposes the ACTIVE run snapshot failure in health metadata', async () => {
+    dbState.meta = { last_ingest_at: new Date().toISOString(), last_status: 'ok' };
+    const response = await worker.fetch(new Request('https://example.test/api/health'), env);
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(503);
+    expect(body.ok).toBe(false);
+    expect(body.ingest_runs.active).toMatchObject({
+      run_id: 'active-1', snapshot_state: 'FAILED', snapshot_error: 'snapshot write failed', snapshot_count: 2,
+    });
   });
 });
 

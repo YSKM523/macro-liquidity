@@ -25,17 +25,21 @@ vi.mock('../src/db', () => ({
   renewIngestLock: vi.fn(async () => true),
   releaseIngestLock: vi.fn(async () => true),
   createIngestRun: vi.fn(async () => undefined),
+  startSeriesAttempt: vi.fn(async () => undefined),
   stageSeriesAttempt: vi.fn(async () => undefined),
+  failSeriesAttempt: vi.fn(async () => undefined),
+  validateSeriesRows: vi.fn(() => undefined),
   validateIngestRun: vi.fn(async () => undefined),
   activateIngestRun: vi.fn(async () => undefined),
   failIngestRun: vi.fn(async () => undefined),
+  completeIngestSnapshots: vi.fn(async () => undefined),
+  failIngestSnapshots: vi.fn(async () => undefined),
   decisionWeek: (date: string) => {
     const d = new Date(`${date}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
     return d.toISOString().slice(0, 10);
   },
   maxObsDate: vi.fn(async () => '2024-05-29'),
-  upsertObservations: vi.fn(async () => undefined),
   loadSeriesMap: vi.fn(async () => state.seriesMap),
   upsertOfficialSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
     state.snapshots.set(snapshot.date, structuredClone(snapshot));

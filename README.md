@@ -142,7 +142,7 @@ flowchart TD
 - **Cloudflare Worker**(TypeScript)+ **Workers Static Assets** + **D1**(SQLite)+ **Cron Triggers**
 - 数据:**FRED**(宏观)+ **Yahoo / Stooq**(实时价格)
 - 前端:原生 HTML / CSS / JS + 自托管 [Lightweight-Charts](https://github.com/tradingview/lightweight-charts),仿 Stripe 纯色风格
-- 测试:**Vitest**(360 测试，覆盖模型逻辑、原子摄取、锁与 API)
+- 测试:**Vitest**(377 测试，覆盖模型逻辑、原子摄取、锁与 API)
 - 部署:`wrangler`
 
 ---
@@ -171,8 +171,8 @@ migrations/       D1 schema（ingest runs/staging + observations + official week
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress + ACTIVE/最近 FAILED ingest run |
-| `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 审计状态 |
+| `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress + ACTIVE/最近 FAILED ingest run（含 snapshot outcome） |
+| `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 与 `PENDING`/`SUCCEEDED`/`FAILED` snapshot 状态；ACTIVE snapshot 失败返回 503 |
 | `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
 | `GET /api/prices` | 实时价格(Yahoo/Stooq) |
 | `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |

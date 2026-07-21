@@ -102,7 +102,11 @@ export default {
           now: new Date().toISOString(),
           staleHours: INGEST_STALE_HOURS,
         });
-        return json({ ...h, ingest_runs: ingestRuns }, h.ok ? 200 : 503);
+        const activeSnapshotFailed = (ingestRuns.active as any)?.snapshot_state === 'FAILED';
+        const health = activeSnapshotFailed
+          ? { ...h, ok: false, stale: true, error: 'snapshot_failed' }
+          : h;
+        return json({ ...health, ingest_runs: ingestRuns }, health.ok ? 200 : 503);
       } catch (e) {
         return json({ ok: false, stale: true, error: 'db_unreachable', message: String((e as any)?.message ?? e) }, 503);
       }

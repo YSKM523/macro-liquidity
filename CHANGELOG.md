@@ -12,6 +12,10 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Made manual lock contention explicit with HTTP 409 and scheduled contention an explicit typed result.
 - Exposed the current ACTIVE and latest FAILED run through snapshot ingest metadata and health responses.
 - Added local-only migration `0006_atomic_ingest.sql` without dropping or redirecting legacy production tables.
+- Extended the lease through active-view reads, DXY fetches, every snapshot write, success metadata, and snapshot finalization; a lost owner can no longer continue snapshot persistence.
+- Added local-only additive migration `0007_ingest_snapshot_outcome.sql` with durable `PENDING` / `SUCCEEDED` / `FAILED` snapshot outcomes, completion/error/count fields, and health failure signaling.
+- Opened each series attempt before fetch and durably closed fetch, structural-validation, and staging failures without masking the original exception when audit persistence fails.
+- Guarded every activation mutation inside the transactional batch so a missing or non-`RUNNING` target cannot promote observations or demote the prior ACTIVE run.
 
 ### PR-05 — Official weekly snapshots and daily nowcasts
 
