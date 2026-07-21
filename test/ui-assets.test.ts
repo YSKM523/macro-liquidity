@@ -127,8 +127,8 @@ describe('static UI assets', () => {
     expect(js).toContain('实时风险层不可用');
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
-    expect(html).toContain('/styles.css?v=0721a');
-    expect(html).toContain('/app.js?v=0721a');
+    expect(html).toContain('/styles.css?v=0721b');
+    expect(html).toContain('/app.js?v=0721b');
   });
 
   it('sizes charts from their rendered container', () => {
@@ -138,5 +138,22 @@ describe('static UI assets', () => {
     expect(js).toContain('height: Math.max(260, el.clientHeight || 320)');
     expect(js).toContain('height: Math.max(110, el.clientHeight || 220)');
     expect(js).toContain('height: Math.max(110, el.clientHeight || 180)');
+  });
+
+  it('renders persisted factor status and as-of quality without neutralizing absent scores', () => {
+    const js = read('public/app.js');
+    const css = read('public/styles.css');
+
+    expect(js).toContain('factor_quality');
+    expect(js).toContain('result.asOf');
+    expect(js).toContain("result.status === 'STALE'");
+    expect(js).toContain("result.status === 'MISSING'");
+    expect(js).toContain("result.score == null ? '—'");
+    expect(js).toContain('宏观数据不完整');
+    expect(js).toContain("const macroIncomplete = s.decision_status === 'DATA_INCOMPLETE'");
+    expect(js).toContain("res.error === 'data_incomplete'");
+    expect(css).toContain('.factor-status.stale');
+    expect(css).toContain('.factor-status.missing');
+    expect(css).toContain('.fb.is-unavailable');
   });
 });

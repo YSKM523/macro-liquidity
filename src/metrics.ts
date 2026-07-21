@@ -4,7 +4,7 @@ import type { FreshnessRule } from './config';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, COVERAGE_FACTORS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH, STRESS_SCORE_CEILING } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, COVERAGE_FACTORS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH, STRESS_SCORE_CEILING, SERIES } from './config';
 
 export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
@@ -122,6 +122,17 @@ export interface Factors {
   netliqTrend: number; impulse: number; credit: number; funding: number;
   rates: number; dollar: number; vol: number; reserveAdequacy: number; curve: number;
 }
+
+export type FactorStatus = 'OK' | 'PARTIAL' | 'STALE' | 'MISSING';
+export interface FactorResult {
+  score: number | null;
+  quality: number;
+  status: FactorStatus;
+  asOf: string | null;
+  components: Record<string, unknown>;
+}
+export type FactorResults = { [K in keyof Factors]: FactorResult };
+export type DecisionStatus = 'OK' | 'DATA_INCOMPLETE';
 
 export function percentileRank(value: number, history: number[]): number {
   if (history.length === 0) return 0.5;
@@ -350,8 +361,10 @@ export interface Snapshot {
   netliq: number | null; netliqTrend: number | null;
   sofrIorb: number | null; hyOas: number | null; dgs10: number | null;
   dxy: number | null; vix: number | null;
-  bsImpulse: Impulse; netliqDir: Direction; verdict: Verdict; score: number;
-  factors: Factors; p0: boolean; p1: boolean; p2: boolean; p3: boolean; reason: string;
+  bsImpulse: Impulse; netliqDir: Direction; verdict: Verdict | null; score: number | null;
+  factors: Partial<Factors>; factorResults: FactorResults; freshness: Record<string, FreshnessResult>;
+  decisionStatus: DecisionStatus;
+  p0: boolean; p1: boolean; p2: boolean; p3: boolean; reason: string;
   coverage: number;
 }
 
@@ -377,22 +390,38 @@ export function buildReason(impulse: Impulse, dir: Direction, verdict: Verdict):
 }
 
 export interface DecisionInput {
-  score: number;
-  previousVerdict?: Verdict;
+  score: number | null;
+  previousVerdict?: Verdict | null;
   netliqDir: Direction;
   qeQtRegime: Impulse;
   stressStatus: StressStatus;
+  decisionStatus?: DecisionStatus;
 }
 
 export interface DecisionState {
-  macroVerdict: Verdict;
+  macroVerdict: Verdict | null;
   displayVerdict: Verdict | 'UNKNOWN';
   reason: string;
   guidance: Guidance;
 }
 
 export function deriveDecisionState(input: DecisionInput): DecisionState {
-  const macroVerdict = verdictFromScore(input.score, input.previousVerdict);
+  if (input.decisionStatus === 'DATA_INCOMPLETE' || input.score == null) {
+    return {
+      macroVerdict: null,
+      displayVerdict: 'UNKNOWN',
+      reason: '宏观数据不完整，暂停方向性判断',
+      guidance: {
+        tone: 'unknown',
+        tierLabel: '宏观数据不完整',
+        exposure: '暂停风险增加，风险敞口不高于基准',
+        lean: '等待关键宏观数据恢复',
+        divergence: null,
+        triggers: [{ label: '关键宏观数据恢复后再评估', detail: '当前无法形成可靠宏观判定', armed: true }],
+      },
+    };
+  }
+  const macroVerdict = verdictFromScore(input.score, input.previousVerdict ?? undefined);
   const stressApplied = input.stressStatus === 'STRESSED' && input.score < STRESS_SCORE_CEILING;
   const displayVerdict = input.stressStatus === 'UNKNOWN'
     ? 'UNKNOWN'
@@ -423,74 +452,159 @@ export function policyRegime(impulse: Impulse, date: string): PolicyRegime {
 }
 
 export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Snapshot {
+  const freshness: Record<string, FreshnessResult> = {};
+  for (const [seriesId, rule] of Object.entries(SERIES)) {
+    freshness[seriesId] = asOfFresh(m[seriesId] ?? [], date, rule);
+  }
+
+  const components = (seriesIds: string[], extra: Record<string, unknown> = {}) => ({
+    ...Object.fromEntries(seriesIds.map(seriesId => [seriesId, freshness[seriesId]])),
+    ...extra,
+  });
+  const oldestAsOf = (seriesIds: string[]): string | null => {
+    const dates = seriesIds.map(seriesId => freshness[seriesId]?.observationDate);
+    return dates.some(observationDate => observationDate == null)
+      ? null
+      : (dates as string[]).sort()[0];
+  };
+  const result = (
+    seriesIds: string[],
+    score: number | null,
+    options: { partial?: boolean; historyUsable?: boolean; extra?: Record<string, unknown> } = {},
+  ): FactorResult => {
+    const statuses = seriesIds.map(seriesId => freshness[seriesId]?.status ?? 'MISSING');
+    const unavailable = statuses.includes('MISSING') ? 'MISSING'
+      : statuses.includes('STALE') ? 'STALE'
+      : options.historyUsable === false ? 'MISSING'
+      : null;
+    if (unavailable) {
+      return {
+        score: null,
+        quality: 0,
+        status: unavailable,
+        asOf: oldestAsOf(seriesIds),
+        components: components(seriesIds, options.extra),
+      };
+    }
+    return {
+      score,
+      quality: options.partial ? 0.5 : 1,
+      status: options.partial ? 'PARTIAL' : 'OK',
+      asOf: oldestAsOf(seriesIds),
+      components: components(seriesIds, options.extra),
+    };
+  };
+
   const walclWeekly = (m.WALCL ?? []).filter(o => o.date <= date).map(o => o.value);
   const netliqWeekly = buildWeeklyNetliq(m, date);
 
-  const walcl = asOf(m.WALCL ?? [], date);
-  const tga = asOf(m.WDTGAL ?? [], date);
-  const rrp = asOf(m.RRPONTSYD ?? [], date);
-  const repo = asOf(m.RPONTSYD ?? [], date);
+  const walcl = freshness.WALCL.value;
+  const tga = freshness.WDTGAL.value;
+  const rrp = freshness.RRPONTSYD.value;
+  const repo = freshness.RPONTSYD.value;
   const netliq = (walcl != null && tga != null && rrp != null) ? walcl - tga - rrp : null;
 
-  const sofr = asOf(m.SOFR ?? [], date);
-  const iorb = asOf(m.IORB ?? [], date);
+  const sofr = freshness.SOFR.value;
+  const iorb = freshness.IORB.value;
   const sofrIorb = (sofr != null && iorb != null) ? sofr - iorb : null;
-  const hyOas = asOf(m.BAMLH0A0HYM2 ?? [], date);
+  const hyOas = freshness.BAMLH0A0HYM2.value;
   const hyHistory = (m.BAMLH0A0HYM2 ?? []).filter(o => o.date <= date).map(o => o.value);
   const creditDelta = changeOverDays(m.BAMLH0A0HYM2 ?? [], date, CREDIT_LOOKBACK_DAYS);
-  const dgs10 = asOf(m.DGS10 ?? [], date);
+  const dgs10 = freshness.DGS10.value;
   const delta10y = changeOverDays(m.DGS10 ?? [], date, RATES_LOOKBACK_DAYS);
-  const dxy = asOf(m.DTWEXBGS ?? [], date);
-  const vix = asOf(m.VIXCLS ?? [], date);
+  const dxy = freshness.DTWEXBGS.value;
+  const vix = freshness.VIXCLS.value;
 
   const bsImpulse = balanceSheetImpulse(walclWeekly);
   const netliqDir = netliqDirection(netliqWeekly);
 
-  const reservesLevel = asOf(m.WRBWFRBL ?? [], date);
+  const reservesLevel = freshness.WRBWFRBL.value;
   const deltaReserves13w = changeOverDays(m.WRBWFRBL ?? [], date, 91); // ~13 weeks
 
-  const curveSlope = asOf(m.T10Y2Y ?? [], date);
+  const curveSlope = freshness.T10Y2Y.value;
   const curveChange20 = changeOverDays(m.T10Y2Y ?? [], date, 20);
 
-  const factors: Factors = {
-    netliqTrend: scoreNetliqTrend(netliqWeekly),
-    impulse: scoreImpulse(bsImpulse),
-    credit: hyOas != null ? scoreCredit(hyOas, hyHistory, creditDelta) : 50,
-    funding: sofrIorb != null ? scoreFunding(sofrIorb) : 50,
-    rates: scoreRates(delta10y),
-    dollar: scoreDollar(m.DTWEXBGS ?? [], date),
-    vol: scoreVol(vix),
-    reserveAdequacy: scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb),
-    curve: scoreCurve(curveSlope, curveChange20),
+  const netliqHistoryUsable = netliqWeekly.length >= NETLIQ_TREND_WEEKS + 1;
+  const impulseHistoryUsable = walclWeekly.length >= 14;
+  const fundingUsable = sofrIorb != null;
+  const factorResults: FactorResults = {
+    netliqTrend: result(
+      ['WALCL', 'WDTGAL', 'RRPONTSYD'],
+      netliqHistoryUsable ? scoreNetliqTrend(netliqWeekly) : null,
+      { historyUsable: netliqHistoryUsable, extra: { historyObservations: netliqWeekly.length } },
+    ),
+    impulse: result(
+      ['WALCL'],
+      impulseHistoryUsable ? scoreImpulse(bsImpulse) : null,
+      { historyUsable: impulseHistoryUsable, extra: { historyObservations: walclWeekly.length } },
+    ),
+    credit: result(
+      ['BAMLH0A0HYM2'],
+      hyOas != null ? scoreCredit(hyOas, hyHistory, creditDelta) : null,
+      { partial: creditDelta == null, extra: { lookbackChange: creditDelta } },
+    ),
+    funding: result(['SOFR', 'IORB'], fundingUsable ? scoreFunding(sofrIorb) : null),
+    rates: result(
+      ['DGS10'],
+      delta10y != null ? scoreRates(delta10y) : null,
+      { historyUsable: delta10y != null, extra: { lookbackChange: delta10y } },
+    ),
+    dollar: result(
+      ['DTWEXBGS'],
+      (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200 ? scoreDollar(m.DTWEXBGS ?? [], date) : null,
+      {
+        historyUsable: (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200,
+        extra: { historyObservations: (m.DTWEXBGS ?? []).filter(o => o.date <= date).length },
+      },
+    ),
+    vol: result(['VIXCLS'], vix != null ? scoreVol(vix) : null),
+    reserveAdequacy: result(
+      ['WRBWFRBL'],
+      reservesLevel != null ? scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb) : null,
+      {
+        partial: deltaReserves13w == null || !fundingUsable,
+        extra: { deltaReserves13w, SOFR: freshness.SOFR, IORB: freshness.IORB },
+      },
+    ),
+    curve: result(
+      ['T10Y2Y'],
+      curveSlope != null ? scoreCurve(curveSlope, curveChange20) : null,
+      { partial: curveChange20 == null, extra: { lookbackChange: curveChange20 } },
+    ),
   };
-  const score = weightedScore(factors);
+  const factors = Object.fromEntries(
+    Object.entries(factorResults)
+      .filter(([, factor]) => factor.score != null)
+      .map(([key, factor]) => [key, factor.score]),
+  ) as Partial<Factors>;
+  const availableWeightedFactors = (Object.keys(WEIGHTS) as (keyof Factors)[])
+    .filter(key => WEIGHTS[key] > 0 && factorResults[key].score != null);
+  const availableWeight = availableWeightedFactors.reduce((sum, key) => sum + WEIGHTS[key], 0);
+  const aggregateScore = availableWeight === 0 ? null : clamp(
+    availableWeightedFactors.reduce((sum, key) => sum + factorResults[key].score! * WEIGHTS[key], 0) / availableWeight,
+  );
+  const decisionStatus: DecisionStatus = factorResults.netliqTrend.status === 'OK' ? 'OK' : 'DATA_INCOMPLETE';
+  const score = decisionStatus === 'OK' ? aggregateScore : null;
   const decision = deriveDecisionState({
     score,
     previousVerdict: prev,
     netliqDir,
     qeQtRegime: bsImpulse,
     stressStatus: 'NORMAL',
+    decisionStatus,
   });
 
-  const adequacy = [
-    netliqWeekly.length >= NETLIQ_TREND_WEEKS + 1,                        // netliqTrend
-    walclWeekly.length >= 14,                                              // impulse
-    hyOas != null,                                                         // credit
-    sofrIorb != null,                                                      // funding
-    delta10y != null,                                                      // rates
-    (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200,          // dollar
-    reservesLevel != null,                                                 // reserveAdequacy
-    curveSlope != null,                                                    // curve
-  ];
-  const coverage = adequacy.filter(Boolean).length / COVERAGE_FACTORS.length;
+  const coverage = COVERAGE_FACTORS
+    .reduce((sum, key) => sum + factorResults[key].quality, 0) / COVERAGE_FACTORS.length;
 
   return {
     date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),
     sofrIorb, hyOas, dgs10, dxy, vix, bsImpulse, netliqDir, verdict: decision.macroVerdict, score, factors,
-    p0: factors.rates >= 50 && factors.funding >= 50 && factors.credit >= 50,
-    p1: factors.netliqTrend >= 50 || factors.impulse >= 50,
-    p2: factors.dollar >= 50,
-    p3: factors.vol >= 50,
+    factorResults, freshness, decisionStatus,
+    p0: (factorResults.rates.score ?? -Infinity) >= 50 && (factorResults.funding.score ?? -Infinity) >= 50 && (factorResults.credit.score ?? -Infinity) >= 50,
+    p1: (factorResults.netliqTrend.score ?? -Infinity) >= 50 || (factorResults.impulse.score ?? -Infinity) >= 50,
+    p2: (factorResults.dollar.score ?? -Infinity) >= 50,
+    p3: (factorResults.vol.score ?? -Infinity) >= 50,
     reason: decision.reason,
     coverage,
   };

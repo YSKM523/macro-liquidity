@@ -147,7 +147,7 @@ describe('verdict + snapshot', () => {
       }));
     const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
     const m = {
-      WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+      WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),
       RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
       BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
       DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10), value: 120 })),
@@ -230,7 +230,7 @@ describe('computeSnapshot coverage', () => {
     }));
   const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
   const fullMap = {
-    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),
     RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
     BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
     DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10), value: 120 })),
@@ -342,7 +342,7 @@ describe('reserveAdequacy integration', () => {
   }));
 
   const baseMap = {
-    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),
     RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
     BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
     DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: 120 })),
@@ -361,7 +361,9 @@ describe('reserveAdequacy integration', () => {
     const snapWithout = computeSnapshot(baseMap, '2024-07-31');
     const snapWith = computeSnapshot({ ...baseMap, WRBWFRBL: wkReserves }, '2024-07-31');
     // reserveAdequacy now carries weight, so adding reserves data changes the total score
-    expect(snapWith.score).not.toBeCloseTo(snapWithout.score);
+    expect(snapWith.score).not.toBeNull();
+    expect(snapWithout.score).not.toBeNull();
+    expect(snapWith.score!).not.toBeCloseTo(snapWithout.score!);
   });
 
   it('reserveAdequacy carries a positive weight (P2-4)', () => {
@@ -408,7 +410,7 @@ describe('curve integration', () => {
   const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
 
   const baseMap = {
-    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: wk(500, -5),
+    WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),
     RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
     BAMLH0A0HYM2: daily(3.5), DGS10: daily(4.2), VIXCLS: daily(14),
     DTWEXBGS: Array.from({ length: 250 }, (_, i) => ({ date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: 120 })),
@@ -419,7 +421,7 @@ describe('curve integration', () => {
     const curveData = Array.from({ length: 30 }, (_, i) => ({
       date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10),
       value: 0.5 + i * 0.01,
-    }));
+    })).concat({ date: '2024-07-31', value: 0.8 });
     const m = { ...baseMap, T10Y2Y: curveData };
     const snap = computeSnapshot(m, '2024-07-31');
     expect(typeof snap.factors.curve).toBe('number');
@@ -432,7 +434,9 @@ describe('curve integration', () => {
     // T10Y2Y providing a steep curve → higher curve score than the null fallback (50)
     const curveData = [{ date: '2024-01-01', value: 2.5 }, { date: '2024-07-31', value: 2.5 }];
     const snapWith = computeSnapshot({ ...baseMap, T10Y2Y: curveData }, '2024-07-31');
-    expect(snapWith.score).not.toBeCloseTo(snapWithout.score);
+    expect(snapWith.score).not.toBeNull();
+    expect(snapWithout.score).not.toBeNull();
+    expect(snapWith.score!).not.toBeCloseTo(snapWithout.score!);
   });
 
   it('curve carries a positive weight (earned its keep: 13w IC +0.17, raises equal-weight OOS IC)', () => {

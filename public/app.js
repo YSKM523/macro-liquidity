@@ -116,9 +116,10 @@ function threeYearsAgo() {
 
 function renderVerdict(res) {
   const s = res.snapshot || {};
+  const macroIncomplete = s.decision_status === 'DATA_INCOMPLETE';
   const card = document.getElementById('verdict-card');
-  const macroV = s.verdict || 'NEUTRAL';
-  const displayV = s.display_verdict || macroV;
+  const macroV = s.verdict || null;
+  const displayV = s.display_verdict || macroV || 'UNKNOWN';
   card.classList.remove('bull', 'bear', 'neutral', 'unknown');
   card.classList.add(VERDICT_CLASS[displayV]);
   document.getElementById('verdict-label').textContent = VERDICT_CN[displayV] || '—';
@@ -130,7 +131,12 @@ function renderVerdict(res) {
   const stress = s.live_stress;
   const banner = document.getElementById('stress-banner');
   const note = document.getElementById('stress-note');
-  if (stress && stress.status === 'UNKNOWN') {
+  if (macroIncomplete) {
+    banner.textContent = '⚠️ 宏观数据不完整';
+    banner.style.display = '';
+    note.textContent = '关键宏观输入缺失或过期，暂停方向性判断';
+    note.style.display = '';
+  } else if (stress && stress.status === 'UNKNOWN') {
     const missing = (stress.unavailable || []).join('、');
     banner.textContent = '⚠️ 实时风险层不可用' + (missing ? '：' + missing : '');
     banner.style.display = '';
@@ -149,13 +155,15 @@ function renderVerdict(res) {
     banner.style.display = 'none';
     note.style.display = 'none';
   }
-  const policy = s.policy_regime ? (POLICY_CN[s.policy_regime] || s.policy_regime) : '—';
+  const regime = macroIncomplete ? null : s.qe_qt_regime;
+  const direction = macroIncomplete ? null : s.netliq_dir;
+  const policy = !macroIncomplete && s.policy_regime ? (POLICY_CN[s.policy_regime] || s.policy_regime) : '—';
   const regimeHost = document.getElementById('regime-sub');
   if (regimeHost) {
     regimeHost.innerHTML = [
-      `<div class="state-tile ${toneForRegime(s.qe_qt_regime)}"><span>资产负债表</span><b>${REGIME_CN[s.qe_qt_regime] || s.qe_qt_regime || '—'}</b></div>`,
-      `<div class="state-tile ${toneForDirection(s.netliq_dir)}"><span>净流动性</span><b>${dirCn(s.netliq_dir)}</b></div>`,
-      `<div class="state-tile state-wide ${toneForPolicy(s.policy_regime)}"><span>政策阶段</span><b>${policy}</b></div>`,
+      `<div class="state-tile ${toneForRegime(regime)}"><span>资产负债表</span><b>${REGIME_CN[regime] || regime || '—'}</b></div>`,
+      `<div class="state-tile ${toneForDirection(direction)}"><span>净流动性</span><b>${dirCn(direction)}</b></div>`,
+      `<div class="state-tile state-wide ${toneForPolicy(macroIncomplete ? null : s.policy_regime)}"><span>政策阶段</span><b>${policy}</b></div>`,
     ].join('');
   }
   const live = res.live || {};
@@ -277,19 +285,24 @@ function renderProvenance(res) {
 
 function renderScore(s) {
   if (!s) return;
-  const score = Math.round(s.score ?? 0);
-  document.getElementById('score-gauge').style.width = score + '%';
-  document.getElementById('score-num').textContent = score;
-  // sub-factor bars read the persisted factors_json column (set by upsertSnapshot)
-  const factors = s.factors_json ? JSON.parse(s.factors_json) : null;
+  const score = s.score == null ? null : Math.round(s.score);
+  document.getElementById('score-gauge').style.width = (score ?? 0) + '%';
+  document.getElementById('score-num').textContent = score == null ? '—' : score;
+  const factorQuality = s.factor_quality || {};
   const host = document.getElementById('factor-bars');
   host.innerHTML = '';
-  if (!factors) return;
   for (const [k, label] of Object.entries(FACTOR_LABELS)) {
-    const val = Math.round(factors[k] ?? 0);
-    const st = val >= 55 ? 'up' : val <= 45 ? 'down' : 'flat';
-    const row = document.createElement('div'); row.className = 'fb';
-    row.innerHTML = `<span>${label}</span><span class="track"><span class="bar ${st}" style="width:${val}%"></span></span><span class="fbv ${st}">${val}</span>`;
+    const result = factorQuality[k] || { score: null, quality: 0, status: 'MISSING', asOf: null };
+    const val = result.score == null ? null : Math.round(result.score);
+    const st = val == null ? 'unavailable' : val >= 55 ? 'up' : val <= 45 ? 'down' : 'flat';
+    const unavailable = result.status === 'STALE' || result.status === 'MISSING';
+    const statusClass = String(result.status || 'MISSING').toLowerCase();
+    const statusLabel = { OK: '正常', PARTIAL: '部分', STALE: '过期', MISSING: '缺失' }[result.status] || '缺失';
+    const row = document.createElement('div');
+    row.className = 'fb' + (unavailable ? ' is-unavailable' : '');
+    row.innerHTML = `<span class="factor-name">${label}<small>${result.asOf || '无日期'} · <b class="factor-status ${statusClass}">${statusLabel}</b></small></span>`
+      + `<span class="track"><span class="bar ${st}" style="width:${val ?? 0}%"></span></span>`
+      + `<span class="fbv ${st}">${result.score == null ? '—' : val}</span>`;
     host.appendChild(row);
   }
 }
@@ -299,9 +312,9 @@ function renderFactorTable(res) {
   const tbody = document.querySelector('#factor-table tbody');
   const tag = ok => `<span class="tag ${ok ? 'ok' : 'bad'}">${ok ? '顺风' : '逆风'}</span>`;
   const rows = [
-    ['净流动性 (十亿)', fmt(s.netliq, 0), s.netliq_dir === 'UP'],
+    ['净流动性 (十亿)', fmt(s.netliq, 0), s.netliq == null ? null : s.netliq_dir === 'UP'],
     ['10Y 收益率', fmt(live.us10y) + '%', null],
-    ['SOFR−IORB', fmt(s.sofr_iorb, 3), (s.sofr_iorb ?? 1) <= 0.05],
+    ['SOFR−IORB', fmt(s.sofr_iorb, 3), s.sofr_iorb == null ? null : s.sofr_iorb <= 0.05],
     ['HY OAS', fmt(s.hy_oas, 2), null],
     ['美元 (ICE DXY,实时仅展示)', fmt(live.dxy), null],
     ['VIX', fmt(live.vix), (live.vix ?? 99) < 25],
@@ -402,6 +415,10 @@ function setupExplain() {
 function renderExplain(res) {
   const body = document.getElementById('explain-body');
   if (!body) return;
+  if (res && res.error === 'data_incomplete') {
+    body.innerHTML = '<p class="ex-note">宏观数据不完整，暂不生成分数归因。</p>';
+    return;
+  }
   if (!res || res.error === 'no_data' || !res.current) {
     body.innerHTML = '<p class="ex-note">暂无数据</p>';
     return;

@@ -45,12 +45,13 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
         ? (m.WALCL ?? []).map(o => o.date).filter(d => d <= lastDate)
         : eachDay(addDays(lastDate, -14), lastDate);
       const prior = rebuildAll ? null : await snapshotBefore(env.DB, dates[0]);
-      let prev: Verdict | undefined = prior?.verdict;
+      let prev: Verdict | undefined = prior?.verdict ?? undefined;
       for (const date of dates) {
         if (asOf(m.WALCL ?? [], date) == null) continue;
         const snap = computeSnapshot(m, date, prev);
         await upsertSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
-        prev = snap.verdict; snapshots++;
+        if (snap.verdict != null) prev = snap.verdict;
+        snapshots++;
       }
     }
     await setMeta(env.DB, 'last_ingest_at', new Date().toISOString());

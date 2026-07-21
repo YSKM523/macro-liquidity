@@ -10,9 +10,20 @@ import { runBacktest } from './backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
+import type { DecisionStatus } from './metrics';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed != null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#F6F8FA"/><path d="M14 43h36" stroke="#1A1F36" stroke-width="4" stroke-linecap="round"/><path d="M16 39c7-14 15-20 24-20 5 0 9 2 12 5" fill="none" stroke="#635BFF" stroke-width="5" stroke-linecap="round"/><path d="M37 20l12 1-5 11" fill="none" stroke="#1A7F4B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -70,15 +81,24 @@ export default {
       };
       if (!row) return json({ snapshot: null, live, ingest, error: 'no_data' });
       const r: any = row;
+      const decisionStatus: DecisionStatus = r.decision_status === 'OK' ? 'OK' : 'DATA_INCOMPLETE';
+      const persistedScore = decisionStatus === 'OK' && typeof r.score === 'number' ? r.score : null;
+      const persistedVerdict = decisionStatus === 'OK' ? r.verdict : null;
       const decision = deriveDecisionState({
-        score: r.score,
-        previousVerdict: r.verdict,
+        score: persistedScore,
+        previousVerdict: persistedVerdict,
         netliqDir: r.netliq_dir,
         qeQtRegime: r.qe_qt_regime,
         stressStatus: stress.status,
+        decisionStatus,
       });
       const snap = {
         ...r,
+        score: persistedScore,
+        verdict: persistedVerdict,
+        decision_status: decisionStatus,
+        factor_quality: parseJsonObject(r.factor_quality_json),
+        freshness: parseJsonObject(r.freshness_json),
         policy_regime: policyRegime(r.qe_qt_regime, r.date),
         reason: decision.reason,
         display_verdict: decision.displayVerdict,
@@ -95,6 +115,14 @@ export default {
 
       const cur: any = await latestSnapshot(env.DB);
       if (!cur) return json({ window, error: 'no_data' });
+      if (cur.decision_status !== 'OK') {
+        return json({
+          window,
+          error: 'data_incomplete',
+          message: '宏观数据不完整，无法生成可靠分数归因',
+          current: { date: cur.date, score: null },
+        });
+      }
 
       const refDate = new Date(new Date(cur.date + 'T00:00:00Z').getTime() - days * 86400000)
         .toISOString().slice(0, 10);

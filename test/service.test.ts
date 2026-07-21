@@ -3,7 +3,8 @@ import type { SeriesMap, Snapshot, Verdict } from '../src/metrics';
 
 const state = vi.hoisted(() => ({
   seriesMap: {} as SeriesMap,
-  snapshots: new Map<string, Snapshot>(),
+  snapshots: new Map<string, any>(),
+  incompleteDates: new Set<string>(),
 }));
 
 vi.mock('../src/fred', () => ({
@@ -41,7 +42,8 @@ vi.mock('../src/metrics', async importOriginal => {
       // One breakout establishes BULLISH; every later official and nowcast date
       // is in the 45-55 dead zone and must inherit that state.
       const score = date === '2024-01-03' ? 60 : 50;
-      const verdict = actual.verdictFromScore(score, prev);
+      const incomplete = state.incompleteDates.has(date);
+      const verdict = incomplete ? null : actual.verdictFromScore(score, prev);
       const factors = {
         netliqTrend: 50, impulse: 50, credit: 50, funding: 50, rates: 50,
         dollar: 50, vol: 50, reserveAdequacy: 50, curve: 50,
@@ -62,15 +64,18 @@ vi.mock('../src/metrics', async importOriginal => {
         bsImpulse: 'FLAT',
         netliqDir: 'FLAT',
         verdict,
-        score,
+        score: incomplete ? null : score,
         factors,
         p0: true,
         p1: true,
         p2: true,
         p3: true,
-        reason: `dead-zone inherits ${verdict}`,
+        reason: incomplete ? '宏观数据不完整' : `dead-zone inherits ${verdict}`,
         coverage: 1,
-      };
+        decisionStatus: incomplete ? 'DATA_INCOMPLETE' : 'OK',
+        factorResults: {},
+        freshness: {},
+      } as any;
     }),
   };
 });
@@ -109,6 +114,9 @@ const makeSnapshot = (date: string, verdict: Verdict): Snapshot => ({
     netliqTrend: 50, impulse: 50, credit: 50, funding: 50, rates: 50,
     dollar: 50, vol: 50, reserveAdequacy: 50, curve: 50,
   },
+  factorResults: {} as Snapshot['factorResults'],
+  freshness: {},
+  decisionStatus: 'OK',
   p0: true,
   p1: true,
   p2: true,
@@ -129,6 +137,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.seriesMap = makeSeriesMap();
   state.snapshots.clear();
+  state.incompleteDates.clear();
 });
 
 describe('runIngest hysteresis continuity', () => {
@@ -157,5 +166,15 @@ describe('runIngest hysteresis continuity', () => {
       const actual = state.snapshots.get(date);
       expect(Object.fromEntries(fields.map(field => [field, actual?.[field]]))).toEqual(expected);
     }
+  });
+
+  it('preserves the prior official verdict across DATA_INCOMPLETE dates', async () => {
+    state.incompleteDates.add('2024-01-10');
+
+    await runIngest(env, true);
+
+    expect(state.snapshots.get('2024-01-03')?.verdict).toBe('BULLISH');
+    expect(state.snapshots.get('2024-01-10')?.verdict).toBeNull();
+    expect(state.snapshots.get('2024-01-17')?.verdict).toBe('BULLISH');
   });
 });

@@ -31,8 +31,9 @@ export async function upsertSnapshot(db: D1Database, s: Snapshot, spx: number | 
   await db.prepare(
     `INSERT INTO daily_snapshot
       (date, walcl, tga, rrp, repo, netliq, netliq_trend, sofr_iorb, hy_oas, dgs10,
-       dxy_eod, vix_eod, qe_qt_regime, netliq_dir, verdict, score, p0, p1, p2, p3, spx, reason, factors_json, coverage)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       dxy_eod, vix_eod, qe_qt_regime, netliq_dir, verdict, score, p0, p1, p2, p3, spx, reason, factors_json, coverage,
+       decision_status, factor_quality_json, freshness_json)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(date) DO UPDATE SET
        walcl=excluded.walcl, tga=excluded.tga, rrp=excluded.rrp, repo=excluded.repo,
        netliq=excluded.netliq, netliq_trend=excluded.netliq_trend, sofr_iorb=excluded.sofr_iorb,
@@ -40,12 +41,14 @@ export async function upsertSnapshot(db: D1Database, s: Snapshot, spx: number | 
        qe_qt_regime=excluded.qe_qt_regime, netliq_dir=excluded.netliq_dir, verdict=excluded.verdict,
        score=excluded.score, p0=excluded.p0, p1=excluded.p1, p2=excluded.p2, p3=excluded.p3,
        spx=excluded.spx, reason=excluded.reason, factors_json=excluded.factors_json,
-       coverage=excluded.coverage`
+       coverage=excluded.coverage, decision_status=excluded.decision_status,
+       factor_quality_json=excluded.factor_quality_json, freshness_json=excluded.freshness_json`
   ).bind(
     s.date, s.walcl, s.tga, s.rrp, s.repo, s.netliq, s.netliqTrend, s.sofrIorb, s.hyOas, s.dgs10,
     s.dxy, s.vix, s.bsImpulse, s.netliqDir, s.verdict, s.score,
     s.p0 ? 1 : 0, s.p1 ? 1 : 0, s.p2 ? 1 : 0, s.p3 ? 1 : 0,
-    spx, s.reason, JSON.stringify(s.factors), s.coverage
+    spx, s.reason, JSON.stringify(s.factors), s.coverage,
+    s.decisionStatus, JSON.stringify(s.factorResults), JSON.stringify(s.freshness)
   ).run();
 }
 
@@ -57,7 +60,7 @@ export async function snapshotBefore(
   db: D1Database,
   date: string,
 ): Promise<{ date: string; verdict: Snapshot['verdict'] } | null> {
-  return db.prepare('SELECT * FROM daily_snapshot WHERE date < ? ORDER BY date DESC LIMIT 1')
+  return db.prepare('SELECT * FROM daily_snapshot WHERE date < ? AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1')
     .bind(date).first<{ date: string; verdict: Snapshot['verdict'] }>();
 }
 

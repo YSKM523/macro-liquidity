@@ -9,7 +9,10 @@ const dbState = vi.hoisted(() => ({
     qe_qt_regime: 'FLAT',
     reason: 'macro remains bullish',
     coverage: 1,
-  },
+    decision_status: 'OK',
+    factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
+    freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
+  } as any,
 }));
 
 vi.mock('../src/service', () => ({
@@ -38,11 +41,76 @@ const env = {
 };
 
 beforeEach(() => {
+  dbState.row = {
+    date: '2026-07-15', score: 60, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
+    reason: 'macro remains bullish', coverage: 1, decision_status: 'OK',
+    factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
+    freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
+  };
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('/api/snapshot persisted macro quality', () => {
+  it('fails closed for DATA_INCOMPLETE and exposes persisted quality dates without inventing current as-of values', async () => {
+    dbState.row = {
+      ...dbState.row,
+      score: null,
+      verdict: null,
+      decision_status: 'DATA_INCOMPLETE',
+      factor_quality_json: '{"netliqTrend":{"score":null,"quality":0,"status":"STALE","asOf":"2026-07-01","components":{}}}',
+      freshness_json: '{"WDTGAL":{"value":null,"observationDate":"2026-07-01","ageDays":14,"status":"STALE"}}',
+    };
+
+    const response = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
+    const body = await response.json() as any;
+
+    expect(body.snapshot.decision_status).toBe('DATA_INCOMPLETE');
+    expect(body.snapshot.score).toBeNull();
+    expect(body.snapshot.verdict).toBeNull();
+    expect(body.snapshot.display_verdict).toBe('UNKNOWN');
+    expect(body.snapshot.reason).toContain('宏观数据不完整');
+    expect(body.snapshot.guidance.tone).toBe('unknown');
+    expect(body.snapshot.guidance.exposure).not.toMatch(/加仓|\+/);
+    expect(JSON.stringify(body.snapshot.guidance)).not.toContain('未触发');
+    expect(body.snapshot.factor_quality.netliqTrend.asOf).toBe('2026-07-01');
+    expect(body.snapshot.freshness.WDTGAL.observationDate).toBe('2026-07-01');
+  });
+
+  it('does not invent neutral factor attribution for an incomplete latest snapshot', async () => {
+    dbState.row = {
+      ...dbState.row,
+      score: null,
+      verdict: null,
+      decision_status: 'DATA_INCOMPLETE',
+      factors_json: '{}',
+    };
+
+    const response = await worker.fetch(new Request('https://example.test/api/explain'), env);
+    const body = await response.json() as any;
+
+    expect(body.error).toBe('data_incomplete');
+    expect(body.message).toContain('宏观数据不完整');
+    expect(body.contributions).toBeUndefined();
+  });
+
+  it('treats legacy rows without quality columns conservatively', async () => {
+    dbState.row = {
+      date: '2024-01-01', score: 60, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
+      reason: 'legacy', coverage: 1,
+    } as any;
+
+    const response = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
+    const body = await response.json() as any;
+
+    expect(body.snapshot.decision_status).toBe('DATA_INCOMPLETE');
+    expect(body.snapshot.display_verdict).toBe('UNKNOWN');
+    expect(body.snapshot.factor_quality).toEqual({});
+    expect(body.snapshot.freshness).toEqual({});
+  });
 });
 
 describe('/api/snapshot live stress status', () => {
