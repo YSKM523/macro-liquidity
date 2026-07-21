@@ -13,6 +13,7 @@ const dbState = vi.hoisted(() => ({
     factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
   } as any,
+  reference: null as any,
 }));
 
 vi.mock('../src/service', () => ({
@@ -26,7 +27,7 @@ vi.mock('../src/db', () => ({
   countSnapshots: vi.fn(async () => 1),
   snapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => []),
-  snapshotOnOrBefore: vi.fn(async () => null),
+  snapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
 }));
 
@@ -47,6 +48,7 @@ beforeEach(() => {
     factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
   };
+  dbState.reference = null;
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -78,6 +80,27 @@ describe('/api/snapshot persisted macro quality', () => {
     expect(JSON.stringify(body.snapshot.guidance)).not.toContain('未触发');
     expect(body.snapshot.factor_quality.netliqTrend.asOf).toBe('2026-07-01');
     expect(body.snapshot.freshness.WDTGAL.observationDate).toBe('2026-07-01');
+    expect(body.snapshot.policy_regime).toBeNull();
+  });
+
+  it('does not use an incomplete reference returned by the explain lookup', async () => {
+    dbState.row = {
+      ...dbState.row,
+      factors_json: '{"netliqTrend":80}',
+      walcl: 6000, tga: 700, rrp: 100, netliq: 5200,
+    };
+    dbState.reference = {
+      date: '2026-07-01', score: 20, decision_status: 'DATA_INCOMPLETE',
+      factors_json: '{"netliqTrend":20}', walcl: 5900, tga: 700, rrp: 100, netliq: 5100,
+    };
+
+    const response = await worker.fetch(new Request('https://example.test/api/explain'), env);
+    const body = await response.json() as any;
+
+    expect(body.reference).toBeNull();
+    expect(body.deltaScore).toBeNull();
+    expect(body.attribution).toBeNull();
+    expect(body.netliq.reference).toBeNull();
   });
 
   it('does not invent neutral factor attribution for an incomplete latest snapshot', async () => {

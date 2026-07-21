@@ -133,4 +133,66 @@ describe('snapshot data quality', () => {
     expect(snapshot.factorResults.funding.components.SOFR.observationDate).toBe('2024-07-22');
     expect(snapshot.factorResults.funding.components.IORB.observationDate).toBe(DATE);
   });
+
+  it('uses the oldest reserve, SOFR, and IORB observation for complete reserve adequacy as-of', () => {
+    const map = completeMap();
+    map.SOFR = map.SOFR.filter(observation => observation.date <= '2024-07-22');
+    const snapshot = computeSnapshot(map, DATE) as any;
+
+    expect(snapshot.factorResults.reserveAdequacy.status).toBe('OK');
+    expect(snapshot.factorResults.reserveAdequacy.asOf).toBe('2024-07-22');
+  });
+
+  it('keeps reserve adequacy explicitly partial from reserves when funding components are unavailable', () => {
+    const snapshot = computeSnapshot({ ...completeMap(), SOFR: [], IORB: [] }, DATE) as any;
+
+    expect(snapshot.factorResults.reserveAdequacy.status).toBe('PARTIAL');
+    expect(snapshot.factorResults.reserveAdequacy.score).not.toBeNull();
+    expect(snapshot.factorResults.reserveAdequacy.asOf).toBe(completeMap().WRBWFRBL.at(-1)!.date);
+  });
+
+  it('does not forward-fill old TGA and RRP forever into critical net-liquidity history', () => {
+    const map = completeMap();
+    const walcl = weekly(6000, 15, 14);
+    const date = walcl.at(-1)!.date;
+    map.WALCL = walcl;
+    map.WDTGAL = [
+      { date: walcl[0].date, value: 700 },
+      { date, value: 713 },
+    ];
+    map.RRPONTSYD = [
+      { date: walcl[0].date, value: 500 },
+      { date, value: 450 },
+    ];
+
+    const snapshot = computeSnapshot(map, date) as any;
+
+    expect(snapshot.freshness.WDTGAL.status).toBe('FRESH');
+    expect(snapshot.freshness.RRPONTSYD.status).toBe('FRESH');
+    expect(snapshot.factorResults.netliqTrend.components.historyObservations).toBeLessThan(14);
+    expect(snapshot.decisionStatus).toBe('DATA_INCOMPLETE');
+  });
+
+  it.each([
+    ['BAMLH0A0HYM2', 'credit'],
+    ['DGS10', 'rates'],
+    ['WRBWFRBL', 'reserveAdequacy'],
+    ['T10Y2Y', 'curve'],
+  ] as const)('does not fabricate a %s lookback delta from an arbitrarily old reference', (seriesId, factorKey) => {
+    const map = completeMap();
+    const current = map[seriesId].at(-1)!;
+    map[seriesId] = [
+      { date: '2024-01-01', value: current.value - 1 },
+      current,
+    ];
+
+    const snapshot = computeSnapshot(map, DATE) as any;
+
+    const components = snapshot.factorResults[factorKey].components;
+    const lookbackChange = 'lookbackChange' in components
+      ? components.lookbackChange
+      : components.deltaReserves13w;
+    expect(lookbackChange).toBeNull();
+    expect(snapshot.factorResults[factorKey].status).not.toBe('OK');
+  });
 });

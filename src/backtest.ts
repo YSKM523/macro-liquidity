@@ -148,9 +148,11 @@ export function runBacktest(
 
     // per-factor IC
     for (const fk of factorKeys) {
-      const factorVals = pairs.map(p => snaps[p.idx].factors[fk] ?? 0);
+      const factorPairs = pairs.filter(p => Number.isFinite(snaps[p.idx].factors[fk]));
+      const factorVals = factorPairs.map(p => snaps[p.idx].factors[fk]);
+      const factorFwds = factorPairs.map(p => p.fwd);
       factorIcResult[fk] ??= {};
-      factorIcResult[fk][`${h}w`] = fin(spearman(factorVals, fwds));
+      factorIcResult[fk][`${h}w`] = fin(spearman(factorVals, factorFwds));
     }
   }
 

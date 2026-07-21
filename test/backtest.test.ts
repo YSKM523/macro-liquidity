@@ -216,6 +216,19 @@ describe('runBacktest', () => {
     }
   });
 
+  it('pairs factor IC only where the factor has a real finite value', () => {
+    const partial: BtSnap[] = Array.from({ length: 7 }, (_, i) => ({
+      date: addDays('2024-01-01', i * 7),
+      score: 50,
+      spx: [100, 110, 132, 171.6, 240.24, 360.36, 576.576][i],
+      factors: (i < 3 ? { credit: [10, 20, 30][i] } : {}) as Record<string, number>,
+    }));
+
+    const result = runBacktest(partial, [1], ['credit']);
+
+    expect(result.factor_ic_spearman.credit['1w']).toBeCloseTo(1);
+  });
+
   it('strategy_long_flat has required fields', () => {
     result = runBacktest(snaps);
     const s = result.strategy_long_flat;

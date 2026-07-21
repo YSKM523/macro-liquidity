@@ -20,6 +20,10 @@ describe('factorContributions', () => {
     const xs = factorContributions(F).map(c => Math.abs(c.contribution));
     for (let i = 1; i < xs.length; i++) expect(xs[i - 1]).toBeGreaterThanOrEqual(xs[i]);
   });
+  it('uses only real finite factors and renormalizes their configured positive weights', () => {
+    const r = factorContributions({ netliqTrend: 80, credit: Number.NaN });
+    expect(r).toEqual([{ key: 'netliqTrend', factor: 80, weight: 1, contribution: 30 }]);
+  });
 });
 
 describe('attributeScoreChange', () => {
@@ -32,6 +36,17 @@ describe('attributeScoreChange', () => {
     expect(arr.some(c => c.key === 'vol')).toBe(false);
     const xs = arr.map(c => Math.abs(c.deltaContribution));
     for (let i = 1; i < xs.length; i++) expect(xs[i - 1]).toBeGreaterThanOrEqual(xs[i]);
+  });
+  it('attributes only real factors common to both snapshots and renormalizes them', () => {
+    const arr = attributeScoreChange(
+      { netliqTrend: 80, credit: 20 },
+      { netliqTrend: 60, funding: 90 },
+    );
+    expect(arr).toEqual([{ key: 'netliqTrend', deltaFactor: 20, weight: 1, deltaContribution: 20 }]);
+  });
+
+  it('withholds attribution when there is no real common scoring factor', () => {
+    expect(attributeScoreChange({ credit: 20 }, { funding: 90 })).toEqual([]);
   });
 });
 

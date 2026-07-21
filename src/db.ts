@@ -60,13 +60,17 @@ export async function snapshotBefore(
   db: D1Database,
   date: string,
 ): Promise<{ date: string; verdict: Snapshot['verdict'] } | null> {
-  return db.prepare('SELECT * FROM daily_snapshot WHERE date < ? AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1')
+  return db.prepare("SELECT * FROM daily_snapshot WHERE date < ? AND decision_status = 'OK' AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1")
     .bind(date).first<{ date: string; verdict: Snapshot['verdict'] }>();
 }
 
 export async function snapshotHistory(db: D1Database, from: string, to: string) {
   const rs = await db.prepare(
-    'SELECT date, netliq, walcl, score, verdict, qe_qt_regime, spx FROM daily_snapshot WHERE date BETWEEN ? AND ? ORDER BY date'
+    `SELECT date, netliq, walcl,
+       CASE WHEN decision_status = 'OK' THEN score ELSE NULL END AS score,
+       CASE WHEN decision_status = 'OK' AND verdict IS NOT NULL THEN verdict ELSE NULL END AS verdict,
+       qe_qt_regime, spx, decision_status
+     FROM daily_snapshot WHERE date BETWEEN ? AND ? ORDER BY date`
   ).bind(from, to).all();
   return rs.results ?? [];
 }
@@ -79,7 +83,7 @@ export async function distinctSnapshotDates(db: D1Database, lastN: number): Prom
 
 export async function loadBacktestRows(db: D1Database): Promise<any[]> {
   const rs = await db.prepare(
-    'SELECT date, score, spx, verdict, factors_json, qe_qt_regime, vix_eod FROM daily_snapshot WHERE spx IS NOT NULL ORDER BY date'
+    "SELECT date, score, spx, verdict, factors_json, qe_qt_regime, vix_eod FROM daily_snapshot WHERE decision_status = 'OK' AND spx IS NOT NULL ORDER BY date"
   ).all();
   return rs.results ?? [];
 }
@@ -103,6 +107,6 @@ export async function countSnapshots(db: D1Database): Promise<number> {
 }
 
 export async function snapshotOnOrBefore(db: D1Database, date: string) {
-  return db.prepare('SELECT * FROM daily_snapshot WHERE date <= ? ORDER BY date DESC LIMIT 1')
+  return db.prepare("SELECT * FROM daily_snapshot WHERE date <= ? AND decision_status = 'OK' ORDER BY date DESC LIMIT 1")
     .bind(date).first();
 }

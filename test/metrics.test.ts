@@ -145,7 +145,9 @@ describe('verdict + snapshot', () => {
         date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
         value: start + i * step,
       }));
-    const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+    const daily = (v: number) => Array.from({ length: 213 }, (_, i) => ({
+      date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: v,
+    }));
     const m = {
       WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),
       RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
@@ -228,7 +230,9 @@ describe('computeSnapshot coverage', () => {
       date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
       value: start + i * step,
     }));
-  const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+  const daily = (v: number) => Array.from({ length: 213 }, (_, i) => ({
+    date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: v,
+  }));
   const fullMap = {
     WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),
     RPONTSYD: daily(0), SOFR: daily(5.3), IORB: daily(5.4),
@@ -335,7 +339,9 @@ describe('reserveAdequacy integration', () => {
       date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
       value: start + i * step,
     }));
-  const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+  const daily = (v: number) => Array.from({ length: 213 }, (_, i) => ({
+    date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: v,
+  }));
   const wkReserves = Array.from({ length: 30 }, (_, i) => ({
     date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
     value: 3300 + i * 5,  // gently rising reserves around mid-range
@@ -407,7 +413,9 @@ describe('curve integration', () => {
       date: new Date(Date.UTC(2024, 0, 3 + i * 7)).toISOString().slice(0, 10),
       value: start + i * step,
     }));
-  const daily = (v: number) => [{ date: '2024-01-01', value: v }, { date: '2024-07-31', value: v }];
+  const daily = (v: number) => Array.from({ length: 213 }, (_, i) => ({
+    date: new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10), value: v,
+  }));
 
   const baseMap = {
     WALCL: wk(6000, 15), WDTGAL: wk(700, 0), RRPONTSYD: daily(500),

@@ -76,27 +76,24 @@ describe('weightedFrom', () => {
     expect(weightedFrom(factors, weights)).toBeCloseTo(50);
   });
 
-  it('defaults missing factor to 50', () => {
-    const factors: Record<string, number> = {}; // all missing → default 50
-    const weights: Record<string, number> = {};
-    for (const k of FACTOR_KEYS) weights[k] = 1 / FACTOR_KEYS.length;
-    // 50 * 1 = 50
-    expect(weightedFrom(factors, weights)).toBeCloseTo(50);
+  it('renormalizes unchanged positive weights across real finite factors', () => {
+    expect(weightedFrom({ netliqTrend: 80 }, { netliqTrend: 0.25, credit: 0.75 })).toBe(80);
   });
 
-  it('returns 0 when all weights are 0', () => {
+  it('returns null when no positively weighted real factor is available', () => {
     const factors: Record<string, number> = {};
     for (const k of FACTOR_KEYS) factors[k] = 90;
     const weights: Record<string, number> = {};
     for (const k of FACTOR_KEYS) weights[k] = 0;
-    expect(weightedFrom(factors, weights)).toBe(0);
+    expect(weightedFrom(factors, weights)).toBeNull();
+    expect(weightedFrom({}, { netliqTrend: 1 })).toBeNull();
   });
 });
 
 // ---------- icWeights ----------
 
 describe('icWeights', () => {
-  it('returns equal weights (1/8) when all factor ICs are non-positive', () => {
+  it('returns equal weights across actually available factors when all available ICs are non-positive', () => {
     // Build snaps where netliqTrend is negatively correlated with future returns
     // and all other factors too — so all ICs <= 0 → fall back to equal weight
     const N = 60;
@@ -110,10 +107,11 @@ describe('icWeights', () => {
     });
     // All other factors are constant 50 → IC ≈ 0 except netliqTrend (negative)
     const w = icWeights(snaps, 4);
-    const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy','curve'];
-    for (const k of FACTOR_KEYS) {
-      expect(w[k]).toBeCloseTo(1 / 9, 5);
+    const AVAILABLE_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy'];
+    for (const k of AVAILABLE_KEYS) {
+      expect(w[k]).toBeCloseTo(1 / AVAILABLE_KEYS.length, 5);
     }
+    expect(w.curve).toBe(0);
   });
 
   it('gives the highest weight to the factor most positively correlated with forward returns', () => {
@@ -146,6 +144,20 @@ describe('icWeights', () => {
     for (const v of Object.values(w)) {
       expect(v).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('trains each factor IC from only its real finite factor-return pairs', () => {
+    const snaps: BtSnap[] = Array.from({ length: 7 }, (_, i) => ({
+      date: addDays('2024-01-01', i * 7),
+      score: 50,
+      spx: [100, 110, 132, 171.6, 240.24, 360.36, 576.576][i],
+      factors: (i < 3 ? { credit: [10, 20, 30][i] } : {}) as Record<string, number>,
+    }));
+
+    const w = icWeights(snaps, 1);
+
+    expect(w.credit).toBe(1);
+    expect(Object.entries(w).filter(([key]) => key !== 'credit').every(([, value]) => value === 0)).toBe(true);
   });
 });
 

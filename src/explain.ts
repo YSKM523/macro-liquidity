@@ -4,12 +4,24 @@ const W = WEIGHTS as Record<string, number>;
 
 export interface FactorContribution { key: string; factor: number; weight: number; contribution: number }
 
+function availableScoringKeys(...factorSets: Record<string, number>[]): string[] {
+  return COVERAGE_FACTORS.filter((key) =>
+    (W[key] ?? 0) > 0 && factorSets.every(factors => Number.isFinite(factors[key])),
+  );
+}
+
+function normalizedWeight(key: string, keys: string[]): number {
+  const availableWeight = keys.reduce((sum, availableKey) => sum + W[availableKey], 0);
+  return availableWeight > 0 ? W[key] / availableWeight : 0;
+}
+
 // 离中性贡献:(factor − 50) × weight;8 个权重>0 因子,Σ = 未封顶分 − 50。按 |贡献| 降序。
 export function factorContributions(factors: Record<string, number>): FactorContribution[] {
-  return COVERAGE_FACTORS
+  const keys = availableScoringKeys(factors);
+  return keys
     .map((key) => {
-      const factor = factors[key] ?? 50;
-      const weight = W[key] ?? 0;
+      const factor = factors[key];
+      const weight = normalizedWeight(key, keys);
       return { key, factor, weight, contribution: (factor - 50) * weight };
     })
     .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
@@ -19,10 +31,11 @@ export interface FactorAttribution { key: string; deltaFactor: number; weight: n
 
 // 变化归因:weight × (cur − ref);Σ = 未封顶(curScore − refScore)。按 |拉动| 降序。
 export function attributeScoreChange(cur: Record<string, number>, ref: Record<string, number>): FactorAttribution[] {
-  return COVERAGE_FACTORS
+  const keys = availableScoringKeys(cur, ref);
+  return keys
     .map((key) => {
-      const deltaFactor = (cur[key] ?? 50) - (ref[key] ?? 50);
-      const weight = W[key] ?? 0;
+      const deltaFactor = cur[key] - ref[key];
+      const weight = normalizedWeight(key, keys);
       return { key, deltaFactor, weight, deltaContribution: weight * deltaFactor };
     })
     .sort((a, b) => Math.abs(b.deltaContribution) - Math.abs(a.deltaContribution));

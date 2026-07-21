@@ -88,12 +88,34 @@ export function buildWeeklyNetliq(m: SeriesMap, upTo: string): number[] {
   return out;
 }
 
+function buildWeeklyNetliqFresh(m: SeriesMap, upTo: string): number[] {
+  const walcl = m.WALCL ?? [];
+  const out: number[] = [];
+  for (const observation of walcl) {
+    if (observation.date > upTo) break;
+    const tga = asOfFresh(m.WDTGAL ?? [], observation.date, SERIES.WDTGAL).value;
+    const rrp = asOfFresh(m.RRPONTSYD ?? [], observation.date, SERIES.RRPONTSYD).value;
+    if (tga == null || rrp == null) continue;
+    out.push(observation.value - tga - rrp);
+  }
+  return out;
+}
+
 export function changeOverDays(series: Obs[], date: string, days: number): number | null {
   const latest = asOf(series, date);
   if (latest == null) return null;
   const d = new Date(date + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() - days);
   const past = asOf(series, d.toISOString().slice(0, 10));
+  return past == null ? null : latest - past;
+}
+
+function changeOverDaysFresh(series: Obs[], date: string, days: number, rule: FreshnessRule): number | null {
+  const latest = asOfFresh(series, date, rule).value;
+  if (latest == null) return null;
+  const target = new Date(date + 'T00:00:00Z');
+  target.setUTCDate(target.getUTCDate() - days);
+  const past = asOfFresh(series, target.toISOString().slice(0, 10), rule).value;
   return past == null ? null : latest - past;
 }
 
@@ -496,7 +518,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   };
 
   const walclWeekly = (m.WALCL ?? []).filter(o => o.date <= date).map(o => o.value);
-  const netliqWeekly = buildWeeklyNetliq(m, date);
+  const netliqWeekly = buildWeeklyNetliqFresh(m, date);
 
   const walcl = freshness.WALCL.value;
   const tga = freshness.WDTGAL.value;
@@ -509,9 +531,9 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const sofrIorb = (sofr != null && iorb != null) ? sofr - iorb : null;
   const hyOas = freshness.BAMLH0A0HYM2.value;
   const hyHistory = (m.BAMLH0A0HYM2 ?? []).filter(o => o.date <= date).map(o => o.value);
-  const creditDelta = changeOverDays(m.BAMLH0A0HYM2 ?? [], date, CREDIT_LOOKBACK_DAYS);
+  const creditDelta = changeOverDaysFresh(m.BAMLH0A0HYM2 ?? [], date, CREDIT_LOOKBACK_DAYS, SERIES.BAMLH0A0HYM2);
   const dgs10 = freshness.DGS10.value;
-  const delta10y = changeOverDays(m.DGS10 ?? [], date, RATES_LOOKBACK_DAYS);
+  const delta10y = changeOverDaysFresh(m.DGS10 ?? [], date, RATES_LOOKBACK_DAYS, SERIES.DGS10);
   const dxy = freshness.DTWEXBGS.value;
   const vix = freshness.VIXCLS.value;
 
@@ -519,10 +541,10 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const netliqDir = netliqDirection(netliqWeekly);
 
   const reservesLevel = freshness.WRBWFRBL.value;
-  const deltaReserves13w = changeOverDays(m.WRBWFRBL ?? [], date, 91); // ~13 weeks
+  const deltaReserves13w = changeOverDaysFresh(m.WRBWFRBL ?? [], date, 91, SERIES.WRBWFRBL); // ~13 weeks
 
   const curveSlope = freshness.T10Y2Y.value;
-  const curveChange20 = changeOverDays(m.T10Y2Y ?? [], date, 20);
+  const curveChange20 = changeOverDaysFresh(m.T10Y2Y ?? [], date, 20, SERIES.T10Y2Y);
 
   const netliqHistoryUsable = netliqWeekly.length >= NETLIQ_TREND_WEEKS + 1;
   const impulseHistoryUsable = walclWeekly.length >= 14;
@@ -559,7 +581,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     ),
     vol: result(['VIXCLS'], vix != null ? scoreVol(vix) : null),
     reserveAdequacy: result(
-      ['WRBWFRBL'],
+      fundingUsable ? ['WRBWFRBL', 'SOFR', 'IORB'] : ['WRBWFRBL'],
       reservesLevel != null ? scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb) : null,
       {
         partial: deltaReserves13w == null || !fundingUsable,

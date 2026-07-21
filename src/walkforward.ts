@@ -5,28 +5,32 @@ import { WEIGHTS } from './config';
 const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy','curve'];
 
 // Weighted sum of factors (each 0-100, weights sum ≈ 1 → result 0-100)
-export function weightedFrom(factors: Record<string, number>, weights: Record<string, number>): number {
-  let s = 0;
-  for (const k of FACTOR_KEYS) s += (factors[k] ?? 50) * (weights[k] ?? 0);
-  return s;
+export function weightedFrom(factors: Record<string, number>, weights: Record<string, number>): number | null {
+  const available = FACTOR_KEYS.filter(k => Number.isFinite(factors[k]) && Number.isFinite(weights[k]) && weights[k] > 0);
+  const availableWeight = available.reduce((sum, key) => sum + weights[key], 0);
+  if (!(availableWeight > 0)) return null;
+  return available.reduce((sum, key) => sum + factors[key] * weights[key], 0) / availableWeight;
 }
 
 // Derive IC-based weights from a training window.
 // w_f = max(0, IC_f) normalised; all IC ≤ 0 → equal weights.
 export function icWeights(window: BtSnap[], horizonWeeks: number): Record<string, number> {
   const pairs = forwardReturns(window, horizonWeeks);
-  const fwds = pairs.map(p => p.fwd);
   const raw: Record<string, number> = {};
+  const eligible: string[] = [];
   let sum = 0;
   for (const k of FACTOR_KEYS) {
-    const xs = pairs.map(p => window[p.idx].factors[k] ?? 50);
-    const w = Math.max(0, spearman(xs, fwds));
+    const factorPairs = pairs.filter(p => Number.isFinite(window[p.idx].factors[k]));
+    const xs = factorPairs.map(p => window[p.idx].factors[k]);
+    const factorFwds = factorPairs.map(p => p.fwd);
+    if (xs.length >= 3) eligible.push(k);
+    const w = xs.length >= 3 ? Math.max(0, spearman(xs, factorFwds)) : 0;
     raw[k] = w;
     sum += w;
   }
   if (!(sum > 0)) {
-    const eq = 1 / FACTOR_KEYS.length;
-    return Object.fromEntries(FACTOR_KEYS.map(k => [k, eq]));
+    const eq = eligible.length > 0 ? 1 / eligible.length : 0;
+    return Object.fromEntries(FACTOR_KEYS.map(k => [k, eligible.includes(k) ? eq : 0]));
   }
   return Object.fromEntries(FACTOR_KEYS.map(k => [k, raw[k] / sum]));
 }
@@ -110,11 +114,12 @@ export function runWalkForward(
       const curScore = weightedFrom(fac, current);
       const eqScore  = weightedFrom(fac, equal);
 
-      acc.wf.s.push(wfScore);   acc.wf.f.push(p.fwd);
-      acc.cur.s.push(curScore); acc.cur.f.push(p.fwd);
-      acc.eq.s.push(eqScore);   acc.eq.f.push(p.fwd);
-      fs.push(wfScore);
-      ff.push(p.fwd);
+      if (wfScore != null) {
+        acc.wf.s.push(wfScore); acc.wf.f.push(p.fwd);
+        fs.push(wfScore); ff.push(p.fwd);
+      }
+      if (curScore != null) { acc.cur.s.push(curScore); acc.cur.f.push(p.fwd); }
+      if (eqScore != null) { acc.eq.s.push(eqScore); acc.eq.f.push(p.fwd); }
     }
 
     folds.push({

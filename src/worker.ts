@@ -99,7 +99,7 @@ export default {
         decision_status: decisionStatus,
         factor_quality: parseJsonObject(r.factor_quality_json),
         freshness: parseJsonObject(r.freshness_json),
-        policy_regime: policyRegime(r.qe_qt_regime, r.date),
+        policy_regime: decisionStatus === 'OK' ? policyRegime(r.qe_qt_regime, r.date) : null,
         reason: decision.reason,
         display_verdict: decision.displayVerdict,
         live_stress: stress,
@@ -127,7 +127,7 @@ export default {
       const refDate = new Date(new Date(cur.date + 'T00:00:00Z').getTime() - days * 86400000)
         .toISOString().slice(0, 10);
       const refRow: any = await snapshotOnOrBefore(env.DB, refDate);
-      const reference = (refRow && refRow.date !== cur.date) ? refRow : null;
+      const reference = (refRow && refRow.decision_status === 'OK' && refRow.date !== cur.date) ? refRow : null;
 
       const curFactors = JSON.parse(cur.factors_json ?? '{}');
       const contributions = factorContributions(curFactors);

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 // The project tsconfig intentionally only loads Workers types; this test runs in Vitest's Node runtime.
 // @ts-ignore
 import { existsSync, readFileSync } from 'node:fs';
-import { snapshotBefore, upsertSnapshot } from '../src/db';
+import { loadBacktestRows, snapshotBefore, snapshotHistory, snapshotOnOrBefore, upsertSnapshot } from '../src/db';
 
 describe('snapshotBefore', () => {
   it('loads the nearest snapshot strictly before the rebuild start date', async () => {
@@ -14,10 +14,63 @@ describe('snapshotBefore', () => {
     const row = await snapshotBefore(db, '2024-05-15');
 
     expect(prepare).toHaveBeenCalledWith(
-      'SELECT * FROM daily_snapshot WHERE date < ? AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1',
+      "SELECT * FROM daily_snapshot WHERE date < ? AND decision_status = 'OK' AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1",
     );
     expect(bind).toHaveBeenCalledWith('2024-05-15');
     expect(row).toEqual({ date: '2024-05-08', verdict: 'BULLISH' });
+  });
+
+  it('requires an explicitly valid decision rather than accepting a legacy verdict', async () => {
+    const first = vi.fn(async () => null);
+    const prepare = vi.fn(() => ({ bind: vi.fn(() => ({ first })) }));
+    const db = { prepare } as unknown as D1Database;
+
+    await snapshotBefore(db, '2024-05-15');
+
+    const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    expect(sql).toContain("decision_status = 'OK'");
+    expect(sql).toContain('verdict IS NOT NULL');
+  });
+});
+
+describe('historical snapshot consumers', () => {
+  it('uses only explicit OK rows as explain references', async () => {
+    const first = vi.fn(async () => null);
+    const prepare = vi.fn(() => ({ bind: vi.fn(() => ({ first })) }));
+    const db = { prepare } as unknown as D1Database;
+
+    await snapshotOnOrBefore(db, '2024-05-15');
+
+    const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    expect(sql).toContain("decision_status = 'OK'");
+  });
+
+  it('excludes legacy and incomplete rows from every analytics loader', async () => {
+    const all = vi.fn(async () => ({ results: [] }));
+    const prepare = vi.fn(() => ({ all }));
+    const db = { prepare } as unknown as D1Database;
+
+    await loadBacktestRows(db);
+
+    const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    expect(sql).toContain("decision_status = 'OK'");
+  });
+
+  it('exposes decision status while masking official score and verdict for non-OK history rows', async () => {
+    const all = vi.fn(async () => ({ results: [] }));
+    const bind = vi.fn(() => ({ all }));
+    const prepare = vi.fn(() => ({ bind }));
+    const db = { prepare } as unknown as D1Database;
+
+    await snapshotHistory(db, '2024-01-01', '2024-12-31');
+
+    const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    expect(sql).toContain('decision_status');
+    expect(sql).toMatch(/CASE WHEN decision_status = 'OK' THEN score ELSE NULL END AS score/);
+    expect(sql).toMatch(/CASE WHEN decision_status = 'OK' AND verdict IS NOT NULL THEN verdict ELSE NULL END AS verdict/);
+    expect(sql).toContain('netliq');
+    expect(sql).toContain('walcl');
+    expect(bind).toHaveBeenCalledWith('2024-01-01', '2024-12-31');
   });
 });
 
