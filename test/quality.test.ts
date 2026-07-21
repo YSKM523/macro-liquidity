@@ -195,4 +195,88 @@ describe('snapshot data quality', () => {
     expect(lookbackChange).toBeNull();
     expect(snapshot.factorResults[factorKey].status).not.toBe('OK');
   });
+
+  it('scores partial credit from the real level component only', () => {
+    const map = completeMap();
+    map.BAMLH0A0HYM2 = [
+      { date: '2024-01-01', value: 2 },
+      { date: DATE, value: 3 },
+    ];
+
+    const snapshot = computeSnapshot(map, DATE) as any;
+
+    expect(snapshot.factorResults.credit.status).toBe('PARTIAL');
+    expect(snapshot.factorResults.credit.components.lookbackChange).toBeNull();
+    expect(snapshot.factorResults.credit.score).toBe(0);
+  });
+
+  it('scores partial curve from the real slope level component only', () => {
+    const map = completeMap();
+    map.T10Y2Y = [
+      { date: '2024-01-01', value: 0 },
+      { date: DATE, value: 1.5 },
+    ];
+
+    const snapshot = computeSnapshot(map, DATE) as any;
+
+    expect(snapshot.factorResults.curve.status).toBe('PARTIAL');
+    expect(snapshot.factorResults.curve.components.lookbackChange).toBeNull();
+    expect(snapshot.factorResults.curve.score).toBe(100);
+  });
+
+  it('renormalizes partial reserve adequacy over real level and funding components', () => {
+    const map = completeMap();
+    map.WRBWFRBL = [{ date: DATE, value: 3300 }];
+    map.SOFR = [{ date: DATE, value: 5.4 }];
+    map.IORB = [{ date: DATE, value: 5.4 }];
+
+    const snapshot = computeSnapshot(map, DATE) as any;
+
+    expect(snapshot.factorResults.reserveAdequacy.status).toBe('PARTIAL');
+    expect(snapshot.factorResults.reserveAdequacy.components.deltaReserves13w).toBeNull();
+    expect(snapshot.factorResults.reserveAdequacy.score).toBeCloseTo((50 * 0.5 + 100 * 0.2) / 0.7, 12);
+  });
+
+  it('renormalizes partial reserve adequacy over real level and momentum when funding is unavailable', () => {
+    const map = completeMap();
+    map.SOFR = [];
+    map.IORB = [];
+
+    const snapshot = computeSnapshot(map, DATE) as any;
+    const reservesLevel = 3200 + 29 * 8;
+    const reservesMomentum = 13 * 8;
+    const levelScore = (reservesLevel - 2800) / (3800 - 2800) * 100;
+    const momentumScore = (reservesMomentum - (-300)) / (300 - (-300)) * 100;
+
+    expect(snapshot.factorResults.reserveAdequacy.status).toBe('PARTIAL');
+    expect(snapshot.factorResults.reserveAdequacy.score).toBeCloseTo(
+      (levelScore * 0.5 + momentumScore * 0.3) / 0.8,
+      12,
+    );
+  });
+
+  it('fails closed when the recent net-liquidity cadence has a long invalid gap despite enough old valid history', () => {
+    const map = completeMap();
+    const walcl = weekly(6000, 15, 30);
+    const date = walcl.at(-1)!.date;
+    const oldValid = walcl.slice(0, 14);
+    map.WALCL = walcl;
+    map.WDTGAL = [
+      ...oldValid.map((observation, index) => ({ date: observation.date, value: 700 + index })),
+      { date, value: 729 },
+    ];
+    map.RRPONTSYD = [
+      ...oldValid.map((observation, index) => ({ date: observation.date, value: 500 - index })),
+      { date, value: 470 },
+    ];
+
+    const snapshot = computeSnapshot(map, date) as any;
+
+    expect(snapshot.freshness.WDTGAL.status).toBe('FRESH');
+    expect(snapshot.freshness.RRPONTSYD.status).toBe('FRESH');
+    expect(snapshot.factorResults.netliqTrend.status).toBe('MISSING');
+    expect(snapshot.decisionStatus).toBe('DATA_INCOMPLETE');
+    expect(snapshot.score).toBeNull();
+    expect(snapshot.verdict).toBeNull();
+  });
 });

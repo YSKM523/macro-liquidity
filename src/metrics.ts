@@ -88,17 +88,20 @@ export function buildWeeklyNetliq(m: SeriesMap, upTo: string): number[] {
   return out;
 }
 
-function buildWeeklyNetliqFresh(m: SeriesMap, upTo: string): number[] {
-  const walcl = m.WALCL ?? [];
+function buildRecentWeeklyNetliqFresh(
+  m: SeriesMap,
+  upTo: string,
+  observationsRequired: number,
+): { values: number[]; cadenceObservations: number } {
+  const walcl = (m.WALCL ?? []).filter(observation => observation.date <= upTo).slice(-observationsRequired);
   const out: number[] = [];
   for (const observation of walcl) {
-    if (observation.date > upTo) break;
     const tga = asOfFresh(m.WDTGAL ?? [], observation.date, SERIES.WDTGAL).value;
     const rrp = asOfFresh(m.RRPONTSYD ?? [], observation.date, SERIES.RRPONTSYD).value;
     if (tga == null || rrp == null) continue;
     out.push(observation.value - tga - rrp);
   }
-  return out;
+  return { values: out, cadenceObservations: walcl.length };
 }
 
 export function changeOverDays(series: Obs[], date: string, days: number): number | null {
@@ -186,6 +189,12 @@ export function scoreCredit(hyLatest: number, hyHistory: number[], delta20: numb
   return clamp(0.55 * calm + 0.45 * momentum - fragility);
 }
 
+function scoreAvailableCredit(hyLatest: number, hyHistory: number[], delta20: number | null): number {
+  if (delta20 != null) return scoreCredit(hyLatest, hyHistory, delta20);
+  const pct = percentileRank(hyLatest, hyHistory);
+  return clamp((1 - pct) * 100);
+}
+
 export function scoreFunding(sofrIorb: number): number {
   // <=0 calm → 100; rises through +0.10 → 0
   return linMap(sofrIorb, 0.10, 0.0);
@@ -234,6 +243,23 @@ export function scoreReserveAdequacy(
   return clamp(0.5 * lvl + 0.3 * mom + 0.2 * fund);
 }
 
+function scoreAvailableReserveAdequacy(
+  reservesLevel: number,
+  deltaReserves13w: number | null,
+  sofrIorb: number | null,
+): number {
+  if (deltaReserves13w != null && sofrIorb != null) {
+    return scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb);
+  }
+  const components = [
+    { score: linMap(reservesLevel, RESERVE_LOW, RESERVE_HIGH), weight: 0.5 },
+    { score: deltaReserves13w == null ? null : linMap(deltaReserves13w, -300, 300), weight: 0.3 },
+    { score: sofrIorb == null ? null : linMap(sofrIorb, 0.10, 0.00), weight: 0.2 },
+  ].filter((component): component is { score: number; weight: number } => component.score != null);
+  const availableWeight = components.reduce((sum, component) => sum + component.weight, 0);
+  return clamp(components.reduce((sum, component) => sum + component.score * component.weight, 0) / availableWeight);
+}
+
 /**
  * Yield-curve slope score (0–100).
  * @param slope       T10Y2Y level (pp): -0.5 inverted → 0, +1.5 steep → 100
@@ -243,6 +269,10 @@ export function scoreCurve(slope: number | null, slopeChange20: number | null): 
   const lvl = slope == null ? 50 : linMap(slope, -0.5, 1.5);
   const mom = slopeChange20 == null ? 50 : linMap(slopeChange20, -0.3, 0.3);
   return clamp(0.5 * lvl + 0.5 * mom);
+}
+
+function scoreAvailableCurve(slope: number, slopeChange20: number | null): number {
+  return slopeChange20 == null ? linMap(slope, -0.5, 1.5) : scoreCurve(slope, slopeChange20);
 }
 
 export function weightedScore(f: Factors): number {
@@ -518,7 +548,8 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   };
 
   const walclWeekly = (m.WALCL ?? []).filter(o => o.date <= date).map(o => o.value);
-  const netliqWeekly = buildWeeklyNetliqFresh(m, date);
+  const recentNetliq = buildRecentWeeklyNetliqFresh(m, date, NETLIQ_TREND_WEEKS + 1);
+  const netliqWeekly = recentNetliq.values;
 
   const walcl = freshness.WALCL.value;
   const tga = freshness.WDTGAL.value;
@@ -546,14 +577,18 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const curveSlope = freshness.T10Y2Y.value;
   const curveChange20 = changeOverDaysFresh(m.T10Y2Y ?? [], date, 20, SERIES.T10Y2Y);
 
-  const netliqHistoryUsable = netliqWeekly.length >= NETLIQ_TREND_WEEKS + 1;
+  const netliqHistoryUsable = recentNetliq.cadenceObservations === NETLIQ_TREND_WEEKS + 1
+    && netliqWeekly.length === recentNetliq.cadenceObservations;
   const impulseHistoryUsable = walclWeekly.length >= 14;
   const fundingUsable = sofrIorb != null;
   const factorResults: FactorResults = {
     netliqTrend: result(
       ['WALCL', 'WDTGAL', 'RRPONTSYD'],
       netliqHistoryUsable ? scoreNetliqTrend(netliqWeekly) : null,
-      { historyUsable: netliqHistoryUsable, extra: { historyObservations: netliqWeekly.length } },
+      {
+        historyUsable: netliqHistoryUsable,
+        extra: { historyObservations: netliqWeekly.length, cadenceObservations: recentNetliq.cadenceObservations },
+      },
     ),
     impulse: result(
       ['WALCL'],
@@ -562,7 +597,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     ),
     credit: result(
       ['BAMLH0A0HYM2'],
-      hyOas != null ? scoreCredit(hyOas, hyHistory, creditDelta) : null,
+      hyOas != null ? scoreAvailableCredit(hyOas, hyHistory, creditDelta) : null,
       { partial: creditDelta == null, extra: { lookbackChange: creditDelta } },
     ),
     funding: result(['SOFR', 'IORB'], fundingUsable ? scoreFunding(sofrIorb) : null),
@@ -582,7 +617,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     vol: result(['VIXCLS'], vix != null ? scoreVol(vix) : null),
     reserveAdequacy: result(
       fundingUsable ? ['WRBWFRBL', 'SOFR', 'IORB'] : ['WRBWFRBL'],
-      reservesLevel != null ? scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb) : null,
+      reservesLevel != null ? scoreAvailableReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb) : null,
       {
         partial: deltaReserves13w == null || !fundingUsable,
         extra: { deltaReserves13w, SOFR: freshness.SOFR, IORB: freshness.IORB },
@@ -590,7 +625,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     ),
     curve: result(
       ['T10Y2Y'],
-      curveSlope != null ? scoreCurve(curveSlope, curveChange20) : null,
+      curveSlope != null ? scoreAvailableCurve(curveSlope, curveChange20) : null,
       { partial: curveChange20 == null, extra: { lookbackChange: curveChange20 } },
     ),
   };
