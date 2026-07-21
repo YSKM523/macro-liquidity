@@ -16,7 +16,7 @@
 | PR-04 | 已完成 | `6367de0`–`19ceabc` | 独立 freshness、FactorResult、DATA_INCOMPLETE 与质量传播 |
 | PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
 | PR-06 | 已完成（本地） | `cf7463c`–`8a8ab9e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
-| PR-07 | 已完成（本地） | `28af59c` | 行情 source/fetch 时间分离、统一 provider、DXY/10Y/Stress fallback 与 divergence fail-closed |
+| PR-07 | 已完成（本地） | `28af59c`–`9dec8fb` | 行情 source/fetch 时间分离、统一 provider、DXY/10Y/Stress fallback 与 divergence fail-closed |
 | PR-08～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。

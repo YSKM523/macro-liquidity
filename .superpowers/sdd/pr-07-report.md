@@ -10,7 +10,7 @@ No deploy, push, remote D1 access, production mutation, schema migration, PIT/vi
 
 - `MarketDataProvider` is the single typed quote/history contract. Every result carries value or points, provider observation time, fetch time, market state, delay flag, actual/primary provider names, fallback flag, and `OK`, `STALE`, `DIVERGENT`, or `FAILED` quality state.
 - Yahoo parses `regularMarketTime`, `marketState`, and `exchangeDataDelayedBy`. Yahoo history uses the timestamp paired with the last finite close. Missing or invalid provider timestamps produce a failed result and are never replaced with `fetchedAt`.
-- Stooq quote provenance comes from its CSV date/time. Stooq history and FRED use their observation dates as source timestamps. FRED DGS10 is the official 10Y fallback.
+- Stooq quote provenance comes from its eight-column quote CSV date/time. Its history endpoint has a separate real six-column `Date,Open,High,Low,Close,Volume` contract. Stooq history and FRED use strictly validated observation dates as source timestamps; impossible calendar dates fail with `INVALID_TIMESTAMP`. FRED DGS10 is the official 10Y fallback.
 - SPX/VIX use Yahoo→Stooq; DXY uses Yahoo→Stooq; 10Y uses normalized Yahoo TNX→FRED DGS10. Both sources are requested so comparable observations can be quality-checked as well as used for fallback.
 - Named `MARKET_DATA_QUALITY` tolerances are separate from Champion scoring and stress thresholds. Quote levels are compared only on the same market date. Histories are compared by normalized change only on exact shared dates, avoiding both unlike DXY/broad-dollar levels and Yahoo-one-month versus Stooq-long-history false divergence.
 - A material disagreement returns `DIVERGENT` plus `SOURCE_DIVERGENCE`; compatibility numeric fields become `null` instead of silently presenting either source as trusted.
@@ -30,7 +30,7 @@ No deploy, push, remote D1 access, production mutation, schema migration, PIT/vi
 
 ### Tests
 
-- `test/prices.test.ts` — Yahoo/Stooq timestamps, weekend behavior, DXY/10Y fallbacks, quote/history divergence, shared history windows, valid-close timestamp pairing, stress fallback/fail-closed, and DXY-only requests.
+- `test/prices.test.ts` — Yahoo/Stooq timestamps, real Stooq quote/history CSV contracts, strict Stooq/FRED calendar dates, weekend behavior, DXY/10Y fallbacks, quote/history divergence, shared history windows, valid-close timestamp pairing, stress fallback/fail-closed, and DXY-only requests.
 - `test/worker.test.ts` — API numeric compatibility plus structured source/fetch/provider/fallback metadata.
 - `test/ui-assets.test.ts` — separate source/fetch labels and explicit provider quality rendering.
 
@@ -70,7 +70,19 @@ Additional provider-time RED produced 2 failed and 31 passed: Yahoo history used
 env -u NODE_OPTIONS npx vitest run test/prices.test.ts test/worker.test.ts test/ui-assets.test.ts
 ```
 
-Result: PASS — 3 files, 58 tests passed, 0 failed.
+Result: PASS — 3 files, 60 tests passed, 0 failed.
+
+### Task-review history-schema RED/GREEN
+
+The task-review fixtures were first changed to Stooq's real history format (`Date,Open,High,Low,Close,Volume`) and impossible calendar dates were added before production edits:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/prices.test.ts test/worker.test.ts
+```
+
+RED result: 1 file failed and 1 passed; 4 tests failed and 43 passed. SPX/VIX/DXY history fallback and DXY extension could not parse real Stooq history rows, Stooq invalid dates were mislabeled `NO_DATA`, and FRED invalid dates were accepted as `OK`.
+
+After separating quote/history parsers, using history columns 0/4, strictly validating real calendar dates, and freezing the API test clock, the same two-file command passed 47 tests. The complete PR-07 focused command (`prices`, `worker`, and `ui-assets`) then passed 3 files, 60 tests, 0 failed.
 
 ## Final verification
 
@@ -80,7 +92,7 @@ Result: PASS — 3 files, 58 tests passed, 0 failed.
 env -u NODE_OPTIONS npm test
 ```
 
-Result: PASS — 24 test files, 407 tests passed, 0 failed.
+Result: PASS — 24 test files, 409 tests passed, 0 failed.
 
 ### TypeScript
 
@@ -116,12 +128,17 @@ No schema or migration file was added. Local migration execution is therefore no
 This PR has no schema rollback. Revert the local PR-07 commits, rebuild, and redeploy only through a separately authorized release process:
 
 ```bash
-git revert <PR-07-documentation-commit> 28af59c
+git revert --no-commit 732880e..HEAD
+git commit -m "revert: remove PR-07 provider fallback"
 env -u NODE_OPTIONS npm test
 env -u NODE_OPTIONS npx tsc --noEmit
 ```
 
+The substantive reverse order at report time is the current report-only HEAD, then `9dec8fb`, `099c579`, and `28af59c`; the base-to-HEAD range avoids an unstable placeholder for the commit that contains this report itself.
+
 Reverting restores the pre-PR-07 Yahoo/Stooq numeric API behavior. No database cleanup or data restoration is needed because PR-07 writes no provider data and adds no migration.
+
+An environment-level provider smoke test remains an authorized rollout step: in staging/target, call `/api/prices` and `/api/snapshot`, verify plausible SPX/VIX/DXY/10Y values plus actual provider/source timestamps, and exercise one controlled primary-source failure if the environment supports it. That test requires explicit permission to use the target environment and provider network; it was not run here, and no deploy or remote request was made.
 
 ## Historical-result impact
 
@@ -134,4 +151,5 @@ Champion formulas, factor definitions, weights, 45/55 verdict thresholds, hyster
 ## Commits
 
 - `28af59c` — `feat: add market provider fallbacks and provenance`
-- Documentation/report/checklist commit follows this implementation commit on the same local branch.
+- `099c579` — `docs: record PR-07 verification`
+- `9dec8fb` — `fix: parse provider history timestamps strictly`

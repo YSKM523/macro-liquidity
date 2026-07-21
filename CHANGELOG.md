@@ -12,6 +12,7 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added `SOURCE_DIVERGENCE` detection using documented market-data quality tolerances and shared-date normalized history changes.
 - Made live stress fail closed for failed, stale, or divergent required histories while accepting a valid named fallback.
 - Routed DXY daily extension through the same Yahoo/Stooq abstraction without changing its level scale or splice semantics.
+- Corrected Stooq history parsing to its distinct six-column CSV contract and reject impossible Stooq/FRED calendar dates as `INVALID_TIMESTAMP`.
 - Updated snapshot/prices API payloads and the dashboard to show source time, fetch time, provider, market state, delay, fallback, and divergence separately.
 - Added no migration and made no Champion scoring, weight, threshold, exposure, channel, ingest, or PIT change.
 
