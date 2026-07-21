@@ -16,7 +16,7 @@ Implementation and local verification are complete. No deployment, push, remote 
 - Initialized either calculation stream from the prior official weekly verdict. Nowcast writes never update official rows, so provisional processing cannot mutate official hysteresis continuity.
 - Restricted history, explain, exported snapshots, backtest, walk-forward, and robustness to `model_snapshot_weekly`.
 - Returned `/api/snapshot` as `{ official, nowcast, live, ingest }`. The ambiguous legacy `snapshot` alias was deliberately not retained because it would obscure which frequency is being displayed.
-- Updated the frontend with visible “正式信号” and “周中预估 · PROVISIONAL” channel labels. The primary card displays the latest nowcast when present, otherwise the latest official signal, while both summaries remain visible.
+- Updated the frontend with visible “正式信号” and “周中预估 · PROVISIONAL” channel labels. The primary card displays the nowcast only when it is at least as recent as the official signal, while both summaries remain visible.
 - Preserved `daily_snapshot` untouched as a read-only legacy compatibility source.
 
 ## 3. Changed files
@@ -88,7 +88,7 @@ The first sandboxed attempt failed with `listen EPERM` on `127.0.0.1`. The appro
 
 ## 8. Rollback instructions
 
-1. Revert documentation/report commit and implementation commit `c3ee4d1`.
+1. Revert the complete PR range `854c64b..7393112` (implementation, documentation, and review fix).
 2. Do not delete the new tables as part of an emergency application rollback; the preserved `daily_snapshot` lets the previous application code run, although it will contain only pre-PR legacy data because PR-05 never writes it.
 3. If schema cleanup is later required, export/verify the two new tables first, then remove them in a separately reviewed migration. Do not manually modify production D1 during an application rollback.
 
@@ -103,7 +103,8 @@ No production state was changed because nothing was deployed and remote D1 was n
 ## 11. Commits and worktree state
 
 - Implementation: `c3ee4d1` (`refactor: split official snapshots from nowcasts`).
-- Report/status: this documentation commit.
+- Report/status: `798e2c1` (`docs: record PR-05 verification`).
+- Review fix: `7393112` (`fix: address official nowcast review`).
 - Expected final state after committing this report: clean tracked worktree on `codex/pr-05-official-nowcast`.
 - `package-lock.json` contained dependency-platform metadata churn unrelated to PR-05; it was inspected, excluded, and restored. PR-05 adds no dependency.
 
