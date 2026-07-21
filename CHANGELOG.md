@@ -4,6 +4,17 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-07 — Source timestamps and provider fallback
+
+- Added one typed quote/history provider contract with injectable Yahoo, Stooq, and FRED implementations.
+- Separated provider market/observation timestamps from fetch time and retained `asof` only with explicit `FETCH_TIME` semantics.
+- Added auditable SPX, VIX, DXY, and 10Y quote/history fallback metadata plus named `OK`, `STALE`, `DIVERGENT`, and `FAILED` states.
+- Added `SOURCE_DIVERGENCE` detection using documented market-data quality tolerances and shared-date normalized history changes.
+- Made live stress fail closed for failed, stale, or divergent required histories while accepting a valid named fallback.
+- Routed DXY daily extension through the same Yahoo/Stooq abstraction without changing its level scale or splice semantics.
+- Updated snapshot/prices API payloads and the dashboard to show source time, fetch time, provider, market state, delay, fallback, and divergence separately.
+- Added no migration and made no Champion scoring, weight, threshold, exposure, channel, ingest, or PIT change.
+
 ### PR-06 — Atomic ingest runs and staging activation
 
 - Added durable `RUNNING` / `ACTIVE` / `FAILED` ingest-run audit state, per-series attempts, run-scoped staging observations, and an expiring database-backed lease.

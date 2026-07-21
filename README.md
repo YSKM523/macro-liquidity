@@ -20,7 +20,7 @@
 ```mermaid
 flowchart LR
   FRED["FRED API（宏观序列，唯一真相源）"] -->|"cron 每 3 小时"| W["Cloudflare Worker"]
-  YH["Yahoo / Stooq（实时价格，仅展示）"] -->|"每次请求"| W
+  YH["Yahoo 主源 / Stooq + FRED 备用源（行情与 stress）"] -->|"每次请求"| W
   W -->|"分批 staging，原子激活"| D1[("D1：ingest runs / observations / official weekly / daily nowcast")]
   W --> ST["Static Assets：public/ 前端"]
   W -->|"/api/*"| U["用户浏览器"]
@@ -28,7 +28,7 @@ flowchart LR
 ```
 
 - **单个 Cloudflare Worker** 托管前端(Workers Static Assets)、`/api/*` 接口和每日 `cron`。
-- **FRED = 历史与逻辑的唯一真相源**;实时价格(Yahoo 主 / Stooq 备)只贴顶部当前数字、**不入库**(口径隔离)。
+- **FRED = 宏观历史与模型逻辑的唯一真相源**；实时行情层使用 Yahoo 主源、Stooq/FRED 备用源，只影响顶部读数和 live-stress、**不入库且不改变宏观分**。每个结果分别携带 provider 行情时间和抓取时间；无合法 provider 时间戳时不会拿抓取时间代替。
 - **D1**(SQLite)先按 `run_id` 保存逐序列尝试与 staging 数据；全部校验通过后在一个事务中更新兼容表 `observations` 并切换唯一 ACTIVE run。失败 run 保留审计信息且不改变生产观测。`cron` 每 3 小时增量更新 nowcast，正式历史只由全量重建写入。
 
 ---
@@ -91,7 +91,7 @@ flowchart TD
 
 ### 4)live-stress 实时风控覆盖层
 
-近 5 个交易日任一触发(`VIX>28` / `SPX 5日<−4%` / `10Y 5日>+0.25pp` / `美元 5日>+2%`)→ 把**显示**结论降一级(偏多→中性→偏空),但**宏观 score 不变、不入库**。强环境(score≥65)压过短期噪音、不降级。
+近 5 个交易日任一触发(`VIX>28` / `SPX 5日<−4%` / `10Y 5日>+0.25pp` / `美元 5日>+2%`)→ 把**显示**结论降一级(偏多→中性→偏空),但**宏观 score 不变、不入库**。强环境(score≥65)压过短期噪音、不降级。主源失败但备用源有效时继续工作并显示实际 provider；任一必需历史为 `FAILED`、`STALE` 或 `DIVERGENT` 时，live-stress 返回 `UNKNOWN` 并暂停风险增加。
 
 ### 5)操作建议 · 仓位旋钮
 
@@ -142,7 +142,7 @@ flowchart TD
 - **Cloudflare Worker**(TypeScript)+ **Workers Static Assets** + **D1**(SQLite)+ **Cron Triggers**
 - 数据:**FRED**(宏观)+ **Yahoo / Stooq**(实时价格)
 - 前端:原生 HTML / CSS / JS + 自托管 [Lightweight-Charts](https://github.com/tradingview/lightweight-charts),仿 Stripe 纯色风格
-- 测试:**Vitest**(393 测试，覆盖模型逻辑、原子摄取、锁与 API)
+- 测试:**Vitest**(407 测试，覆盖模型逻辑、原子摄取、provider fallback、锁与 API)
 - 部署:`wrangler`
 
 ---
@@ -158,6 +158,7 @@ src/
   service.ts      FRED staging / 原子激活 / 回填流水线
   worker.ts       路由 + snapshot 组装（display_verdict / live_stress / guidance）
   db.ts           D1 读写、ingest run、租约锁与激活事务
+  prices.ts       Yahoo/Stooq/FRED provider、行情 provenance、fallback/divergence 与 live-stress
 public/           前端：index.html / app.js / styles.css / algorithm.html
 docs/             ALGORITHM.md（算法全文）/ ROADMAP / qeqt（分析师评审）
 scripts/          全球流动性长史研究（离线，Fed+ECB+BOJ vs SPX）
@@ -174,7 +175,7 @@ migrations/       D1 schema（ingest runs/staging + observations + official week
 | `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress + ACTIVE/最近 FAILED ingest run（含 snapshot outcome） |
 | `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 与 `PENDING`/`SUCCEEDED`/`FAILED` snapshot 状态；ACTIVE snapshot 非 `SUCCEEDED`（包括 `PENDING`）返回 503 和显式原因 |
 | `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
-| `GET /api/prices` | 实时价格(Yahoo/Stooq) |
+| `GET /api/prices` | 兼容数字字段 + 每个行情的 `sourceTimestamp` / `fetchedAt` / provider / market state / delay / fallback / quality status；`asof` 明确只代表 `FETCH_TIME` |
 | `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |
 | `GET /api/walkforward` | 样本外三臂裁决 |
 | `POST /api/admin/refresh` | 回填(Bearer `ADMIN_TOKEN`;`?all=1` 全量)；已有有效 ingest 租约时返回 `409` |
