@@ -1,5 +1,6 @@
 import type { Obs } from './fred';
 import type { StressStatus } from './prices';
+import type { FreshnessRule } from './config';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
@@ -21,6 +22,57 @@ export function asOf(series: Obs[], date: string): number | null {
   let val: number | null = null;
   for (const o of series) { if (o.date <= date) val = o.value; else break; }
   return val;
+}
+
+export interface FreshnessResult {
+  value: number | null;
+  observationDate: string | null;
+  ageDays: number | null;
+  status: 'FRESH' | 'STALE' | 'MISSING';
+}
+
+const UTC_DAY_MS = 24 * 60 * 60 * 1000;
+
+function utcDayNumber(date: string): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return Date.UTC(year, month - 1, day) / UTC_DAY_MS;
+}
+
+function businessDaysBetween(fromDate: string, toDate: string): number {
+  const fromDay = utcDayNumber(fromDate);
+  const toDay = utcDayNumber(toDate);
+  let businessDays = 0;
+  for (let day = fromDay + 1; day <= toDay; day++) {
+    const weekday = new Date(day * UTC_DAY_MS).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) businessDays++;
+  }
+  return businessDays;
+}
+
+export function asOfFresh(series: Obs[], date: string, freshnessRule: FreshnessRule): FreshnessResult {
+  let latest: Obs | null = null;
+  for (const observation of series) {
+    if (observation.date <= date && (latest == null || observation.date > latest.date)) {
+      latest = observation;
+    }
+  }
+
+  if (latest == null) {
+    return { value: null, observationDate: null, ageDays: null, status: 'MISSING' };
+  }
+
+  const ageDays = utcDayNumber(date) - utcDayNumber(latest.date);
+  const ageBusinessDays = businessDaysBetween(latest.date, date);
+  const stale = ageDays > freshnessRule.maxStaleCalendarDays
+    || ageBusinessDays > freshnessRule.maxStaleBusinessDays
+    || (freshnessRule.fallbackPolicy === 'NONE' && latest.date !== date);
+
+  return {
+    value: stale ? null : latest.value,
+    observationDate: latest.date,
+    ageDays,
+    status: stale ? 'STALE' : 'FRESH',
+  };
 }
 
 export function buildWeeklyNetliq(m: SeriesMap, upTo: string): number[] {

@@ -1,24 +1,41 @@
+export type ExpectedFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'IRREGULAR';
+export type FallbackPolicy = 'NONE' | 'FORWARD_FILL';
+
+export interface FreshnessRule {
+  expectedFrequency: ExpectedFrequency;
+  maxStaleCalendarDays: number;
+  maxStaleBusinessDays: number;
+  releaseLag: number;
+  requiredForScore: boolean;
+  fallbackPolicy: FallbackPolicy;
+}
+
+export interface SeriesDefinition extends FreshnessRule {
+  id: string;
+  unit: 'M' | 'B' | 'P' | 'I';
+}
+
 // unit: 'M' millions→/1000 billions; 'B' billions; 'P' percent; 'I' index
 export const SERIES = {
-  WALCL:        { id: 'WALCL',        unit: 'M' },
-  WTREGEN:      { id: 'WTREGEN',      unit: 'M' },
-  WDTGAL:       { id: 'WDTGAL',       unit: 'M' },
-  WRBWFRBL:     { id: 'WRBWFRBL',     unit: 'M' },
-  RRPONTSYD:    { id: 'RRPONTSYD',    unit: 'B' },
-  RPONTSYD:     { id: 'RPONTSYD',     unit: 'B' },
-  SOFR:         { id: 'SOFR',         unit: 'P' },
-  IORB:         { id: 'IORB',         unit: 'P' },
-  BAMLH0A0HYM2: { id: 'BAMLH0A0HYM2', unit: 'P' },
-  DGS10:        { id: 'DGS10',        unit: 'P' },
-  VIXCLS:       { id: 'VIXCLS',       unit: 'I' },
-  DTWEXBGS:     { id: 'DTWEXBGS',     unit: 'I' },
-  SP500:        { id: 'SP500',        unit: 'I' },
-  T10Y2Y:       { id: 'T10Y2Y',       unit: 'P' },
-  ECBASSETSW:   { id: 'ECBASSETSW',   unit: 'I' }, // ECB total assets, millions EUR (raw)
-  JPNASSETS:    { id: 'JPNASSETS',    unit: 'I' }, // BOJ total assets, 億円 (raw)
-  DEXUSEU:      { id: 'DEXUSEU',      unit: 'I' }, // USD per EUR
-  DEXJPUS:      { id: 'DEXJPUS',      unit: 'I' }, // JPY per USD
-} as const;
+  WALCL:        { id: 'WALCL',        unit: 'M', expectedFrequency: 'WEEKLY', maxStaleCalendarDays: 10, maxStaleBusinessDays: 7, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  WTREGEN:      { id: 'WTREGEN',      unit: 'M', expectedFrequency: 'WEEKLY', maxStaleCalendarDays: 10, maxStaleBusinessDays: 7, releaseLag: 1, requiredForScore: false, fallbackPolicy: 'FORWARD_FILL' },
+  WDTGAL:       { id: 'WDTGAL',       unit: 'M', expectedFrequency: 'WEEKLY', maxStaleCalendarDays: 10, maxStaleBusinessDays: 7, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  WRBWFRBL:     { id: 'WRBWFRBL',     unit: 'M', expectedFrequency: 'WEEKLY', maxStaleCalendarDays: 10, maxStaleBusinessDays: 7, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  RRPONTSYD:    { id: 'RRPONTSYD',    unit: 'B', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 0, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  RPONTSYD:     { id: 'RPONTSYD',     unit: 'B', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 0, requiredForScore: false, fallbackPolicy: 'FORWARD_FILL' },
+  SOFR:         { id: 'SOFR',         unit: 'P', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  IORB:         { id: 'IORB',         unit: 'P', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 0, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  BAMLH0A0HYM2: { id: 'BAMLH0A0HYM2', unit: 'P', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  DGS10:        { id: 'DGS10',        unit: 'P', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  VIXCLS:       { id: 'VIXCLS',       unit: 'I', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: false, fallbackPolicy: 'NONE' },
+  DTWEXBGS:     { id: 'DTWEXBGS',     unit: 'I', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 10, maxStaleBusinessDays: 7, releaseLag: 7, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  SP500:        { id: 'SP500',        unit: 'I', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: false, fallbackPolicy: 'NONE' },
+  T10Y2Y:       { id: 'T10Y2Y',       unit: 'P', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: true,  fallbackPolicy: 'FORWARD_FILL' },
+  ECBASSETSW:   { id: 'ECBASSETSW',   unit: 'I', expectedFrequency: 'WEEKLY', maxStaleCalendarDays: 14, maxStaleBusinessDays: 10, releaseLag: 4, requiredForScore: false, fallbackPolicy: 'FORWARD_FILL' }, // ECB total assets, millions EUR (raw)
+  JPNASSETS:    { id: 'JPNASSETS',    unit: 'I', expectedFrequency: 'MONTHLY', maxStaleCalendarDays: 45, maxStaleBusinessDays: 32, releaseLag: 10, requiredForScore: false, fallbackPolicy: 'FORWARD_FILL' }, // BOJ total assets, 億円 (raw)
+  DEXUSEU:      { id: 'DEXUSEU',      unit: 'I', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: false, fallbackPolicy: 'FORWARD_FILL' }, // USD per EUR
+  DEXJPUS:      { id: 'DEXJPUS',      unit: 'I', expectedFrequency: 'DAILY',  maxStaleCalendarDays: 4,  maxStaleBusinessDays: 2, releaseLag: 1, requiredForScore: false, fallbackPolicy: 'FORWARD_FILL' }, // JPY per USD
+} as const satisfies Record<string, SeriesDefinition>;
 
 export const SERIES_IDS: string[] = Object.values(SERIES).map(s => s.id);
 export const UNIT_BY_ID: Record<string, string> =
