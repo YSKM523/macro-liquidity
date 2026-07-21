@@ -1,6 +1,6 @@
 import { fetchFredSeries } from './fred';
 import { SERIES_IDS, MAIN_CRON, RETRY_MAX_AGE_HOURS, ALERT_MIN_INTERVAL_HOURS } from './config';
-import { maxObsDate, upsertObservations, loadSeriesMap, upsertSnapshot, setMeta, getAllMeta } from './db';
+import { maxObsDate, upsertObservations, loadSeriesMap, upsertSnapshot, setMeta, getAllMeta, snapshotBefore } from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
 import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
@@ -44,7 +44,8 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
       const dates = rebuildAll
         ? (m.WALCL ?? []).map(o => o.date).filter(d => d <= lastDate)
         : eachDay(addDays(lastDate, -14), lastDate);
-      let prev: Verdict | undefined;
+      const prior = rebuildAll ? null : await snapshotBefore(env.DB, dates[0]);
+      let prev: Verdict | undefined = prior?.verdict;
       for (const date of dates) {
         if (asOf(m.WALCL ?? [], date) == null) continue;
         const snap = computeSnapshot(m, date, prev);

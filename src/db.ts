@@ -53,6 +53,14 @@ export async function latestSnapshot(db: D1Database) {
   return db.prepare('SELECT * FROM daily_snapshot ORDER BY date DESC LIMIT 1').first();
 }
 
+export async function snapshotBefore(
+  db: D1Database,
+  date: string,
+): Promise<{ date: string; verdict: Snapshot['verdict'] } | null> {
+  return db.prepare('SELECT * FROM daily_snapshot WHERE date < ? ORDER BY date DESC LIMIT 1')
+    .bind(date).first<{ date: string; verdict: Snapshot['verdict'] }>();
+}
+
 export async function snapshotHistory(db: D1Database, from: string, to: string) {
   const rs = await db.prepare(
     'SELECT date, netliq, walcl, score, verdict, qe_qt_regime, spx FROM daily_snapshot WHERE date BETWEEN ? AND ? ORDER BY date'
