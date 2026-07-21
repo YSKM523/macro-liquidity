@@ -6,6 +6,9 @@ const state = vi.hoisted(() => ({
   snapshots: new Map<string, any>(),
   nowcasts: new Map<string, any>(),
   incompleteDates: new Set<string>(),
+  scoreOverrides: new Map<string, number>(),
+  officialBeforeCalls: 0,
+  anchorCalls: 0,
 }));
 
 vi.mock('../src/fred', () => ({
@@ -35,11 +38,19 @@ vi.mock('../src/db', () => ({
   setMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
   officialSnapshotBefore: vi.fn(async (_db: unknown, date: string) => {
+    state.officialBeforeCalls++;
     const priorDate = [...state.snapshots.keys()]
       .filter(candidate => candidate < date)
       .sort()
       .at(-1);
     return priorDate ? state.snapshots.get(priorDate) : null;
+  }),
+  officialVerdictAnchors: vi.fn(async (_db: unknown, from: string, to: string) => {
+    state.anchorCalls++;
+    return [...state.snapshots.values()]
+      .filter(snapshot => snapshot.date >= from && snapshot.date <= to && snapshot.verdict != null)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(snapshot => ({ date: snapshot.date, verdict: snapshot.verdict }));
   }),
 }));
 
@@ -50,7 +61,7 @@ vi.mock('../src/metrics', async importOriginal => {
     computeSnapshot: vi.fn((_map: SeriesMap, date: string, prev?: Verdict): Snapshot => {
       // One breakout establishes BULLISH; every later official and nowcast date
       // is in the 45-55 dead zone and must inherit that state.
-      const score = date === '2024-01-03' ? 60 : 50;
+      const score = state.scoreOverrides.get(date) ?? (date === '2024-01-03' ? 60 : 50);
       const incomplete = state.incompleteDates.has(date);
       const verdict = incomplete ? null : actual.verdictFromScore(score, prev);
       const factors = {
@@ -148,6 +159,9 @@ beforeEach(() => {
   state.snapshots.clear();
   state.nowcasts.clear();
   state.incompleteDates.clear();
+  state.scoreOverrides.clear();
+  state.officialBeforeCalls = 0;
+  state.anchorCalls = 0;
 });
 
 describe('runIngest hysteresis continuity', () => {
@@ -158,6 +172,30 @@ describe('runIngest hysteresis continuity', () => {
 
     expect(state.nowcasts.get('2024-05-15')?.verdict).toBe('BULLISH');
     expect(state.nowcasts.get('2024-05-29')?.verdict).toBe('BULLISH');
+  });
+
+  it('reanchors incremental hysteresis at an official snapshot inside the window', async () => {
+    state.snapshots.set('2024-05-08', makeSnapshot('2024-05-08', 'BULLISH'));
+    state.snapshots.set('2024-05-22', makeSnapshot('2024-05-22', 'BULLISH'));
+    state.scoreOverrides.set('2024-05-16', 40);
+
+    await runIngest(env, false, new Date('2024-05-29T12:00:00.000Z'));
+
+    expect(state.nowcasts.get('2024-05-21')?.verdict).toBe('BEARISH');
+    expect(state.nowcasts.get('2024-05-22')?.verdict).toBe('BULLISH');
+    expect(state.nowcasts.get('2024-05-29')?.verdict).toBe('BULLISH');
+    expect(state.anchorCalls).toBe(1);
+  });
+
+  it('reconstructs a full rebuild without reading persisted official verdicts', async () => {
+    state.snapshots.set('2023-12-27', makeSnapshot('2023-12-27', 'BEARISH'));
+    state.scoreOverrides.set('2024-01-03', 50);
+
+    await runIngest(env, true);
+
+    expect(state.snapshots.get('2024-01-03')?.verdict).toBe('NEUTRAL');
+    expect(state.officialBeforeCalls).toBe(0);
+    expect(state.anchorCalls).toBe(0);
   });
 
   it('calculates same-date incremental nowcasts consistently with a full official rebuild', async () => {

@@ -1,4 +1,4 @@
-import type { Obs, SeriesMap, Snapshot } from './metrics';
+import type { Obs, SeriesMap, Snapshot, Verdict } from './metrics';
 import { SERIES_IDS } from './config';
 
 export async function maxObsDate(db: D1Database, seriesId: string): Promise<string | null> {
@@ -91,6 +91,17 @@ export async function officialSnapshotBefore(
 ): Promise<{ date: string; verdict: Snapshot['verdict'] } | null> {
   return db.prepare("SELECT * FROM model_snapshot_weekly WHERE date < ? AND decision_status = 'OK' AND verdict IS NOT NULL ORDER BY date DESC LIMIT 1")
     .bind(date).first<{ date: string; verdict: Snapshot['verdict'] }>();
+}
+
+export async function officialVerdictAnchors(
+  db: D1Database,
+  from: string,
+  to: string,
+): Promise<Array<{ date: string; verdict: Verdict }>> {
+  const rs = await db.prepare(
+    "SELECT date, verdict FROM model_snapshot_weekly WHERE date BETWEEN ? AND ? AND decision_status = 'OK' AND verdict IS NOT NULL ORDER BY date",
+  ).bind(from, to).all<{ date: string; verdict: Verdict }>();
+  return rs.results ?? [];
 }
 
 export async function officialSnapshotHistory(db: D1Database, from: string, to: string) {

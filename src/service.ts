@@ -9,6 +9,7 @@ import {
   setMeta,
   getAllMeta,
   officialSnapshotBefore,
+  officialVerdictAnchors,
   decisionWeek,
 } from './db';
 import { computeSnapshot, asOf } from './metrics';
@@ -64,10 +65,17 @@ export async function runIngest(
       const dates = rebuildAll
         ? oneDecisionPerWeek((m.WALCL ?? []).map(o => o.date).filter(d => d <= lastWalcl))
         : eachDay(addDays(currentAsOf, -14), currentAsOf);
-      const prior = dates.length > 0 ? await officialSnapshotBefore(env.DB, dates[0]) : null;
-      let prev: Verdict | undefined = prior?.verdict ?? undefined;
+      let prev: Verdict | undefined;
+      let officialAnchors = new Map<string, Verdict>();
+      if (!rebuildAll && dates.length > 0) {
+        const prior = await officialSnapshotBefore(env.DB, dates[0]);
+        prev = prior?.verdict ?? undefined;
+        const anchors = await officialVerdictAnchors(env.DB, dates[0], dates.at(-1)!);
+        officialAnchors = new Map(anchors.map(anchor => [anchor.date, anchor.verdict]));
+      }
       for (const date of dates) {
         if (asOf(m.WALCL ?? [], date) == null) continue;
+        if (!rebuildAll) prev = officialAnchors.get(date) ?? prev;
         const snap = computeSnapshot(m, date, prev);
         if (rebuildAll) {
           await upsertOfficialSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));

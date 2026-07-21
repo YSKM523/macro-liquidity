@@ -154,6 +154,7 @@ body{margin:0;background:var(--surface);color:var(--ink);
 .prov-tag{font-size:11px;font-weight:700;padding:1px 8px;border-radius:4px;color:#fff;flex:none}
 .prov-tag.live{background:var(--green)}
 .prov-tag.weekly{background:var(--amber)}
+.prov-tag.provisional{background:var(--violet)}
 .prov-src{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.55}
 .prov-asof{font-size:12.5px;color:var(--ink);margin-top:4px;line-height:1.55}
 .prov-asof b{font-variant-numeric:tabular-nums;font-weight:700}
@@ -190,6 +191,8 @@ body{margin:0;background:var(--surface);color:var(--ink);
 /* ── Explainability / attribution card ──────────────────────────────────── */
 .explain-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px}
 .explain-head h2{margin:0}
+.ex-source{font-size:12px;color:var(--panel-muted);border-bottom:1px solid var(--hairline);padding:0 0 8px;margin-bottom:8px}
+.ex-source b{color:var(--panel-ink);font-variant-numeric:tabular-nums}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{appearance:none;border:none;background:var(--bg);color:var(--muted);font:inherit;font-size:13px;padding:6px 14px;cursor:pointer}
 .seg button+button{border-left:1px solid var(--line)}

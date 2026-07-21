@@ -35,6 +35,7 @@ vi.mock('../src/db', () => ({
   setMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
   officialSnapshotBefore: vi.fn(async () => ({ verdict: state.priorVerdict })),
+  officialVerdictAnchors: vi.fn(async () => []),
 }));
 vi.mock('../src/metrics', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/metrics')>();

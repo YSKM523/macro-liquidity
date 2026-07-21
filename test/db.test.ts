@@ -6,6 +6,7 @@ import * as snapshotDb from '../src/db';
 import {
   loadBacktestRows,
   officialSnapshotBefore,
+  officialVerdictAnchors,
   officialSnapshotHistory,
   officialSnapshotOnOrBefore,
   upsertOfficialSnapshot,
@@ -37,6 +38,31 @@ describe('officialSnapshotBefore', () => {
     const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(sql).toContain("decision_status = 'OK'");
     expect(sql).toContain('verdict IS NOT NULL');
+  });
+});
+
+describe('officialVerdictAnchors', () => {
+  it('loads valid in-window official verdict anchors with one ordered query', async () => {
+    const rows = [
+      { date: '2024-05-22', verdict: 'BULLISH' as const },
+      { date: '2024-05-29', verdict: 'BEARISH' as const },
+    ];
+    const all = vi.fn(async () => ({ results: rows }));
+    const bind = vi.fn(() => ({ all }));
+    const prepare = vi.fn(() => ({ bind }));
+    const db = { prepare } as unknown as D1Database;
+
+    const result = await officialVerdictAnchors(db, '2024-05-15', '2024-05-29');
+
+    expect(prepare).toHaveBeenCalledTimes(1);
+    const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    expect(sql).toContain('FROM model_snapshot_weekly');
+    expect(sql).toContain('date BETWEEN ? AND ?');
+    expect(sql).toContain("decision_status = 'OK'");
+    expect(sql).toContain('verdict IS NOT NULL');
+    expect(sql).toContain('ORDER BY date');
+    expect(bind).toHaveBeenCalledWith('2024-05-15', '2024-05-29');
+    expect(result).toEqual(rows);
   });
 });
 

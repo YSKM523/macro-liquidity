@@ -13,18 +13,21 @@ Implementation and local verification are complete. No deployment, push, remote 
 - Marked every daily nowcast `PROVISIONAL` in both storage and API presentation.
 - Made database APIs frequency-explicit (`upsertOfficialSnapshot`, `upsertNowcastSnapshot`, `latestOfficialSnapshot`, `latestNowcastSnapshot`, and official-only history/reference helpers).
 - Routed full rebuilds only to official storage and incremental refreshes only to nowcast storage.
-- Initialized either calculation stream from the prior official weekly verdict. Nowcast writes never update official rows, so provisional processing cannot mutate official hysteresis continuity.
+- Full rebuilds reconstruct official hysteresis from an undefined prior verdict. Incremental nowcasts seed from the official verdict before their window and re-anchor at every persisted valid official verdict inside the window, loaded with one batched query. Nowcast writes never update official rows.
 - Restricted history, explain, exported snapshots, backtest, walk-forward, and robustness to `model_snapshot_weekly`.
 - Returned `/api/snapshot` as `{ official, nowcast, live, ingest }`. The ambiguous legacy `snapshot` alias was deliberately not retained because it would obscure which frequency is being displayed.
-- Updated the frontend with visible “正式信号” and “周中预估 · PROVISIONAL” channel labels. The primary card displays the nowcast only when it is at least as recent as the official signal, while both summaries remain visible.
+- Updated the frontend with visible “正式信号” and “周中预估 · PROVISIONAL” channel labels. The primary card displays the nowcast only when it is strictly newer than the official signal; equal dates prefer official. Explanation and provenance surfaces state their channel and source date explicitly.
 - Preserved `daily_snapshot` untouched as a read-only legacy compatibility source.
 
-## 3. Changed files
+## 3. Changed-file inventory
 
-- Persistence and routing: `migrations/0005_official_nowcast.sql`, `src/db.ts`, `src/service.ts`, `src/worker.ts`, `package.json`.
-- Frontend: `public/index.html`, `public/app.js`, `public/styles.css`.
-- Tests: `test/db.test.ts`, `test/service-channels.test.ts`, `test/service.test.ts`, `test/service-freshness.test.ts`, `test/worker.test.ts`, `test/ui-channels.test.ts`.
-- Documentation: `README.md`, `docs/ALGORITHM.md`, `public/algorithm.md`, `public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md`, `CHANGELOG.md`.
+The authoritative inventory is derived from the feature base at review time, so it cannot become stale when another review-fix commit is added:
+
+```text
+git diff --name-only 854c64b..HEAD
+```
+
+The range covers persistence/service routing, migration and package scripts, frontend assets, focused regression tests, and PR-05 documentation/reporting.
 
 ## 4. RED and GREEN evidence
 
@@ -88,7 +91,7 @@ The first sandboxed attempt failed with `listen EPERM` on `127.0.0.1`. The appro
 
 ## 8. Rollback instructions
 
-1. Revert the complete PR range `854c64b..7393112` (implementation, documentation, and review fix).
+1. Revert every commit after feature base `854c64b` through the then-current feature-branch `HEAD` (`854c64b..HEAD`), newest first. Do not substitute a manually recorded end hash.
 2. Do not delete the new tables as part of an emergency application rollback; the preserved `daily_snapshot` lets the previous application code run, although it will contain only pre-PR legacy data because PR-05 never writes it.
 3. If schema cleanup is later required, export/verify the two new tables first, then remove them in a separately reviewed migration. Do not manually modify production D1 during an application rollback.
 
@@ -102,9 +105,8 @@ No production state was changed because nothing was deployed and remote D1 was n
 
 ## 11. Commits and worktree state
 
-- Implementation: `c3ee4d1` (`refactor: split official snapshots from nowcasts`).
-- Report/status: `798e2c1` (`docs: record PR-05 verification`).
-- Review fix: `7393112` (`fix: address official nowcast review`).
+- Feature base: `854c64b`.
+- Authoritative commit inventory: `git log --oneline 854c64b..HEAD`; the report intentionally does not duplicate a tip-hash list that becomes stale with each fix.
 - Expected final state after committing this report: clean tracked worktree on `codex/pr-05-official-nowcast`.
 - `package-lock.json` contained dependency-platform metadata churn unrelated to PR-05; it was inspected, excluded, and restored. PR-05 adds no dependency.
 
@@ -112,7 +114,7 @@ No production state was changed because nothing was deployed and remote D1 was n
 
 Resolved the PR-05 review findings without changing formulas, weights, thresholds, migration scope, remote state, or deployment state:
 
-- The frontend now selects a provisional nowcast as the primary card only when `nowcast.date >= official.date`. A newer official snapshot remains primary, while both official and nowcast summaries are still rendered and the current-channel label follows the selected primary record.
+- The frontend now selects a provisional nowcast as the primary card only when `nowcast.date > official.date`. A same-date or newer official snapshot remains primary, while both official and nowcast summaries are still rendered and the current-channel label follows the selected primary record.
 - Removed obsolete ambiguous database API exports from the service-channel and worker test mocks.
 - Strengthened the PR-01 consistency regression to compare full-rebuild official fields with independently calculated incremental nowcast fields on the same dates, instead of re-reading unchanged official rows.
 
@@ -139,6 +141,62 @@ env -u NODE_OPTIONS npm test
 ```
 
 Result: exit 0; 22/22 test files passed, 341/341 tests passed.
+
+```text
+env -u NODE_OPTIONS npx tsc --noEmit
+```
+
+Result: exit 0 with no diagnostics.
+
+```text
+git diff --check
+```
+
+Result: exit 0 with no output.
+
+## 13. Final-review fixes
+
+Resolved all final-review findings without changing formulas, factor weights, 45/55 thresholds, migration scope, remote state, or deployment state:
+
+- Added `officialVerdictAnchors()` to load every valid official verdict inside the incremental window in one ordered D1 query. Incremental nowcasts still seed from the official row before the window, then reset hysteresis before calculating each anchored date so a provisional threshold crossing cannot leak past an official boundary.
+- Full official rebuilds no longer query any persisted official verdict; they reconstruct from `undefined` as required by P0-01.
+- Equal-date channel conflicts now prefer official; only a strictly newer nowcast becomes primary.
+- The explanation title and rendered source line explicitly identify `正式信号 · OFFICIAL` and show the official source date returned by `/api/explain`, independently of the primary card.
+- The official-only history chart and robustness panel visibly carry `OFFICIAL` titles.
+- Primary-card provenance is channel-aware: provisional nowcasts receive a `PROVISIONAL` tag and daily-recalculation wording instead of the official weekly label.
+- Rollback and inventory instructions now use the feature base plus the then-current `HEAD`, avoiding stale recorded tip hashes.
+
+Final-review RED command:
+
+```text
+env -u NODE_OPTIONS npm test -- test/db.test.ts test/service.test.ts test/ui-channels.test.ts
+```
+
+Observed RED: exit 1; 3/3 test files failed, with 6 failed and 15 passed tests. Failures proved the batched anchor helper was absent, a provisional BEARISH crossing leaked past an in-window BULLISH official boundary, full rebuild inherited a persisted BEARISH verdict, an equal-date conflicting nowcast won, explanation lacked official source/date labeling, and provisional provenance lacked channel identity.
+
+Additional historical-analytics RED command:
+
+```text
+env -u NODE_OPTIONS npm test -- test/ui-channels.test.ts
+```
+
+Observed RED: exit 1; 1 test failed and 5 passed because the official-only history chart and robustness titles did not identify themselves as `OFFICIAL`.
+
+Final-review focused GREEN command:
+
+```text
+env -u NODE_OPTIONS npm test -- test/db.test.ts test/service.test.ts test/service-channels.test.ts test/service-freshness.test.ts test/ui-channels.test.ts test/ui-assets.test.ts
+```
+
+Observed GREEN: exit 0; 6/6 test files passed, 39/39 tests passed.
+
+Fresh full verification:
+
+```text
+env -u NODE_OPTIONS npm test
+```
+
+Result: exit 0; 22/22 test files passed, 348/348 tests passed.
 
 ```text
 env -u NODE_OPTIONS npx tsc --noEmit

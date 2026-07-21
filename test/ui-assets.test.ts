@@ -127,8 +127,8 @@ describe('static UI assets', () => {
     expect(js).toContain('实时风险层不可用');
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
-    expect(html).toContain('/styles.css?v=0721b');
-    expect(html).toContain('/app.js?v=0721c');
+    expect(html).toContain('/styles.css?v=0721c');
+    expect(html).toContain('/app.js?v=0721d');
   });
 
   it('sizes charts from their rendered container', () => {

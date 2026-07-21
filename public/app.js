@@ -82,7 +82,8 @@ async function main() {
     renderIngest(snapRes && snapRes.ingest);
     return;
   }
-  const activeRes = { ...snapRes, snapshot: active };
+  const snapshotChannel = active === snapRes.nowcast ? 'nowcast' : 'official';
+  const activeRes = { ...snapRes, snapshot: active, snapshotChannel };
   renderSnapshotChannels(snapRes, active);
   renderVerdict(activeRes);
   renderGuidance(active);
@@ -98,7 +99,7 @@ async function main() {
 function selectPrimarySnapshot(official, nowcast) {
   if (!official) return nowcast;
   if (!nowcast) return official;
-  return nowcast.date >= official.date ? nowcast : official;
+  return nowcast.date > official.date ? nowcast : official;
 }
 
 function channelSummary(snapshot) {
@@ -283,7 +284,7 @@ function fmtTs(iso) {
 }
 
 function provLayer(tag, title, src, asof) {
-  const cn = tag === 'live' ? '实时' : '周更';
+  const cn = tag === 'live' ? '实时' : tag === 'provisional' ? 'PROVISIONAL' : 'OFFICIAL';
   return `<div class="prov-layer"><div class="prov-head"><span class="prov-tag ${tag}">${cn}</span><b>${title}</b></div>`
     + `<div class="prov-src">${src}</div><div class="prov-asof">${asof}</div></div>`;
 }
@@ -296,10 +297,16 @@ function renderProvenance(res) {
   const macroDate = s.date || '—';
   const ingestAt = fmtTs(ingest.ingest_at);
   const liveAt = fmtTs(live.asof);
+  const provisional = res.snapshotChannel === 'nowcast';
+  const macroTag = provisional ? 'provisional' : 'weekly';
+  const macroTitle = provisional ? '宏观模型 · 周中预估' : '宏观模型 · 正式信号';
+  const macroCadence = provisional
+    ? '周中预估每日重算;底层 WALCL 周频(以周三为准,H.4.1 周四发布)'
+    : '正式信号周更;WALCL 以周三为准,H.4.1 周四发布';
   body.innerHTML =
-    provLayer('weekly', '宏观模型 · 打分 / 判定 / 净流动性',
+    provLayer(macroTag, `${macroTitle} · 打分 / 判定 / 净流动性`,
       '来源:FRED · 美联储 H.4.1 资产负债表(WALCL)、财政部 TGA、逆回购 RRP、SOFR−IORB、HY OAS、10Y(DGS10)、广义美元(DTWEXBGS)',
-      `数据截至 <b>${macroDate}</b>　·　最近摄取 <b>${ingestAt}</b>　·　每 3 小时;WALCL 周频(以周三为准,H.4.1 周四发布)`)
+      `数据截至 <b>${macroDate}</b>　·　最近摄取 <b>${ingestAt}</b>　·　${macroCadence}`)
     + provLayer('live', '实时行情 · 顶部 SPX / VIX / DXY / 10Y',
       '来源:Yahoo Finance(^GSPC · ^VIX · DX-Y.NYB · ^TNX)',
       `抓取于 <b>${liveAt}</b>　·　每次打开页面实时抓取`)
@@ -441,15 +448,18 @@ function setupExplain() {
 function renderExplain(res) {
   const body = document.getElementById('explain-body');
   if (!body) return;
+  const source = res?.current?.date
+    ? `<div class="ex-source">正式信号 · OFFICIAL · 来源日期 <b>${res.current.date}</b></div>`
+    : '';
   if (res && res.error === 'data_incomplete') {
-    body.innerHTML = '<p class="ex-note">宏观数据不完整，暂不生成分数归因。</p>';
+    body.innerHTML = source + '<p class="ex-note">宏观数据不完整，暂不生成分数归因。</p>';
     return;
   }
   if (!res || res.error === 'no_data' || !res.current) {
     body.innerHTML = '<p class="ex-note">暂无数据</p>';
     return;
   }
-  body.innerHTML = renderAttribution(res) + renderContribution(res.contributions) + renderNetliq(res.netliq, res.window);
+  body.innerHTML = source + renderAttribution(res) + renderContribution(res.contributions) + renderNetliq(res.netliq, res.window);
 }
 
 // 信号变化归因 = Δ分瀑布图(从基准分逐因子累加落到当前分)
