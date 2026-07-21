@@ -76,9 +76,21 @@ function validIso(value: string): boolean {
   return Number.isFinite(Date.parse(value));
 }
 
+function validCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
+
 function businessAgeDays(sourceTimestamp: string, fetchedAt: string): number {
   const source = new Date(sourceTimestamp);
   const fetched = new Date(fetchedAt);
+  if (!Number.isFinite(source.getTime()) || !Number.isFinite(fetched.getTime())) return Number.POSITIVE_INFINITY;
   source.setUTCHours(0, 0, 0, 0);
   fetched.setUTCHours(0, 0, 0, 0);
   let days = 0;
@@ -157,17 +169,16 @@ export function parseYahooDailyObs(json: any): ObsPoint[] {
   return out;
 }
 
-function parseStooqHistory(csv: string): ObsPoint[] {
+function parseStooqHistory(csv: string): { points: ObsPoint[]; invalidTimestamp: boolean } {
   const lines = csv.trim().split(/\r?\n/).slice(1);
   const points: ObsPoint[] = [];
   for (const line of lines) {
     const cols = line.split(',');
-    const value = Number(cols[6]);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(cols[1] ?? '') && Number.isFinite(value)) {
-      points.push({ date: cols[1], value });
-    }
+    const value = Number(cols[4]);
+    if (!validCalendarDate(cols[0])) return { points: [], invalidTimestamp: true };
+    if (Number.isFinite(value)) points.push({ date: cols[0], value });
   }
-  return points.sort((a, b) => a.date.localeCompare(b.date));
+  return { points: points.sort((a, b) => a.date.localeCompare(b.date)), invalidTimestamp: false };
 }
 
 function yahooSourceTimestamp(json: any): string | null {
@@ -252,7 +263,9 @@ export class StooqMarketDataProvider implements MarketDataProvider {
       const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&d1=${start}`;
       const response = await this.fetchFn(url);
       if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
-      const points = parseStooqHistory(await response.text());
+      const parsed = parseStooqHistory(await response.text());
+      if (parsed.invalidTimestamp) return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+      const points = parsed.points;
       const last = points.at(-1);
       if (!last) return failedSeries(this.name, fetchedAt, 'NO_DATA');
       const sourceTimestamp = `${last.date}T00:00:00.000Z`;
@@ -282,8 +295,12 @@ export class FredMarketDataProvider implements MarketDataProvider {
       const response = await this.fetchFn(url.toString());
       if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
       const json: any = await response.json();
-      const points: ObsPoint[] = (Array.isArray(json?.observations) ? json.observations : [])
-        .filter((o: any) => /^\d{4}-\d{2}-\d{2}$/.test(o?.date) && Number.isFinite(Number(o?.value)))
+      const observations: any[] = Array.isArray(json?.observations) ? json.observations : [];
+      const numericObservations = observations.filter((observation: any) => Number.isFinite(Number(observation?.value)));
+      if (numericObservations.some((observation: any) => !validCalendarDate(observation?.date))) {
+        return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+      }
+      const points: ObsPoint[] = numericObservations
         .map((o: any) => ({ date: o.date, value: Number(o.value) }))
         .sort((a: ObsPoint, b: ObsPoint) => a.date.localeCompare(b.date));
       const last = points.at(-1);

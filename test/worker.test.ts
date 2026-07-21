@@ -135,6 +135,7 @@ describe('/api/admin/refresh contention', () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -256,6 +257,8 @@ describe('/api/snapshot live stress status', () => {
 
 describe('/api/prices provider metadata', () => {
   it('keeps numeric fields and exposes source/fetch/provider/fallback metadata', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-21T12:00:00.000Z'));
     const sourceSeconds = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
