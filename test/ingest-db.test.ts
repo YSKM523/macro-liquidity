@@ -8,6 +8,7 @@ describe('ingest repository contracts', () => {
   it('exposes atomic lock and validation operations', () => {
     expect(typeof (ingestDb as any).acquireIngestLock).toBe('function');
     expect(typeof (ingestDb as any).releaseIngestLock).toBe('function');
+    expect(typeof (ingestDb as any).renewIngestLock).toBe('function');
     expect(typeof (ingestDb as any).validateSeriesAttempts).toBe('function');
   });
 
@@ -75,6 +76,25 @@ describe('ingest repository contracts', () => {
     } as unknown as D1Database;
 
     await expect((ingestDb as any).releaseIngestLock(db, 'not-the-owner')).resolves.toBe(false);
+  });
+
+  it('renews only the owning run lease', async () => {
+    expect(typeof (ingestDb as any).renewIngestLock).toBe('function');
+    if (typeof (ingestDb as any).renewIngestLock !== 'function') return;
+    const calls: Array<{ sql: string; binds: unknown[] }> = [];
+    const db = {
+      prepare(sql: string) {
+        const call = { sql, binds: [] as unknown[] };
+        calls.push(call);
+        return {
+          bind(...values: unknown[]) { call.binds = values; return this; },
+          run: vi.fn(async () => ({ meta: { changes: 0 } })),
+        };
+      },
+    } as unknown as D1Database;
+
+    await expect((ingestDb as any).renewIngestLock(db, 'not-the-owner', 't1', 't6')).resolves.toBe(false);
+    expect(calls[0].sql).toMatch(/UPDATE ingest_lock[\s\S]*owner_run_id\s*=\s*\?/i);
   });
 
   it('promotes observations and switches ACTIVE with exactly one D1 batch', async () => {

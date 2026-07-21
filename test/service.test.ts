@@ -22,6 +22,7 @@ vi.mock('../src/prices', () => ({
 
 vi.mock('../src/db', () => ({
   acquireIngestLock: vi.fn(async () => true),
+  renewIngestLock: vi.fn(async () => true),
   releaseIngestLock: vi.fn(async () => true),
   createIngestRun: vi.fn(async () => undefined),
   stageSeriesAttempt: vi.fn(async () => undefined),

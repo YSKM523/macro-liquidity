@@ -18,6 +18,7 @@ import {
   decisionWeek,
   acquireIngestLock,
   releaseIngestLock,
+  renewIngestLock,
   createIngestRun,
   stageSeriesAttempt,
   validateIngestRun,
@@ -57,6 +58,14 @@ function newRunId(now: Date): string {
     : `ingest-${now.getTime()}-${Math.random().toString(36).slice(2)}`;
 }
 
+async function renewOwnedLease(db: D1Database, runId: string): Promise<void> {
+  const renewedAt = new Date();
+  const expiresAt = new Date(renewedAt.getTime() + INGEST_LOCK_LEASE_SECONDS * 1000);
+  if (!await renewIngestLock(db, runId, renewedAt.toISOString(), expiresAt.toISOString())) {
+    throw new Error(`ingest lease lost for run ${runId}`);
+  }
+}
+
 export async function runIngest(
   env: Env,
   rebuildAll = false,
@@ -89,12 +98,16 @@ export async function runIngest(
       failedStep = 'staging';
       await stageSeriesAttempt(env.DB, runId, id, rows, nowIso);
       updated += rows.length;
+      failedStep = 'lock';
+      await renewOwnedLease(env.DB, runId);
     }
     failedSeries = undefined;
     failedStep = 'validation';
     await validateIngestRun(env.DB, runId, SERIES_IDS);
 
     // 2) Promote staging and switch ACTIVE in one transactional D1 batch.
+    failedStep = 'lock';
+    await renewOwnedLease(env.DB, runId);
     failedStep = 'activation';
     await activateIngestRun(env.DB, runId, nowIso);
 

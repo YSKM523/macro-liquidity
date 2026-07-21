@@ -56,6 +56,19 @@ export async function releaseIngestLock(db: D1Database, runId: string): Promise<
   return Number((result.meta as any)?.changes ?? 0) === 1;
 }
 
+export async function renewIngestLock(
+  db: D1Database,
+  runId: string,
+  renewedAt: string,
+  expiresAt: string,
+): Promise<boolean> {
+  const result = await db.prepare(
+    `UPDATE ingest_lock SET expires_at = ?
+     WHERE lock_name = 'fred_ingest' AND owner_run_id = ? AND expires_at > ?`
+  ).bind(expiresAt, runId, renewedAt).run();
+  return Number((result.meta as any)?.changes ?? 0) === 1;
+}
+
 export async function createIngestRun(
   db: D1Database,
   runId: string,

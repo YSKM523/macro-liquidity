@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   fetchFailureSeries: null as string | null,
   activationFailure: false,
   lockAcquired: true,
+  leaseRenewed: true,
   activeSeries: new Set<string>(),
   staged: [] as Array<{ seriesId: string; rows: Obs[] }>,
   events: [] as string[],
@@ -39,6 +40,7 @@ vi.mock('../src/db', async importOriginal => {
     maxObsDate: vi.fn(async () => '2024-01-03'),
     upsertObservations: vi.fn(async () => undefined),
     acquireIngestLock: vi.fn(async () => state.lockAcquired),
+    renewIngestLock: vi.fn(async () => { state.events.push('renew'); return state.leaseRenewed; }),
     releaseIngestLock: vi.fn(async () => { state.events.push('release'); return true; }),
     createIngestRun: vi.fn(async () => { state.events.push('create'); }),
     stageSeriesAttempt: vi.fn(async (_db: unknown, runId: string, seriesId: string, rows: Obs[]) => {
@@ -91,6 +93,7 @@ beforeEach(() => {
   state.fetchFailureSeries = null;
   state.activationFailure = false;
   state.lockAcquired = true;
+  state.leaseRenewed = true;
   state.activeSeries = new Set(SERIES_IDS);
   state.staged = [];
   state.events = [];
@@ -139,6 +142,16 @@ describe('atomic ingest orchestration', () => {
     expect(state.staged).toContainEqual({ seriesId: 'WALCL', rows: [] });
     expect(state.events).toContain('stage:WALCL:0');
     expect(state.events).toContain('validate');
+  });
+
+  it('renews the owned lease while progressing and aborts if ownership is lost', async () => {
+    state.leaseRenewed = false;
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z'))).rejects.toThrow(/lease.*lost/i);
+
+    expect(state.events).toContain('renew');
+    expect(state.failed).toEqual([expect.objectContaining({ step: 'lock' })]);
+    expect(state.events).not.toContain('activate');
   });
 
   it('returns explicit contention without fetching, staging, activation, or snapshots', async () => {
