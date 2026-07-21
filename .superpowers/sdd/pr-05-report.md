@@ -21,13 +21,32 @@ Implementation and local verification are complete. No deployment, push, remote 
 
 ## 3. Changed-file inventory
 
-The authoritative inventory is derived from the feature base at review time, so it cannot become stale when another review-fix commit is added:
+Immutable implementation/review range: `854c64b..9eda471`.
 
 ```text
-git diff --name-only 854c64b..HEAD
+.superpowers/sdd/pr-05-report.md
+CHANGELOG.md
+README.md
+docs/ALGORITHM.md
+docs/superpowers/plans/2026-07-21-pr-05-final-review-fixes.md
+migrations/0005_official_nowcast.sql
+package.json
+public/algorithm.md
+public/app.js
+public/index.html
+public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md
+public/styles.css
+src/db.ts
+src/service.ts
+src/worker.ts
+test/db.test.ts
+test/service-channels.test.ts
+test/service-freshness.test.ts
+test/service.test.ts
+test/ui-assets.test.ts
+test/ui-channels.test.ts
+test/worker.test.ts
 ```
-
-The range covers persistence/service routing, migration and package scripts, frontend assets, focused regression tests, and PR-05 documentation/reporting.
 
 ## 4. RED and GREEN evidence
 
@@ -91,7 +110,7 @@ The first sandboxed attempt failed with `listen EPERM` on `127.0.0.1`. The appro
 
 ## 8. Rollback instructions
 
-1. Revert every commit after feature base `854c64b` through the then-current feature-branch `HEAD` (`854c64b..HEAD`), newest first. Do not substitute a manually recorded end hash.
+1. Before merge, revert immutable functional range `854c64b..9eda471` newest first. After merge, prefer reverting the eventual PR merge commit so the report-only archive commit is also included.
 2. Do not delete the new tables as part of an emergency application rollback; the preserved `daily_snapshot` lets the previous application code run, although it will contain only pre-PR legacy data because PR-05 never writes it.
 3. If schema cleanup is later required, export/verify the two new tables first, then remove them in a separately reviewed migration. Do not manually modify production D1 during an application rollback.
 
@@ -106,8 +125,13 @@ No production state was changed because nothing was deployed and remote D1 was n
 ## 11. Commits and worktree state
 
 - Feature base: `854c64b`.
-- Authoritative commit inventory: `git log --oneline 854c64b..HEAD`; the report intentionally does not duplicate a tip-hash list that becomes stale with each fix.
-- Expected final state after committing this report: clean tracked worktree on `codex/pr-05-official-nowcast`.
+- `c3ee4d1` — `refactor: split official snapshots from nowcasts`.
+- `798e2c1` — `docs: record PR-05 verification`.
+- `7393112` — `fix: address official nowcast review`.
+- `8e5445e` — `docs: clarify PR-05 rollback`.
+- `9eda471` — `fix: resolve final official nowcast review`.
+- The final archive-only report clarification is intentionally outside the immutable functional range above; it changes no runtime behavior.
+- Final tracked worktree state: clean on `codex/pr-05-official-nowcast`.
 - `package-lock.json` contained dependency-platform metadata churn unrelated to PR-05; it was inspected, excluded, and restored. PR-05 adds no dependency.
 
 ## 12. Review fixes
