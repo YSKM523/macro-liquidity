@@ -172,7 +172,7 @@ migrations/       D1 schema（ingest runs/staging + observations + official week
 | 端点 | 说明 |
 |---|---|
 | `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress + ACTIVE/最近 FAILED ingest run（含 snapshot outcome） |
-| `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 与 `PENDING`/`SUCCEEDED`/`FAILED` snapshot 状态；ACTIVE snapshot 失败返回 503 |
+| `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 与 `PENDING`/`SUCCEEDED`/`FAILED` snapshot 状态；ACTIVE snapshot 非 `SUCCEEDED`（包括 `PENDING`）返回 503 和显式原因 |
 | `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
 | `GET /api/prices` | 实时价格(Yahoo/Stooq) |
 | `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |

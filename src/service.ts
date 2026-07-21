@@ -11,7 +11,7 @@ import {
   loadSeriesMap,
   upsertOfficialSnapshot,
   upsertNowcastSnapshot,
-  setMeta,
+  setIngestMeta,
   getAllMeta,
   officialSnapshotBefore,
   officialVerdictAnchors,
@@ -27,7 +27,7 @@ import {
   validateIngestRun,
   activateIngestRun,
   failIngestRun,
-  completeIngestSnapshots,
+  completeIngestSuccess,
   failIngestSnapshots,
   IngestSeriesValidationError,
 } from './db';
@@ -73,9 +73,7 @@ function validationSeriesId(error: unknown): string | undefined {
 }
 
 async function renewOwnedLease(db: D1Database, runId: string): Promise<void> {
-  const renewedAt = new Date();
-  const expiresAt = new Date(renewedAt.getTime() + INGEST_LOCK_LEASE_SECONDS * 1000);
-  if (!await renewIngestLock(db, runId, renewedAt.toISOString(), expiresAt.toISOString())) {
+  if (!await renewIngestLock(db, runId, INGEST_LOCK_LEASE_SECONDS)) {
     throw new Error(`ingest lease lost for run ${runId}`);
   }
 }
@@ -87,8 +85,7 @@ export async function runIngest(
 ): Promise<IngestResult> {
   const runId = newRunId(now);
   const nowIso = now.toISOString();
-  const expiresAt = new Date(now.getTime() + INGEST_LOCK_LEASE_SECONDS * 1000).toISOString();
-  const acquired = await acquireIngestLock(env.DB, runId, nowIso, expiresAt);
+  const acquired = await acquireIngestLock(env.DB, runId, INGEST_LOCK_LEASE_SECONDS);
   if (!acquired) return { status: 'conflict', runId, updated: 0, snapshots: 0 };
 
   let prevMeta: Record<string, string> = {};
@@ -102,7 +99,7 @@ export async function runIngest(
     await renewOwnedLease(env.DB, runId);
     failedStep = 'metadata';
     await renewOwnedLease(env.DB, runId);
-    await setMeta(env.DB, 'last_attempt_at', nowIso);
+    await setIngestMeta(env.DB, runId, 'last_attempt_at', nowIso);
     failedStep = 'initialization';
     await renewOwnedLease(env.DB, runId);
     await createIngestRun(env.DB, runId, rebuildAll ? 'FULL' : 'INCREMENTAL', nowIso);
@@ -112,13 +109,16 @@ export async function runIngest(
     let updated = 0;
     for (const id of SERIES_IDS) {
       failedSeries = id;
-      failedStep = 'series-read';
+      failedStep = 'lock';
       await renewOwnedLease(env.DB, runId);
-      const last = await maxObsDate(env.DB, id);
-      await renewOwnedLease(env.DB, runId);
-      const from = last ?? env.START_DATE;
+      failedStep = 'attempt-start';
       await startSeriesAttempt(env.DB, runId, id, new Date().toISOString());
       try {
+        failedStep = 'series-read';
+        const last = await maxObsDate(env.DB, id);
+        failedStep = 'lock';
+        await renewOwnedLease(env.DB, runId);
+        const from = last ?? env.START_DATE;
         failedStep = 'fetch';
         const rows = await fetchFredSeries(id, from, env.FRED_API_KEY);
         failedStep = 'lock';
@@ -210,15 +210,14 @@ export async function runIngest(
         await renewOwnedLease(env.DB, runId);
         failedStep = 'snapshot';
         if (rebuildAll) {
-          await upsertOfficialSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
+          await upsertOfficialSnapshot(env.DB, runId, snap, asOf(m.SP500 ?? [], date));
         } else {
-          await upsertNowcastSnapshot(env.DB, snap, asOf(m.SP500 ?? [], date));
+          await upsertNowcastSnapshot(env.DB, runId, snap, asOf(m.SP500 ?? [], date));
         }
         if (snap.verdict != null) prev = snap.verdict;
         snapshots++;
       }
     }
-    failedStep = 'metadata';
     const successAt = new Date().toISOString();
     const successMeta: Array<[string, string]> = [
       ['last_ingest_at', successAt],
@@ -227,15 +226,10 @@ export async function runIngest(
       ['last_updated', String(updated)],
       ['last_snapshots', String(snapshots)],
     ];
-    for (const [key, value] of successMeta) {
-      await renewOwnedLease(env.DB, runId);
-      failedStep = 'metadata';
-      await setMeta(env.DB, key, value);
-    }
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     failedStep = 'snapshot-finalization';
-    await completeIngestSnapshots(env.DB, runId, snapshots, new Date().toISOString());
+    await completeIngestSuccess(env.DB, runId, snapshots, successAt, successMeta);
     return { status: 'active', runId, updated, snapshots };
   } catch (e) {
     const errMsg = String((e as any)?.message ?? e);
@@ -268,9 +262,9 @@ export async function runIngest(
     if (stillOwnsLease) {
       try {
         await renewOwnedLease(env.DB, runId);
-        await setMeta(env.DB, 'last_status', 'error');
+        await setIngestMeta(env.DB, runId, 'last_status', 'error');
         await renewOwnedLease(env.DB, runId);
-        await setMeta(env.DB, 'last_error', errMsg);
+        await setIngestMeta(env.DB, runId, 'last_error', errMsg);
         if (shouldAlert({
           prevStatus: prevMeta.last_status ?? null,
           attemptOk: false,
@@ -283,7 +277,7 @@ export async function runIngest(
           }));
           if (sent) {
             await renewOwnedLease(env.DB, runId);
-            await setMeta(env.DB, 'last_alert_at', new Date().toISOString());
+            await setIngestMeta(env.DB, runId, 'last_alert_at', new Date().toISOString());
           }
         }
       } catch {

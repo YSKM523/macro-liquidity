@@ -13,7 +13,8 @@ describe('ingest repository contracts', () => {
     expect(typeof (ingestDb as any).validateSeriesAttempts).toBe('function');
     expect(typeof (ingestDb as any).startSeriesAttempt).toBe('function');
     expect(typeof (ingestDb as any).failSeriesAttempt).toBe('function');
-    expect(typeof (ingestDb as any).completeIngestSnapshots).toBe('function');
+    expect(typeof (ingestDb as any).setIngestMeta).toBe('function');
+    expect(typeof (ingestDb as any).completeIngestSuccess).toBe('function');
     expect(typeof (ingestDb as any).failIngestSnapshots).toBe('function');
     expect((ingestDb as any).upsertObservations).toBeUndefined();
   });
@@ -36,7 +37,7 @@ describe('ingest repository contracts', () => {
     )).toThrow(/NEW.*empty/i);
   });
 
-  it('uses one conditional statement for lock acquisition and owner-scoped release', async () => {
+  it('uses database-current time in one conditional acquisition statement', async () => {
     expect(typeof (ingestDb as any).acquireIngestLock).toBe('function');
     if (typeof (ingestDb as any).acquireIngestLock !== 'function') return;
     const calls: Array<{ sql: string; binds: unknown[] }> = [];
@@ -51,26 +52,35 @@ describe('ingest repository contracts', () => {
       },
     } as unknown as D1Database;
 
-    await expect((ingestDb as any).acquireIngestLock(db, 'run-2', '2024-01-01T00:00:00Z', '2024-01-01T00:05:00Z')).resolves.toBe(false);
+    await expect((ingestDb as any).acquireIngestLock(db, 'run-2', 300)).resolves.toBe(false);
     await expect((ingestDb as any).releaseIngestLock(db, 'run-2')).resolves.toBe(true);
-    expect(calls[0].sql).toMatch(/ON CONFLICT[\s\S]*expires_at\s*<=/i);
+    expect(calls[0].sql).toMatch(/ON CONFLICT[\s\S]*expires_at[\s\S]*<=[\s\S]*'now'/i);
+    expect(calls[0].sql).toMatch(/(?:datetime|strftime|unixepoch)\s*\(\s*'now'/i);
+    expect(calls[0].binds).toEqual(['run-2', 300]);
     expect(calls[1].sql).toMatch(/DELETE[\s\S]*owner_run_id\s*=\s*\?/i);
   });
 
-  it('allows an expired lease to be acquired while rejecting a second valid lease', async () => {
-    expect(typeof (ingestDb as any).acquireIngestLock).toBe('function');
-    if (typeof (ingestDb as any).acquireIngestLock !== 'function') return;
-    const changes = [1, 0, 1];
-    const db = {
-      prepare: vi.fn(() => ({
-        bind() { return this; },
-        run: vi.fn(async () => ({ meta: { changes: changes.shift() } })),
-      })),
-    } as unknown as D1Database;
+  it('uses D1 current time to acquire only an expired lease', async () => {
+    const mf = new Miniflare({
+      modules: true,
+      script: 'export default { fetch() { return new Response(); } }',
+      d1Databases: ['DB'],
+    });
+    const db = await mf.getD1Database('DB') as unknown as D1Database;
+    await db.prepare(`CREATE TABLE ingest_lock (
+      lock_name TEXT PRIMARY KEY, owner_run_id TEXT NOT NULL,
+      acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL
+    )`).run();
 
-    await expect((ingestDb as any).acquireIngestLock(db, 'run-1', 't0', 't5')).resolves.toBe(true);
-    await expect((ingestDb as any).acquireIngestLock(db, 'run-2', 't1', 't6')).resolves.toBe(false);
-    await expect((ingestDb as any).acquireIngestLock(db, 'run-2', 't7', 't12')).resolves.toBe(true);
+    await expect(ingestDb.acquireIngestLock(db, 'run-1', 300)).resolves.toBe(true);
+    await expect(ingestDb.acquireIngestLock(db, 'run-2', 300)).resolves.toBe(false);
+    await db.prepare(
+      "UPDATE ingest_lock SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second')",
+    ).run();
+    await expect(ingestDb.acquireIngestLock(db, 'run-2', 300)).resolves.toBe(true);
+    await expect(db.prepare("SELECT owner_run_id FROM ingest_lock WHERE lock_name='fred_ingest'").first())
+      .resolves.toEqual({ owner_run_id: 'run-2' });
+    await mf.dispose();
   });
 
   it('cannot release a lock owned by another run', async () => {
@@ -84,29 +94,36 @@ describe('ingest repository contracts', () => {
     await expect((ingestDb as any).releaseIngestLock(db, 'not-the-owner')).resolves.toBe(false);
   });
 
-  it('renews only the owning run lease', async () => {
-    expect(typeof (ingestDb as any).renewIngestLock).toBe('function');
-    if (typeof (ingestDb as any).renewIngestLock !== 'function') return;
-    const calls: Array<{ sql: string; binds: unknown[] }> = [];
-    const db = {
-      prepare(sql: string) {
-        const call = { sql, binds: [] as unknown[] };
-        calls.push(call);
-        return {
-          bind(...values: unknown[]) { call.binds = values; return this; },
-          run: vi.fn(async () => ({ meta: { changes: 0 } })),
-        };
-      },
-    } as unknown as D1Database;
+  it('does not resurrect an already expired lease during renewal', async () => {
+    const mf = new Miniflare({
+      modules: true,
+      script: 'export default { fetch() { return new Response(); } }',
+      d1Databases: ['DB'],
+    });
+    const db = await mf.getD1Database('DB') as unknown as D1Database;
+    await db.prepare(`CREATE TABLE ingest_lock (
+      lock_name TEXT PRIMARY KEY, owner_run_id TEXT NOT NULL,
+      acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL
+    )`).run();
+    await db.prepare(
+      `INSERT INTO ingest_lock VALUES (
+        'fred_ingest', 'run-1',
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 seconds'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second')
+      )`,
+    ).run();
+    const before = await db.prepare('SELECT expires_at FROM ingest_lock').first<{ expires_at: string }>();
 
-    await expect((ingestDb as any).renewIngestLock(db, 'not-the-owner', 't1', 't6')).resolves.toBe(false);
-    expect(calls[0].sql).toMatch(/UPDATE ingest_lock[\s\S]*owner_run_id\s*=\s*\?/i);
+    await expect(ingestDb.renewIngestLock(db, 'run-1', 300)).resolves.toBe(false);
+    await expect(db.prepare('SELECT expires_at FROM ingest_lock').first())
+      .resolves.toEqual(before);
+    await mf.dispose();
   });
 
   it('promotes observations and switches ACTIVE with exactly one D1 batch', async () => {
     const statements: Array<{ sql: string; binds: unknown[] }> = [];
     const batch = vi.fn(async (_statements: D1PreparedStatement[]) => [
-      { meta: { changes: 1 } }, { meta: { changes: 1 } }, { meta: { changes: 1 } },
+      { meta: { changes: 1 } }, { meta: { changes: 1 } }, { meta: { changes: 1 } }, {},
     ]);
     const db = {
       prepare(sql: string) {
@@ -120,13 +137,60 @@ describe('ingest repository contracts', () => {
     await (ingestDb as any).activateIngestRun(db, 'run-1', '2024-01-01T00:05:00Z');
 
     expect(batch).toHaveBeenCalledTimes(1);
-    expect(batch.mock.calls[0][0]).toHaveLength(3);
+    expect(batch.mock.calls[0][0]).toHaveLength(4);
     expect(statements[0].sql).toMatch(/INSERT INTO observations[\s\S]*staging_observations/i);
     expect(statements[0].sql).toMatch(/EXISTS[\s\S]*state\s*=\s*'RUNNING'/i);
+    expect(statements[0].sql).toMatch(/ingest_lock[\s\S]*owner_run_id[\s\S]*'now'/i);
     expect(statements[1].sql).toMatch(/SUPERSEDED[\s\S]*ACTIVE/i);
     expect(statements[1].sql).toMatch(/EXISTS[\s\S]*state\s*=\s*'RUNNING'/i);
+    expect(statements[1].sql).toMatch(/ingest_lock[\s\S]*owner_run_id[\s\S]*'now'/i);
     expect(statements[2].sql).toMatch(/state = 'ACTIVE'/i);
+    expect(statements[2].sql).toMatch(/ingest_lock[\s\S]*owner_run_id[\s\S]*'now'/i);
+    expect(statements[3].sql).toMatch(/SELECT[\s\S]*ingest_lock[\s\S]*'now'/i);
   });
+
+  it.each(['transferred', 'expired'] as const)(
+    'rejects activation with no production changes when the lease is %s before the batch',
+    async leaseState => {
+      const mf = new Miniflare({
+        modules: true,
+        script: 'export default { fetch() { return new Response(); } }',
+        d1Databases: ['DB'],
+      });
+      const db = await mf.getD1Database('DB') as unknown as D1Database;
+      const setup = [
+        'CREATE TABLE observations (series_id TEXT, date TEXT, value REAL, PRIMARY KEY(series_id, date))',
+        `CREATE TABLE ingest_runs (
+          run_id TEXT PRIMARY KEY, state TEXT, completed_at TEXT, row_count INTEGER DEFAULT 0,
+          series_count INTEGER DEFAULT 0, snapshot_state TEXT DEFAULT 'PENDING',
+          snapshot_completed_at TEXT, snapshot_error TEXT, snapshot_count INTEGER DEFAULT 0
+        )`,
+        'CREATE TABLE ingest_series_attempts (run_id TEXT, series_id TEXT, status TEXT)',
+        'CREATE TABLE staging_observations (run_id TEXT, series_id TEXT, date TEXT, value REAL)',
+        'CREATE TABLE ingest_lock (lock_name TEXT PRIMARY KEY, owner_run_id TEXT, acquired_at TEXT, expires_at TEXT)',
+        "INSERT INTO observations VALUES ('OLD', '2024-01-01', 1)",
+        "INSERT INTO ingest_runs (run_id, state) VALUES ('old-active', 'ACTIVE')",
+        "INSERT INTO ingest_runs (run_id, state) VALUES ('target', 'RUNNING')",
+        "INSERT INTO staging_observations VALUES ('target', 'NEW', '2024-01-02', 2)",
+        `INSERT INTO ingest_lock VALUES (
+          'fred_ingest', '${leaseState === 'transferred' ? 'replacement' : 'target'}',
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${leaseState === 'expired' ? '-1' : '+60'} seconds')
+        )`,
+      ];
+      await db.batch(setup.map(sql => db.prepare(sql)));
+
+      await expect(ingestDb.activateIngestRun(db, 'target', '2024-01-01T00:05:00Z'))
+        .rejects.toThrow(/activation|lease|fence/i);
+      await expect(db.prepare('SELECT series_id FROM observations ORDER BY series_id').all())
+        .resolves.toMatchObject({ results: [{ series_id: 'OLD' }] });
+      await expect(db.prepare("SELECT state FROM ingest_runs WHERE run_id = 'old-active'").first())
+        .resolves.toEqual({ state: 'ACTIVE' });
+      await expect(db.prepare("SELECT state FROM ingest_runs WHERE run_id = 'target'").first())
+        .resolves.toEqual({ state: 'RUNNING' });
+      await mf.dispose();
+    },
+  );
 
   it.each(['missing', 'FAILED'] as const)(
     'executes activation guards so a %s target cannot promote rows or demote ACTIVE',
@@ -146,12 +210,17 @@ describe('ingest repository contracts', () => {
         )`,
         'CREATE TABLE ingest_series_attempts (run_id TEXT, series_id TEXT, status TEXT)',
         'CREATE TABLE staging_observations (run_id TEXT, series_id TEXT, date TEXT, value REAL)',
+        'CREATE TABLE ingest_lock (lock_name TEXT PRIMARY KEY, owner_run_id TEXT, acquired_at TEXT, expires_at TEXT)',
         "INSERT INTO observations VALUES ('OLD', '2024-01-01', 1)",
         "INSERT INTO ingest_runs (run_id, state) VALUES ('old-active', 'ACTIVE')",
         "INSERT INTO staging_observations VALUES ('target', 'NEW', '2024-01-02', 2)",
         ...(targetState === 'FAILED'
           ? ["INSERT INTO ingest_runs (run_id, state) VALUES ('target', 'FAILED')"]
           : []),
+        `INSERT INTO ingest_lock VALUES (
+          'fred_ingest', 'target', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+60 seconds')
+        )`,
       ];
       await db.batch(setup.map(sql => db.prepare(sql)));
 
@@ -165,7 +234,7 @@ describe('ingest repository contracts', () => {
     },
   );
 
-  it('persists terminal series-attempt and snapshot outcomes with supplied completion timestamps', async () => {
+  it('persists terminal series-attempt and failed-snapshot outcomes with supplied completion timestamps', async () => {
     const calls: Array<{ sql: string; binds: unknown[] }> = [];
     const db = {
       prepare(sql: string) {
@@ -180,7 +249,6 @@ describe('ingest repository contracts', () => {
 
     await (ingestDb as any).startSeriesAttempt(db, 'run-1', 'WALCL', '2024-01-01T00:01:00Z');
     await (ingestDb as any).failSeriesAttempt(db, 'run-1', 'WALCL', 'fetch failed', '2024-01-01T00:02:00Z');
-    await (ingestDb as any).completeIngestSnapshots(db, 'run-1', 3, '2024-01-01T00:03:00Z');
     await (ingestDb as any).failIngestSnapshots(
       db, 'run-2', { step: 'metadata', error: 'meta failed', snapshotCount: 2 }, '2024-01-01T00:04:00Z',
     );
@@ -190,11 +258,126 @@ describe('ingest repository contracts', () => {
     expect(calls[1].sql).toMatch(/status\s*=\s*'FAILED'[\s\S]*completed_at/i);
     expect(calls[1].sql).toMatch(/status\s+IN\s*\(\s*'RUNNING'\s*,\s*'SUCCEEDED'\s*\)/i);
     expect(calls[1].binds).toContain('2024-01-01T00:02:00Z');
-    expect(calls[2].sql).toMatch(/snapshot_state\s*=\s*'SUCCEEDED'/i);
-    expect(calls[2].binds).toContain('2024-01-01T00:03:00Z');
-    expect(calls[3].sql).toMatch(/snapshot_state\s*=\s*'FAILED'/i);
-    expect(calls[3].binds).toContain('2024-01-01T00:04:00Z');
-    expect(calls[3].binds).toContain(2);
+    expect(calls[2].sql).toMatch(/snapshot_state\s*=\s*'FAILED'/i);
+    expect(calls[2].binds).toContain('2024-01-01T00:04:00Z');
+    expect(calls[2].binds).toContain(2);
+  });
+
+  it('publishes success meta and snapshot outcome in one fenced batch with an in-batch assertion', async () => {
+    const statements: Array<{ sql: string; binds: unknown[] }> = [];
+    const batch = vi.fn(async (items: D1PreparedStatement[]) => items.map(() => ({ meta: { changes: 1 } })));
+    const db = {
+      prepare(sql: string) {
+        const statement = { sql, binds: [] as unknown[] };
+        statements.push(statement);
+        return { bind(...values: unknown[]) { statement.binds = values; return this; } };
+      },
+      batch,
+    } as unknown as D1Database;
+
+    await (ingestDb as any).completeIngestSuccess(
+      db,
+      'run-1',
+      3,
+      '2024-01-01T00:03:00Z',
+      [['last_ingest_at', '2024-01-01T00:03:00Z'], ['last_status', 'ok']],
+    );
+
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(batch.mock.calls[0][0]).toHaveLength(4);
+    expect(statements[0].sql).toMatch(/INSERT INTO meta[\s\S]*ingest_lock[\s\S]*'now'/i);
+    expect(statements[1].sql).toMatch(/INSERT INTO meta[\s\S]*ingest_lock[\s\S]*'now'/i);
+    expect(statements[2].sql).toMatch(/snapshot_state\s*=\s*'SUCCEEDED'[\s\S]*ingest_lock[\s\S]*'now'/i);
+    expect(statements[3].sql).toMatch(/SELECT[\s\S]*snapshot_state\s*=\s*'SUCCEEDED'[\s\S]*ingest_lock/i);
+  });
+
+  it.each(['transferred', 'expired'] as const)(
+    'leaves meta unchanged and snapshot PENDING when the lease is %s before success publication',
+    async leaseState => {
+      const mf = new Miniflare({
+        modules: true,
+        script: 'export default { fetch() { return new Response(); } }',
+        d1Databases: ['DB'],
+      });
+      const db = await mf.getD1Database('DB') as unknown as D1Database;
+      await db.batch([
+        db.prepare('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
+        db.prepare(`CREATE TABLE ingest_runs (
+          run_id TEXT PRIMARY KEY, state TEXT, snapshot_state TEXT,
+          snapshot_completed_at TEXT, snapshot_error TEXT, snapshot_count INTEGER DEFAULT 0
+        )`),
+        db.prepare('CREATE TABLE ingest_lock (lock_name TEXT PRIMARY KEY, owner_run_id TEXT, acquired_at TEXT, expires_at TEXT)'),
+        db.prepare("INSERT INTO meta VALUES ('last_status', 'old')"),
+        db.prepare("INSERT INTO ingest_runs (run_id, state, snapshot_state) VALUES ('run-1', 'ACTIVE', 'PENDING')"),
+        db.prepare(`INSERT INTO ingest_lock VALUES (
+          'fred_ingest', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)
+        )`).bind(
+          leaseState === 'transferred' ? 'replacement' : 'run-1',
+          leaseState === 'expired' ? '-1 second' : '+60 seconds',
+        ),
+      ]);
+
+      await expect((ingestDb as any).completeIngestSuccess(
+        db,
+        'run-1',
+        3,
+        '2024-01-01T00:03:00Z',
+        [['last_ingest_at', '2024-01-01T00:03:00Z'], ['last_status', 'ok']],
+      )).rejects.toThrow(/lease|fence/i);
+      await expect(ingestDb.setIngestMeta(db, 'run-1', 'last_error', 'stale owner'))
+        .rejects.toThrow(/lease|fence/i);
+      await expect(ingestDb.failIngestSnapshots(
+        db,
+        'run-1',
+        { step: 'lock', error: 'stale owner', snapshotCount: 0 },
+        '2024-01-01T00:04:00Z',
+      )).rejects.toThrow(/pending snapshot outcome/i);
+      await expect(db.prepare('SELECT key, value FROM meta ORDER BY key').all())
+        .resolves.toMatchObject({ results: [{ key: 'last_status', value: 'old' }] });
+      await expect(db.prepare("SELECT snapshot_state FROM ingest_runs WHERE run_id='run-1'").first())
+        .resolves.toEqual({ snapshot_state: 'PENDING' });
+      await mf.dispose();
+    },
+  );
+
+  it('rolls back earlier success meta when ownership transfers inside the publication batch', async () => {
+    const mf = new Miniflare({
+      modules: true,
+      script: 'export default { fetch() { return new Response(); } }',
+      d1Databases: ['DB'],
+    });
+    const db = await mf.getD1Database('DB') as unknown as D1Database;
+    await db.batch([
+      db.prepare('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
+      db.prepare(`CREATE TABLE ingest_runs (
+        run_id TEXT PRIMARY KEY, state TEXT, snapshot_state TEXT,
+        snapshot_completed_at TEXT, snapshot_error TEXT, snapshot_count INTEGER DEFAULT 0
+      )`),
+      db.prepare('CREATE TABLE ingest_lock (lock_name TEXT PRIMARY KEY, owner_run_id TEXT, acquired_at TEXT, expires_at TEXT)'),
+      db.prepare("INSERT INTO ingest_runs (run_id, state, snapshot_state) VALUES ('run-1', 'ACTIVE', 'PENDING')"),
+      db.prepare(`INSERT INTO ingest_lock VALUES (
+        'fred_ingest', 'run-1', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+60 seconds')
+      )`),
+      db.prepare(`CREATE TRIGGER transfer_lease_after_meta AFTER INSERT ON meta
+        WHEN NEW.key = 'last_ingest_at'
+        BEGIN UPDATE ingest_lock SET owner_run_id = 'replacement'; END`),
+    ]);
+
+    await expect((ingestDb as any).completeIngestSuccess(
+      db,
+      'run-1',
+      3,
+      '2024-01-01T00:03:00Z',
+      [['last_ingest_at', '2024-01-01T00:03:00Z'], ['last_status', 'ok']],
+    )).rejects.toThrow(/lease|fence/i);
+    await expect(db.prepare('SELECT COUNT(*) AS n FROM meta').first()).resolves.toEqual({ n: 0 });
+    await expect(db.prepare("SELECT snapshot_state FROM ingest_runs WHERE run_id='run-1'").first())
+      .resolves.toEqual({ snapshot_state: 'PENDING' });
+    await expect(db.prepare('SELECT owner_run_id FROM ingest_lock').first())
+      .resolves.toEqual({ owner_run_id: 'run-1' });
+    await mf.dispose();
   });
 
   it('throws a structured validation error carrying the semantically invalid series', () => {

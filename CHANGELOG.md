@@ -16,6 +16,10 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added local-only additive migration `0007_ingest_snapshot_outcome.sql` with durable `PENDING` / `SUCCEEDED` / `FAILED` snapshot outcomes, completion/error/count fields, and health failure signaling.
 - Opened each series attempt before fetch and durably closed fetch, structural-validation, and staging failures without masking the original exception when audit persistence fails.
 - Guarded every activation mutation inside the transactional batch so a missing or non-`RUNNING` target cannot promote observations or demote the prior ACTIVE run.
+- Replaced caller-captured lease timestamps with D1-current acquisition and renewal; an expired lease cannot be resurrected.
+- Fenced every activation, official/nowcast snapshot, snapshot-outcome, and global ingest-metadata mutation on the database-current live owner, with in-batch terminal assertions that roll back mid-transaction lease loss.
+- Published `snapshot_state=SUCCEEDED` and the complete success metadata set atomically, made ACTIVE `PENDING` health explicitly unhealthy, and opened each series attempt before its production-history read.
+- Declared the Miniflare version used by real D1 concurrency regressions as the exact direct dev dependency `3.20250718.3`; no schema migration was added by this final hardening pass.
 
 ### PR-05 — Official weekly snapshots and daily nowcasts
 

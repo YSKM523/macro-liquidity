@@ -14,10 +14,12 @@ const state = vi.hoisted(() => ({
   leaseFailureAfterEvent: null as string | null,
   snapshotWriteFailure: false,
   metaFailureKey: null as string | null,
+  seriesReadFailureSeries: null as string | null,
   activeSeries: new Set<string>(),
   staged: [] as Array<{ seriesId: string; rows: Obs[] }>,
   attemptFailures: [] as Array<{ seriesId: string; error: string; completedAt: string }>,
   snapshotFailures: [] as Array<{ step: string; error: string; completedAt: string }>,
+  successPublications: [] as Array<{ count: number; completedAt: string; meta: Array<[string, string]> }>,
   activationCompletedAt: null as string | null,
   runFailureCompletedAt: null as string | null,
   events: [] as string[],
@@ -48,11 +50,15 @@ vi.mock('../src/db', async importOriginal => {
   return {
     ...actual,
     getAllMeta: vi.fn(async () => ({})),
-    setMeta: vi.fn(async (_db: unknown, key: string) => {
+    setIngestMeta: vi.fn(async (_db: unknown, _runId: string, key: string) => {
       state.events.push(`meta:${key}`);
       if (key === state.metaFailureKey) throw new Error(`meta failed: ${key}`);
     }),
-    maxObsDate: vi.fn(async () => '2024-01-03'),
+    maxObsDate: vi.fn(async (_db: unknown, seriesId: string) => {
+      state.events.push(`max-date:${seriesId}`);
+      if (seriesId === state.seriesReadFailureSeries) throw new Error(`series read failed: ${seriesId}`);
+      return '2024-01-03';
+    }),
     acquireIngestLock: vi.fn(async () => state.lockAcquired),
     renewIngestLock: vi.fn(async () => {
       const previous = state.events.at(-1);
@@ -96,12 +102,22 @@ vi.mock('../src/db', async importOriginal => {
       state.events.push(`failed:${failure.step}`);
     }),
     loadSeriesMap: vi.fn(async () => { state.events.push('load-active'); return state.seriesMap; }),
-    upsertOfficialSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => { state.events.push(`official:${snapshot.date}`); }),
-    upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+    upsertOfficialSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => { state.events.push(`official:${snapshot.date}`); }),
+    upsertNowcastSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
       state.events.push(`nowcast:${snapshot.date}`);
       if (state.snapshotWriteFailure) throw new Error('snapshot write failed');
     }),
-    completeIngestSnapshots: vi.fn(async (_db: unknown, _runId: string, count: number, completedAt: string) => {
+    completeIngestSuccess: vi.fn(async (
+      _db: unknown,
+      _runId: string,
+      count: number,
+      completedAt: string,
+      meta: Array<[string, string]>,
+    ) => {
+      if (meta.some(([key]) => key === state.metaFailureKey)) {
+        throw new Error(`meta failed: ${state.metaFailureKey}`);
+      }
+      state.successPublications.push({ count, completedAt, meta });
       state.events.push(`snapshots-succeeded:${count}:${completedAt}`);
     }),
     failIngestSnapshots: vi.fn(async (
@@ -155,10 +171,12 @@ beforeEach(() => {
   state.leaseFailureAfterEvent = null;
   state.snapshotWriteFailure = false;
   state.metaFailureKey = null;
+  state.seriesReadFailureSeries = null;
   state.activeSeries = new Set(SERIES_IDS);
   state.staged = [];
   state.attemptFailures = [];
   state.snapshotFailures = [];
+  state.successPublications = [];
   state.activationCompletedAt = null;
   state.runFailureCompletedAt = null;
   state.events = [];
@@ -186,6 +204,23 @@ describe('atomic ingest orchestration', () => {
     expect(state.events.some(event => event.startsWith('official:') || event.startsWith('nowcast:'))).toBe(false);
     expect(state.events).not.toContain('load-active');
     expect(state.events.at(-1)).toBe('release');
+  });
+
+  it('starts and fails the series attempt when the production series read fails', async () => {
+    state.seriesReadFailureSeries = SERIES_IDS[0];
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z')))
+      .rejects.toThrow(`series read failed: ${SERIES_IDS[0]}`);
+
+    expect(state.events.indexOf(`max-date:${SERIES_IDS[0]}`)).toBeGreaterThan(
+      state.events.findIndex(event => event.startsWith(`attempt-start:${SERIES_IDS[0]}:`)),
+    );
+    expect(state.attemptFailures).toEqual([
+      expect.objectContaining({ seriesId: SERIES_IDS[0], error: `series read failed: ${SERIES_IDS[0]}` }),
+    ]);
+    expect(state.failed).toEqual([
+      expect.objectContaining({ step: 'series-read', seriesId: SERIES_IDS[0] }),
+    ]);
   });
 
   it.each([
@@ -264,6 +299,21 @@ describe('atomic ingest orchestration', () => {
     expect(result).toEqual(expect.objectContaining({ status: 'active', runId: expect.any(String) }));
   });
 
+  it('publishes success metadata and SUCCEEDED outcome through one terminal database operation', async () => {
+    await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
+
+    expect(state.successPublications).toEqual([
+      expect.objectContaining({
+        count: expect.any(Number),
+        completedAt: expect.any(String),
+        meta: expect.arrayContaining([
+          ['last_status', 'ok'],
+          ['last_error', ''],
+        ]),
+      }),
+    ]);
+  });
+
   it('renews ownership after active reads and DXY fetch, before every snapshot write and finalization', async () => {
     await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
 
@@ -291,7 +341,7 @@ describe('atomic ingest orchestration', () => {
 
   it.each([
     ['snapshot write', () => { state.snapshotWriteFailure = true; }, 'snapshot'],
-    ['success metadata', () => { state.metaFailureKey = 'last_ingest_at'; }, 'metadata'],
+    ['success publication', () => { state.metaFailureKey = 'last_ingest_at'; }, 'snapshot-finalization'],
   ])('records the ACTIVE run snapshot outcome FAILED after a %s failure', async (_label, arrange, failedStep) => {
     arrange();
 

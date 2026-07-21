@@ -11,6 +11,22 @@ import {
   officialSnapshotOnOrBefore,
   upsertOfficialSnapshot,
 } from '../src/db';
+import { Miniflare } from 'miniflare';
+
+const testSnapshot = {
+  date: '2024-07-24', walcl: 6000, tga: 700, rrp: 100, repo: 0, netliq: 5200,
+  netliqTrend: 5100, sofrIorb: 0, hyOas: 3, dgs10: 4, dxy: 100, vix: 15,
+  bsImpulse: 'FLAT', netliqDir: 'UP', verdict: 'BULLISH', score: 60,
+  factors: {}, factorResults: {}, freshness: {}, decisionStatus: 'OK',
+  p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 1,
+} as any;
+
+const persistedSnapshotColumns = [
+  'walcl', 'tga', 'rrp', 'repo', 'netliq', 'netliq_trend', 'sofr_iorb', 'hy_oas', 'dgs10',
+  'dxy_eod', 'vix_eod', 'qe_qt_regime', 'netliq_dir', 'verdict', 'score', 'p0', 'p1', 'p2',
+  'p3', 'spx', 'reason', 'factors_json', 'coverage', 'decision_status', 'factor_quality_json',
+  'freshness_json',
+];
 
 describe('officialSnapshotBefore', () => {
   it('loads the nearest snapshot strictly before the rebuild start date', async () => {
@@ -71,7 +87,7 @@ describe('official and nowcast snapshot channels', () => {
     expect(typeof (snapshotDb as any).upsertOfficialSnapshot).toBe('function');
     expect(typeof (snapshotDb as any).upsertNowcastSnapshot).toBe('function');
 
-    const run = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ meta: { changes: 1 } }));
     const bind = vi.fn(() => ({ run }));
     const prepare = vi.fn(() => ({ bind }));
     const db = { prepare } as unknown as D1Database;
@@ -83,13 +99,54 @@ describe('official and nowcast snapshot channels', () => {
       p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 1,
     } as any;
 
-    await (snapshotDb as any).upsertOfficialSnapshot(db, snapshot, 5000);
+    await (snapshotDb as any).upsertOfficialSnapshot(db, 'run-1', snapshot, 5000);
     expect((prepare.mock.calls as unknown as Array<[string]>)[0][0]).toContain('INSERT INTO model_snapshot_weekly');
     expect(bind.mock.calls[0]).toContain('2024-07-22');
+    expect(bind.mock.calls[0].at(-1)).toBe('run-1');
 
-    await (snapshotDb as any).upsertNowcastSnapshot(db, snapshot, 5000);
+    await (snapshotDb as any).upsertNowcastSnapshot(db, 'run-1', snapshot, 5000);
     expect((prepare.mock.calls as unknown as Array<[string]>)[1][0]).toContain('INSERT INTO nowcast_snapshot_daily');
     expect(bind.mock.calls[1]).toContain('PROVISIONAL');
+    expect(bind.mock.calls[1].at(-1)).toBe('run-1');
+  });
+
+  it.each([
+    ['official', 'transferred'],
+    ['official', 'expired'],
+    ['nowcast', 'transferred'],
+    ['nowcast', 'expired'],
+  ] as const)('rejects a %s upsert when the owner lease is %s', async (channel, leaseState) => {
+    const mf = new Miniflare({
+      modules: true,
+      script: 'export default { fetch() { return new Response(); } }',
+      d1Databases: ['DB'],
+    });
+    const db = await mf.getD1Database('DB') as unknown as D1Database;
+    const extraColumn = channel === 'official'
+      ? 'decision_week TEXT UNIQUE'
+      : 'channel_status TEXT';
+    const table = channel === 'official' ? 'model_snapshot_weekly' : 'nowcast_snapshot_daily';
+    await db.batch([
+      db.prepare(`CREATE TABLE ${table} (
+        date TEXT PRIMARY KEY, ${extraColumn}, ${persistedSnapshotColumns.join(', ')}
+      )`),
+      db.prepare('CREATE TABLE ingest_lock (lock_name TEXT PRIMARY KEY, owner_run_id TEXT, acquired_at TEXT, expires_at TEXT)'),
+      db.prepare(`INSERT INTO ingest_lock VALUES (
+        'fred_ingest', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)
+      )`).bind(
+        leaseState === 'transferred' ? 'replacement' : 'run-1',
+        leaseState === 'expired' ? '-1 second' : '+60 seconds',
+      ),
+    ]);
+
+    const write = channel === 'official'
+      ? snapshotDb.upsertOfficialSnapshot(db, 'run-1', testSnapshot, 5000)
+      : snapshotDb.upsertNowcastSnapshot(db, 'run-1', testSnapshot, 5000);
+    await expect(write).rejects.toThrow(/lease|fence/i);
+    await expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first())
+      .resolves.toEqual({ n: 0 });
+    await mf.dispose();
   });
 
   it('loads official analytics exclusively from weekly storage', async () => {
@@ -163,7 +220,7 @@ describe('historical snapshot consumers', () => {
 
 describe('snapshot quality persistence', () => {
   it('serializes decision status, factor quality, and series freshness in the snapshot upsert', async () => {
-    const run = vi.fn(async () => undefined);
+    const run = vi.fn(async () => ({ meta: { changes: 1 } }));
     const bind = vi.fn(() => ({ run }));
     const prepare = vi.fn(() => ({ bind }));
     const db = { prepare } as unknown as D1Database;
@@ -181,14 +238,15 @@ describe('snapshot quality persistence', () => {
       p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 0.875,
     } as any;
 
-    await upsertOfficialSnapshot(db, snapshot, 5000);
+    await upsertOfficialSnapshot(db, 'run-1', snapshot, 5000);
 
     const preparedSql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(preparedSql).toContain('decision_status');
     expect(preparedSql).toContain('factor_quality_json');
     expect(preparedSql).toContain('freshness_json');
-    expect(bind.mock.calls[0].slice(-3)).toEqual([
+    expect(bind.mock.calls[0].slice(-4)).toEqual([
       'OK', JSON.stringify(factorResults), JSON.stringify(freshness),
+      'run-1',
     ]);
   });
 

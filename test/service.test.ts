@@ -32,7 +32,7 @@ vi.mock('../src/db', () => ({
   validateIngestRun: vi.fn(async () => undefined),
   activateIngestRun: vi.fn(async () => undefined),
   failIngestRun: vi.fn(async () => undefined),
-  completeIngestSnapshots: vi.fn(async () => undefined),
+  completeIngestSuccess: vi.fn(async () => undefined),
   failIngestSnapshots: vi.fn(async () => undefined),
   decisionWeek: (date: string) => {
     const d = new Date(`${date}T00:00:00Z`);
@@ -41,13 +41,13 @@ vi.mock('../src/db', () => ({
   },
   maxObsDate: vi.fn(async () => '2024-05-29'),
   loadSeriesMap: vi.fn(async () => state.seriesMap),
-  upsertOfficialSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+  upsertOfficialSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.snapshots.set(snapshot.date, structuredClone(snapshot));
   }),
-  upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+  upsertNowcastSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.nowcasts.set(snapshot.date, structuredClone(snapshot));
   }),
-  setMeta: vi.fn(async () => undefined),
+  setIngestMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
   officialSnapshotBefore: vi.fn(async (_db: unknown, date: string) => {
     state.officialBeforeCalls++;

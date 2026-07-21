@@ -10,14 +10,14 @@ No deploy, push, remote D1 access, production mutation, point-in-time storage, p
 
 - `observations` remains the production latest-view compatibility table. Fetching writes only to `staging_observations`; production observations change only inside activation.
 - `ingest_runs` records `RUNNING`, `ACTIVE`, `FAILED`, and historical `SUPERSEDED` data state plus an independent durable `snapshot_state` of `PENDING`, `SUCCEEDED`, or `FAILED`, with snapshot completion time, error, and count. A partial unique index enforces at most one `ACTIVE` run.
-- Each `ingest_series_attempts` row is created before its fetch. Fetch, structural-validation, and staging failures close it as `FAILED` with the actual failure time and error; successful zero-row responses remain distinguishable from missing/unattempted series and validate only if production already contains that series.
+- Each `ingest_series_attempts` row is created before the production-history read. Series-read, fetch, structural-validation, and staging failures close it as `FAILED` with the actual failure time and error; successful zero-row responses remain distinguishable from missing/unattempted series and validate only if production already contains that series.
 - Staged observations are keyed by `(run_id, series_id, date)` and retain failed-run evidence.
-- Lock acquisition is one conditional upsert. A live lease rejects another owner, an expired lease can be acquired, renewal and release are owner-scoped, and `runIngest()` releases in `finally` without masking the primary result.
-- The lease is checked after long reads and every external fetch, immediately before activation and every snapshot write, before each success-metadata write, and before snapshot finalization. A lost owner stops before further snapshot writes and cannot overwrite global success metadata.
-- Activation uses exactly one transactional D1 `db.batch()`. Promotion and prior-ACTIVE demotion each carry a database-enforced `EXISTS(target RUNNING)` guard, the target transition itself requires `RUNNING`, and a post-result check reports a rejected activation.
-- Snapshot rebuilding starts only after activation and reloads `observations`. The ACTIVE run remains the production data run if a post-activation operation fails, while its snapshot outcome becomes durably `FAILED`; full rebuild still writes only `model_snapshot_weekly`, and incremental ingest still writes only `nowcast_snapshot_daily`.
+- Lock acquisition and renewal derive both current time and expiry inside D1; callers provide only the owner and duration. A live lease rejects another owner, an expired lease can be acquired but cannot be renewed/resurrected, release is owner-scoped, and `runIngest()` releases in `finally` without masking the primary result.
+- Every activation mutation, official/nowcast upsert, snapshot-outcome mutation, and global ingest-meta write embeds the same database-current `owner_run_id` and unexpired-lease fence. A stale former owner receives zero changes/an error even if it renewed before being suspended past expiry and replaced.
+- Activation uses exactly one transactional D1 `db.batch()`. Promotion, prior-ACTIVE demotion, and target activation each carry database-enforced run-state plus live-lease guards. A terminal assertion executes inside the batch, so ownership loss between statements raises a SQL error and rolls back earlier mutations.
+- Snapshot rebuilding starts only after activation and reloads `observations`. The full success meta set and `snapshot_state=SUCCEEDED` publish in one fenced D1 batch with an in-batch terminal assertion, so metadata can never report success while the ACTIVE outcome remains `PENDING`. Full rebuild still writes only `model_snapshot_weekly`, and incremental ingest still writes only `nowcast_snapshot_daily`.
 - Manual contention returns HTTP 409. Scheduled contention returns a typed `conflict` result and emits a structured warning rather than appearing successful.
-- `/api/health` and `/api/snapshot` expose the current ACTIVE and latest FAILED run with snapshot outcome. An ACTIVE run whose snapshot outcome is `FAILED` makes health return HTTP 503.
+- `/api/health` and `/api/snapshot` expose the current ACTIVE and latest FAILED run with snapshot outcome. Every ACTIVE outcome other than `SUCCEEDED`, including `PENDING`, makes health return HTTP 503 with an explicit reason.
 
 ## Changed files
 
@@ -26,16 +26,18 @@ No deploy, push, remote D1 access, production mutation, point-in-time storage, p
 - `migrations/0006_atomic_ingest.sql` — run, series-attempt, staging, ACTIVE index, lease lock, and legacy ACTIVE bootstrap schema.
 - `migrations/0007_ingest_snapshot_outcome.sql` — additive durable snapshot outcome, completion, error, and count fields.
 - `src/config.ts` — 15-minute renewable ingest lease duration.
-- `src/db.ts` — attempt lifecycle, snapshot outcome, guarded activation, lock lifecycle, validation, failure evidence, and run summaries; removed the unused exported direct production-write bypass.
-- `src/service.ts` — pre-fetch attempt auditing, full-run lease checks, guarded activation boundary, post-activation snapshot outcome, actual terminal timestamps, and explicit contention.
-- `src/worker.ts` — manual HTTP 409, run/snapshot metadata, and snapshot-failure health status.
+- `src/db.ts` — database-current lock lifecycle, SQL-local production fences, in-batch activation/success assertions, attempt lifecycle, validation, failure evidence, and run summaries; removed unfenced success/meta mutation entry points.
+- `src/service.ts` — pre-series-read attempt auditing, fenced snapshot routing, atomic success publication, actual terminal timestamps, and explicit contention.
+- `src/worker.ts` — manual HTTP 409, run/snapshot metadata, and non-success ACTIVE snapshot health status.
 
 ### Tests
 
-- `test/atomic-ingest.test.ts` — attempt lifecycle failures, original-error preservation, post-activation lease coverage, durable snapshot outcomes, actual timestamps, and prior atomic-ingest coverage.
-- `test/ingest-db.test.ts` — lock semantics, guarded one-batch activation including real SQLite execution, snapshot outcome persistence/summary, validation, and migrations.
+- `test/atomic-ingest.test.ts` — attempt-before-series-read ordering, original-error preservation, atomic success orchestration, post-activation lease coverage, durable snapshot outcomes, and prior atomic-ingest coverage.
+- `test/ingest-db.test.ts` — real Miniflare D1 database-current lock semantics, transferred/expired activation and finalization fences, mid-batch ownership-transfer rollback, snapshot outcome persistence/summary, validation, and migrations.
+- `test/db.test.ts` — real Miniflare D1 transferred/expired official and nowcast snapshot-write fences plus preserved PR-05 channel contracts.
 - `test/service-channels.test.ts`, `test/service-freshness.test.ts`, `test/service.test.ts` — PR-01–PR-05 service mocks extended for the run repository without weakening assertions.
-- `test/worker.test.ts` — HTTP 409, run/snapshot metadata, and ACTIVE snapshot-failure health coverage.
+- `test/worker.test.ts` — HTTP 409, run/snapshot metadata, and ACTIVE FAILED/PENDING health coverage.
+- `package.json`, `package-lock.json` — exact direct Miniflare `3.20250718.3` dev dependency used by the D1 regressions.
 
 ### Documentation
 
@@ -119,6 +121,48 @@ RED result: 4 tests failed and 26 passed. The failures showed that a zero-row `S
 
 After adding `IngestSeriesValidationError`, allowing semantic invalidation of `RUNNING` or `SUCCEEDED` attempts, and preserving the original error across audit failure, the same command passed: 2 files, 30 tests, 0 failed.
 
+### Final-review database-time and fencing RED/GREEN
+
+Database-current lease RED:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/ingest-db.test.ts
+```
+
+Result before production edits: 3 failed, 11 passed. The SQL had no database `now`, acquisition still required caller timestamps, and real Miniflare rejected the new duration-only calls; expired renewal could not satisfy the no-resurrection contract.
+
+Activation and snapshot-write fence RED:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/ingest-db.test.ts test/db.test.ts
+```
+
+Result before production edits: 9 failed, 22 passed. A transferred or expired owner could still activate staging and the official/nowcast writers had no owner argument or SQL fence; activation had only three mutations and no in-batch terminal assertion.
+
+Crash-safe success publication RED:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/ingest-db.test.ts
+```
+
+Result before production edits: 5 failed, 15 passed. There was no fenced global-meta primitive or atomic success publication operation. The added Miniflare trigger transfers the lease immediately after the first success-meta insert to prove the terminal assertion runs inside the same batch and rolls every earlier change back.
+
+Series-read and health RED:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/atomic-ingest.test.ts test/worker.test.ts
+```
+
+Result before production edits: 3 failed, 26 passed. `maxObsDate` failed before the attempt existed, success meta used separate calls, and ACTIVE `PENDING` health returned 200.
+
+Focused GREEN:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/atomic-ingest.test.ts test/ingest-db.test.ts test/db.test.ts test/worker.test.ts test/service-channels.test.ts test/service-freshness.test.ts test/service.test.ts
+```
+
+Result: PASS — 7 files, 74 tests passed, 0 failed, including all real Miniflare transferred/expired and mid-batch rollback cases.
+
 ## Final verification
 
 ### Full test suite
@@ -172,7 +216,7 @@ Result: PASS — returned all five PR-06 structures plus legacy `observations`; 
 ## Known limitations
 
 - PR-06 intentionally has no staging/audit retention job. Successful and failed run evidence remains until a future explicit retention policy is introduced.
-- Lease ownership is checked after external fetches/long reads and immediately before snapshot or success writes. An external request itself cannot be cancelled by D1 lease expiry, but the returned data is not used for snapshot persistence until ownership is renewed.
+- An external request itself cannot be cancelled by D1 lease expiry. Every later production mutation independently rechecks the database-current live owner in its own SQL, so returned data cannot be published by an expired or replaced owner.
 - Rows predating migration `0007` remain conservatively `PENDING` unless their run had already failed; historical post-activation snapshot success cannot be reconstructed truthfully from the old schema.
 - Migration and transaction behavior were validated only with worktree-local D1, as required. Remote/staging rollout remains a separate authorized operation.
 - This PR stores latest observations, not release vintages or point-in-time availability; PR-08 remains responsible for PIT history.
@@ -189,11 +233,15 @@ Result: PASS — returned all five PR-06 structures plus legacy `observations`; 
 
 No forward production or remote step was performed in this task.
 
+The final-review fencing pass adds no migration. It reuses the `ingest_lock` and snapshot-outcome schema from `0006`/`0007`; only the direct Miniflare test dependency changes the package manifest and lockfile.
+
 ### Code rollback
 
 1. Roll the Worker back to the pre-PR-06 commit.
 2. Leave the additive PR-06 tables in place; the old Worker continues to use legacy `observations` and snapshot tables and ignores the new structures.
 3. Confirm `observations`, `model_snapshot_weekly`, and `nowcast_snapshot_daily` before reopening refresh traffic.
+
+Because success metadata and `snapshot_state=SUCCEEDED` now commit in one batch, rollback is code-only for this final hardening pass. There is no fence-specific schema object to remove.
 
 ### Schema rollback, only if explicitly required
 

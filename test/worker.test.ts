@@ -20,6 +20,7 @@ const dbState = vi.hoisted(() => ({
   } as any,
   reference: null as any,
   meta: {} as Record<string, string>,
+  activeSnapshotState: 'FAILED' as 'PENDING' | 'SUCCEEDED' | 'FAILED',
 }));
 
 vi.mock('../src/service', () => ({
@@ -39,7 +40,7 @@ vi.mock('../src/db', () => ({
   ingestRunSummary: vi.fn(async () => ({
     active: {
       run_id: 'active-1', state: 'ACTIVE', row_count: 20, series_count: 18,
-      snapshot_state: 'FAILED', snapshot_error: 'snapshot write failed', snapshot_count: 2,
+      snapshot_state: dbState.activeSnapshotState, snapshot_error: 'snapshot write failed', snapshot_count: 2,
     },
     latestFailed: {
       run_id: 'failed-1', state: 'FAILED', failed_step: 'fetch', failed_series: 'SOFR',
@@ -73,6 +74,7 @@ beforeEach(() => {
   };
   dbState.reference = null;
   dbState.meta = {};
+  dbState.activeSnapshotState = 'FAILED';
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -102,6 +104,18 @@ describe('/api/health ingest snapshot outcome', () => {
     expect(body.ingest_runs.active).toMatchObject({
       run_id: 'active-1', snapshot_state: 'FAILED', snapshot_error: 'snapshot write failed', snapshot_count: 2,
     });
+  });
+
+  it('returns 503 with an explicit reason while the ACTIVE snapshot outcome is PENDING', async () => {
+    dbState.activeSnapshotState = 'PENDING';
+    dbState.meta = { last_ingest_at: new Date().toISOString(), last_status: 'ok' };
+
+    const response = await worker.fetch(new Request('https://example.test/api/health'), env);
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(503);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('snapshot_pending');
   });
 });
 

@@ -102,9 +102,15 @@ export default {
           now: new Date().toISOString(),
           staleHours: INGEST_STALE_HOURS,
         });
-        const activeSnapshotFailed = (ingestRuns.active as any)?.snapshot_state === 'FAILED';
-        const health = activeSnapshotFailed
-          ? { ...h, ok: false, stale: true, error: 'snapshot_failed' }
+        const activeSnapshotState = (ingestRuns.active as any)?.snapshot_state as string | undefined;
+        const activeSnapshotUnhealthy = ingestRuns.active != null && activeSnapshotState !== 'SUCCEEDED';
+        const snapshotError = activeSnapshotState === 'PENDING'
+          ? 'snapshot_pending'
+          : activeSnapshotState === 'FAILED'
+            ? 'snapshot_failed'
+            : 'snapshot_not_succeeded';
+        const health = activeSnapshotUnhealthy
+          ? { ...h, ok: false, stale: true, error: snapshotError }
           : h;
         return json({ ...health, ingest_runs: ingestRuns }, health.ok ? 200 : 503);
       } catch (e) {

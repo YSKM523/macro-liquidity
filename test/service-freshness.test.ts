@@ -24,16 +24,16 @@ vi.mock('../src/db', () => ({
   validateIngestRun: vi.fn(async () => undefined),
   activateIngestRun: vi.fn(async () => undefined),
   failIngestRun: vi.fn(async () => undefined),
-  completeIngestSnapshots: vi.fn(async () => undefined),
+  completeIngestSuccess: vi.fn(async () => undefined),
   failIngestSnapshots: vi.fn(async () => undefined),
   decisionWeek: (date: string) => date,
   maxObsDate: vi.fn(async () => DATE),
   loadSeriesMap: vi.fn(async () => state.seriesMap),
   upsertOfficialSnapshot: vi.fn(async () => undefined),
-  upsertNowcastSnapshot: vi.fn(async (_db: unknown, snapshot: Snapshot) => {
+  upsertNowcastSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.nowcasts.set(snapshot.date, structuredClone(snapshot));
   }),
-  setMeta: vi.fn(async () => undefined),
+  setIngestMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
   officialSnapshotBefore: vi.fn(async () => null),
   officialVerdictAnchors: vi.fn(async () => []),

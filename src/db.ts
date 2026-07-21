@@ -34,18 +34,21 @@ export class IngestSeriesValidationError extends Error {
 export async function acquireIngestLock(
   db: D1Database,
   runId: string,
-  acquiredAt: string,
-  expiresAt: string,
+  leaseSeconds: number,
 ): Promise<boolean> {
   const result = await db.prepare(
     `INSERT INTO ingest_lock (lock_name, owner_run_id, acquired_at, expires_at)
-     VALUES ('fred_ingest', ?, ?, ?)
+     VALUES (
+       'fred_ingest', ?,
+       strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+       strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || ? || ' seconds')
+     )
      ON CONFLICT(lock_name) DO UPDATE SET
        owner_run_id = excluded.owner_run_id,
        acquired_at = excluded.acquired_at,
        expires_at = excluded.expires_at
-     WHERE ingest_lock.expires_at <= ?`
-  ).bind(runId, acquiredAt, expiresAt, acquiredAt).run();
+     WHERE unixepoch(ingest_lock.expires_at) <= unixepoch('now')`
+  ).bind(runId, leaseSeconds).run();
   return Number((result.meta as any)?.changes ?? 0) === 1;
 }
 
@@ -59,13 +62,14 @@ export async function releaseIngestLock(db: D1Database, runId: string): Promise<
 export async function renewIngestLock(
   db: D1Database,
   runId: string,
-  renewedAt: string,
-  expiresAt: string,
+  leaseSeconds: number,
 ): Promise<boolean> {
   const result = await db.prepare(
-    `UPDATE ingest_lock SET expires_at = ?
-     WHERE lock_name = 'fred_ingest' AND owner_run_id = ? AND expires_at > ?`
-  ).bind(expiresAt, runId, renewedAt).run();
+    `UPDATE ingest_lock
+     SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || ? || ' seconds')
+     WHERE lock_name = 'fred_ingest' AND owner_run_id = ?
+       AND unixepoch(expires_at) > unixepoch('now')`
+  ).bind(leaseSeconds, runId).run();
   return Number((result.meta as any)?.changes ?? 0) === 1;
 }
 
@@ -175,6 +179,8 @@ export async function validateIngestRun(
   configuredSeries: string[],
 ): Promise<void> {
   const [attemptRows, activeRows] = await Promise.all([
+    // D1 rolls the batch back on a statement error. The intentionally invalid
+    // json() converts a fence miss into an error before the transaction commits.
     db.prepare(
       `SELECT series_id, status, row_count
        FROM ingest_series_attempts WHERE run_id = ?`
@@ -199,6 +205,8 @@ export async function activateIngestRun(
   completedAt: string,
 ): Promise<void> {
   const results = await db.batch([
+    // Keep the assertion inside the batch: inspecting meta.changes afterward
+    // would be too late to roll back success metadata written earlier.
     db.prepare(
       `INSERT INTO observations (series_id, date, value)
        SELECT staged.series_id, staged.date, staged.value FROM staging_observations staged
@@ -207,16 +215,26 @@ export async function activateIngestRun(
            SELECT 1 FROM ingest_runs target
            WHERE target.run_id = ? AND target.state = 'RUNNING'
          )
+         AND EXISTS (
+           SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+             AND unixepoch(lease.expires_at) > unixepoch('now')
+         )
        ON CONFLICT(series_id, date) DO UPDATE SET value = excluded.value`
-    ).bind(runId, runId),
+    ).bind(runId, runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET state = 'SUPERSEDED'
        WHERE state = 'ACTIVE' AND run_id <> ?
          AND EXISTS (
            SELECT 1 FROM ingest_runs target
            WHERE target.run_id = ? AND target.state = 'RUNNING'
+         )
+         AND EXISTS (
+           SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+             AND unixepoch(lease.expires_at) > unixepoch('now')
          )`
-    ).bind(runId, runId),
+    ).bind(runId, runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET
          state = 'ACTIVE', completed_at = ?,
@@ -225,29 +243,107 @@ export async function activateIngestRun(
          row_count = (SELECT COUNT(*) FROM staging_observations WHERE run_id = ?),
          series_count = (SELECT COUNT(*) FROM ingest_series_attempts
                          WHERE run_id = ? AND status = 'SUCCEEDED')
-       WHERE run_id = ? AND state = 'RUNNING'`
-    ).bind(completedAt, runId, runId, runId),
-  ]);
+       WHERE run_id = ? AND state = 'RUNNING'
+         AND EXISTS (
+           SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+             AND unixepoch(lease.expires_at) > unixepoch('now')
+         )`
+    ).bind(completedAt, runId, runId, runId, runId),
+    db.prepare(
+      `SELECT CASE WHEN
+         EXISTS (
+           SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+             AND unixepoch(lease.expires_at) > unixepoch('now')
+         )
+         AND EXISTS (
+           SELECT 1 FROM ingest_runs target
+           WHERE target.run_id = ? AND target.state = 'ACTIVE'
+         )
+       THEN 1 ELSE json('ingest activation fence rejected') END AS fence`
+    ).bind(runId, runId),
+  ]).catch(error => {
+    throw new Error(
+      `ingest run ${runId} activation lease/state fence rejected; target must be RUNNING: ${String((error as any)?.message ?? error)}`,
+    );
+  });
   if (Number((results[2]?.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest run ${runId} must be RUNNING before activation`);
   }
 }
 
-export async function completeIngestSnapshots(
+function fencedMetaStatement(
+  db: D1Database,
+  runId: string,
+  key: string,
+  value: string,
+): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO meta (key, value)
+     SELECT ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM ingest_lock lease
+       WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+         AND unixepoch(lease.expires_at) > unixepoch('now')
+     )
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).bind(key, value, runId);
+}
+
+export async function setIngestMeta(
+  db: D1Database,
+  runId: string,
+  key: string,
+  value: string,
+): Promise<void> {
+  const result = await fencedMetaStatement(db, runId, key, value).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`ingest lease fence rejected meta write ${key} for run ${runId}`);
+  }
+}
+
+export async function completeIngestSuccess(
   db: D1Database,
   runId: string,
   snapshotCount: number,
   completedAt: string,
+  metaEntries: Array<[string, string]>,
 ): Promise<void> {
-  const result = await db.prepare(
-    `UPDATE ingest_runs SET
-       snapshot_state = 'SUCCEEDED', snapshot_completed_at = ?,
-       snapshot_error = NULL, snapshot_count = ?
-     WHERE run_id = ? AND state = 'ACTIVE' AND snapshot_state = 'PENDING'`
-  ).bind(completedAt, snapshotCount, runId).run();
-  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
-    throw new Error(`active ingest run ${runId} has no pending snapshot outcome`);
-  }
+  const statements = metaEntries.map(([key, value]) =>
+    fencedMetaStatement(db, runId, key, value));
+  statements.push(
+    db.prepare(
+      `UPDATE ingest_runs SET
+         snapshot_state = 'SUCCEEDED', snapshot_completed_at = ?,
+         snapshot_error = NULL, snapshot_count = ?
+       WHERE run_id = ? AND state = 'ACTIVE' AND snapshot_state = 'PENDING'
+         AND EXISTS (
+           SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+             AND unixepoch(lease.expires_at) > unixepoch('now')
+         )`
+    ).bind(completedAt, snapshotCount, runId, runId),
+    db.prepare(
+      `SELECT CASE WHEN
+         EXISTS (
+           SELECT 1 FROM ingest_runs target
+           WHERE target.run_id = ? AND target.state = 'ACTIVE'
+             AND target.snapshot_state = 'SUCCEEDED'
+         )
+         AND EXISTS (
+           SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+             AND unixepoch(lease.expires_at) > unixepoch('now')
+         )
+       THEN 1 ELSE json('ingest success publication fence rejected') END AS fence`
+    ).bind(runId, runId),
+  );
+  await db.batch(statements).catch(error => {
+    throw new Error(
+      `ingest success publication lease fence rejected for run ${runId}: ${String((error as any)?.message ?? error)}`,
+    );
+  });
 }
 
 export async function failIngestSnapshots(
@@ -259,8 +355,13 @@ export async function failIngestSnapshots(
   const result = await db.prepare(
     `UPDATE ingest_runs SET
        snapshot_state = 'FAILED', snapshot_completed_at = ?, snapshot_error = ?, snapshot_count = ?
-     WHERE run_id = ? AND state IN ('ACTIVE', 'SUPERSEDED') AND snapshot_state = 'PENDING'`
-  ).bind(completedAt, `${failure.step}: ${failure.error}`, failure.snapshotCount, runId).run();
+     WHERE run_id = ? AND state IN ('ACTIVE', 'SUPERSEDED') AND snapshot_state = 'PENDING'
+       AND EXISTS (
+         SELECT 1 FROM ingest_lock lease
+         WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+           AND unixepoch(lease.expires_at) > unixepoch('now')
+       )`
+  ).bind(completedAt, `${failure.step}: ${failure.error}`, failure.snapshotCount, runId, runId).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest run ${runId} has no pending snapshot outcome to fail`);
   }
@@ -347,24 +448,50 @@ export function decisionWeek(date: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-export async function upsertOfficialSnapshot(db: D1Database, s: Snapshot, spx: number | null): Promise<void> {
+export async function upsertOfficialSnapshot(
+  db: D1Database,
+  runId: string,
+  s: Snapshot,
+  spx: number | null,
+): Promise<void> {
   const placeholders = Array.from({ length: 28 }, () => '?').join(',');
-  await db.prepare(
+  const result = await db.prepare(
     `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS})
-     VALUES (${placeholders})
+     SELECT ${placeholders}
+     WHERE EXISTS (
+       SELECT 1 FROM ingest_lock lease
+       WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+         AND unixepoch(lease.expires_at) > unixepoch('now')
+     )
      ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,
        ${SNAPSHOT_UPDATE}`
-  ).bind(s.date, decisionWeek(s.date), ...snapshotValues(s, spx)).run();
+  ).bind(s.date, decisionWeek(s.date), ...snapshotValues(s, spx), runId).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`ingest lease fence rejected official snapshot write for run ${runId}`);
+  }
 }
 
-export async function upsertNowcastSnapshot(db: D1Database, s: Snapshot, spx: number | null): Promise<void> {
+export async function upsertNowcastSnapshot(
+  db: D1Database,
+  runId: string,
+  s: Snapshot,
+  spx: number | null,
+): Promise<void> {
   const placeholders = Array.from({ length: 28 }, () => '?').join(',');
-  await db.prepare(
+  const result = await db.prepare(
     `INSERT INTO nowcast_snapshot_daily (date, channel_status, ${SNAPSHOT_COLUMNS})
-     VALUES (${placeholders})
+     SELECT ${placeholders}
+     WHERE EXISTS (
+       SELECT 1 FROM ingest_lock lease
+       WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
+         AND unixepoch(lease.expires_at) > unixepoch('now')
+     )
      ON CONFLICT(date) DO UPDATE SET channel_status='PROVISIONAL',
        ${SNAPSHOT_UPDATE}`
-  ).bind(s.date, 'PROVISIONAL', ...snapshotValues(s, spx)).run();
+  ).bind(s.date, 'PROVISIONAL', ...snapshotValues(s, spx), runId).run();
+  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    throw new Error(`ingest lease fence rejected nowcast snapshot write for run ${runId}`);
+  }
 }
 
 export async function latestOfficialSnapshot(db: D1Database) {
@@ -426,12 +553,6 @@ export async function countOfficialSnapshots(db: D1Database): Promise<number> {
 export async function officialSnapshotOnOrBefore(db: D1Database, date: string) {
   return db.prepare("SELECT * FROM model_snapshot_weekly WHERE date <= ? AND decision_status = 'OK' ORDER BY date DESC LIMIT 1")
     .bind(date).first();
-}
-
-export async function setMeta(db: D1Database, key: string, value: string): Promise<void> {
-  await db.prepare(
-    'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-  ).bind(key, value).run();
 }
 
 export async function getAllMeta(db: D1Database): Promise<Record<string, string>> {

@@ -13,9 +13,10 @@
     "export:snapshots": "wrangler d1 execute macro_liquidity --remote --json --command \"SELECT date, factors_json, spx, qe_qt_regime, vix_eod FROM model_snapshot_weekly WHERE decision_status = 'OK' AND spx IS NOT NULL ORDER BY date\" > scripts/data/snapshots.json"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "miniflare": "3.20250718.3",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0",
-    "wrangler": "^3.80.0",
-    "@cloudflare/workers-types": "^4.20240909.0"
+    "wrangler": "^3.80.0"
   }
 }
