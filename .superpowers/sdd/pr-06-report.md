@@ -107,6 +107,18 @@ env -u NODE_OPTIONS npx vitest run test/atomic-ingest.test.ts test/ingest-db.tes
 
 Result: PASS — 6 test files, 47 tests passed, 0 failed.
 
+### Remaining semantic-validation RED/GREEN
+
+Command before the final semantic-validation fix:
+
+```bash
+env -u NODE_OPTIONS npx vitest run test/atomic-ingest.test.ts test/ingest-db.test.ts
+```
+
+RED result: 4 tests failed and 26 passed. The failures showed that a zero-row `SUCCEEDED` attempt without active history was not invalidated, the run lost `failed_series`, `failSeriesAttempt` accepted only `RUNNING`, and validation errors had no structured series identity.
+
+After adding `IngestSeriesValidationError`, allowing semantic invalidation of `RUNNING` or `SUCCEEDED` attempts, and preserving the original error across audit failure, the same command passed: 2 files, 30 tests, 0 failed.
+
 ## Final verification
 
 ### Full test suite
@@ -117,7 +129,7 @@ Command:
 env -u NODE_OPTIONS npm test
 ```
 
-Result: PASS — 24 test files, 377 tests passed, 0 failed.
+Result: PASS — 24 test files, 380 tests passed, 0 failed.
 
 ### TypeScript
 
@@ -200,9 +212,16 @@ None by design. Champion scoring formulas, factor definitions, weights, threshol
 - `cf7463ce6505486223aec47f86f730e00f57e7b3` — `feat: add atomic ingest runs and staging activation`
 - `9a1a54ec554ebc8b75ef2da8c882906775708f81` — `fix: renew active ingest leases`
 - `a444bf7` — `docs: add PR-06 implementation report`
+- `f931617` — `fix: harden atomic ingest completion`
 
 The task-review fix commit hash is returned in the handoff because a file cannot stably contain the hash of the commit that contains itself.
 
 ## Worktree state
 
-At final verification before commit, the worktree contained only the review-fix files listed above; no unrelated or package-lock churn was present. Clean post-commit `git status --short` evidence is recorded in the handoff.
+Final clean-state command, executed after the review-fix commit:
+
+```bash
+git status --short
+```
+
+Result: PASS — no output. The final worktree was clean, with no unrelated or `package-lock.json` churn.

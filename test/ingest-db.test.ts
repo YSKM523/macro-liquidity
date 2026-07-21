@@ -188,12 +188,28 @@ describe('ingest repository contracts', () => {
     expect(calls[0].sql).toMatch(/INSERT INTO ingest_series_attempts[\s\S]*RUNNING/i);
     expect(calls[0].binds).toContain('2024-01-01T00:01:00Z');
     expect(calls[1].sql).toMatch(/status\s*=\s*'FAILED'[\s\S]*completed_at/i);
+    expect(calls[1].sql).toMatch(/status\s+IN\s*\(\s*'RUNNING'\s*,\s*'SUCCEEDED'\s*\)/i);
     expect(calls[1].binds).toContain('2024-01-01T00:02:00Z');
     expect(calls[2].sql).toMatch(/snapshot_state\s*=\s*'SUCCEEDED'/i);
     expect(calls[2].binds).toContain('2024-01-01T00:03:00Z');
     expect(calls[3].sql).toMatch(/snapshot_state\s*=\s*'FAILED'/i);
     expect(calls[3].binds).toContain('2024-01-01T00:04:00Z');
     expect(calls[3].binds).toContain(2);
+  });
+
+  it('throws a structured validation error carrying the semantically invalid series', () => {
+    try {
+      ingestDb.validateSeriesAttempts(
+        ['EMPTY'],
+        [{ seriesId: 'EMPTY', status: 'SUCCEEDED', rowCount: 0 }],
+        new Set(),
+      );
+      throw new Error('expected validation to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf((ingestDb as any).IngestSeriesValidationError);
+      expect(error).toMatchObject({ seriesId: 'EMPTY' });
+      expect((error as Error).message).toMatch(/EMPTY.*empty/i);
+    }
   });
 
   it('includes the durable snapshot outcome in ACTIVE and FAILED run summaries', async () => {

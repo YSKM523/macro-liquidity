@@ -29,6 +29,7 @@ import {
   failIngestRun,
   completeIngestSnapshots,
   failIngestSnapshots,
+  IngestSeriesValidationError,
 } from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
@@ -61,6 +62,14 @@ function newRunId(now: Date): string {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `ingest-${now.getTime()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function validationSeriesId(error: unknown): string | undefined {
+  if (error instanceof IngestSeriesValidationError) return error.seriesId;
+  if (error != null && typeof error === 'object' && typeof (error as any).seriesId === 'string') {
+    return (error as any).seriesId;
+  }
+  return undefined;
 }
 
 async function renewOwnedLease(db: D1Database, runId: string): Promise<void> {
@@ -129,9 +138,29 @@ export async function runIngest(
         throw error;
       }
     }
-    failedSeries = undefined;
     failedStep = 'validation';
-    await validateIngestRun(env.DB, runId, SERIES_IDS);
+    try {
+      await validateIngestRun(env.DB, runId, SERIES_IDS);
+    } catch (error) {
+      const invalidSeries = validationSeriesId(error);
+      if (invalidSeries) {
+        failedSeries = invalidSeries;
+        const originalMessage = String((error as any)?.message ?? error);
+        try {
+          await failSeriesAttempt(
+            env.DB,
+            runId,
+            invalidSeries,
+            originalMessage,
+            new Date().toISOString(),
+          );
+        } catch {
+          // Preserve the semantic validation error if attempt auditing fails.
+        }
+      }
+      throw error;
+    }
+    failedSeries = undefined;
 
     // 2) Promote staging and switch ACTIVE in one transactional D1 batch.
     failedStep = 'lock';

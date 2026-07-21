@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   fetchFailureSeries: null as string | null,
   invalidSeries: null as string | null,
   stagingFailureSeries: null as string | null,
+  semanticValidationFailureSeries: null as string | null,
   attemptAuditFailure: false,
   activationFailure: false,
   lockAcquired: true,
@@ -74,7 +75,16 @@ vi.mock('../src/db', async importOriginal => {
       state.staged.push({ seriesId, rows: structuredClone(rows) });
       state.events.push(`stage:${seriesId}:${rows.length}:${completedAt}`);
     }),
-    validateIngestRun: vi.fn(async () => { state.events.push('validate'); }),
+    validateIngestRun: vi.fn(async () => {
+      state.events.push('validate');
+      if (state.semanticValidationFailureSeries) {
+        const error = new Error(
+          `${state.semanticValidationFailureSeries} returned empty without active production history`,
+        ) as Error & { seriesId: string };
+        error.seriesId = state.semanticValidationFailureSeries;
+        throw error;
+      }
+    }),
     activateIngestRun: vi.fn(async (_db: unknown, _runId: string, completedAt: string) => {
       state.activationCompletedAt = completedAt;
       state.events.push('activate');
@@ -137,6 +147,7 @@ beforeEach(() => {
   state.fetchFailureSeries = null;
   state.invalidSeries = null;
   state.stagingFailureSeries = null;
+  state.semanticValidationFailureSeries = null;
   state.attemptAuditFailure = false;
   state.activationFailure = false;
   state.lockAcquired = true;
@@ -197,6 +208,37 @@ describe('atomic ingest orchestration', () => {
 
     await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z')))
       .rejects.toThrow(`fetch failed: ${SERIES_IDS[0]}`);
+  });
+
+  it('invalidates a SUCCEEDED zero-row attempt and records its series when semantic validation fails', async () => {
+    state.semanticValidationFailureSeries = 'WALCL';
+    state.activeSeries.delete('WALCL');
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z')))
+      .rejects.toThrow('WALCL returned empty without active production history');
+
+    expect(state.staged).toContainEqual({ seriesId: 'WALCL', rows: [] });
+    expect(state.attemptFailures).toEqual([
+      expect.objectContaining({
+        seriesId: 'WALCL',
+        error: 'WALCL returned empty without active production history',
+        completedAt: expect.any(String),
+      }),
+    ]);
+    expect(state.failed).toEqual([
+      expect.objectContaining({ step: 'validation', seriesId: 'WALCL' }),
+    ]);
+  });
+
+  it('preserves the semantic validation error when invalidating the attempt fails', async () => {
+    state.semanticValidationFailureSeries = 'WALCL';
+    state.attemptAuditFailure = true;
+
+    await expect(runIngest(env, false, new Date('2024-01-10T12:00:00Z')))
+      .rejects.toThrow('WALCL returned empty without active production history');
+    expect(state.failed).toEqual([
+      expect.objectContaining({ step: 'validation', seriesId: 'WALCL' }),
+    ]);
   });
 
   it('marks activation failure FAILED and never writes snapshots afterward', async () => {

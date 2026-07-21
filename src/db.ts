@@ -21,6 +21,16 @@ export interface IngestFailure {
   error: string;
 }
 
+export class IngestSeriesValidationError extends Error {
+  constructor(
+    public readonly seriesId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'IngestSeriesValidationError';
+  }
+}
+
 export async function acquireIngestLock(
   db: D1Database,
   runId: string,
@@ -129,9 +139,9 @@ export async function failSeriesAttempt(
   completedAt: string,
 ): Promise<void> {
   const result = await db.prepare(
-    `UPDATE ingest_series_attempts
+     `UPDATE ingest_series_attempts
      SET status = 'FAILED', completed_at = ?, error = ?
-     WHERE run_id = ? AND series_id = ? AND status = 'RUNNING'`
+     WHERE run_id = ? AND series_id = ? AND status IN ('RUNNING', 'SUCCEEDED')`
   ).bind(completedAt, error, runId, seriesId).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`${seriesId} has no RUNNING ingest attempt to fail`);
@@ -146,10 +156,15 @@ export function validateSeriesAttempts(
   const bySeries = new Map(attempts.map(attempt => [attempt.seriesId, attempt]));
   for (const seriesId of configuredSeries) {
     const attempt = bySeries.get(seriesId);
-    if (!attempt) throw new Error(`${seriesId} has no ingest attempt`);
-    if (attempt.status !== 'SUCCEEDED') throw new Error(`${seriesId} attempt did not succeed`);
+    if (!attempt) throw new IngestSeriesValidationError(seriesId, `${seriesId} has no ingest attempt`);
+    if (attempt.status !== 'SUCCEEDED') {
+      throw new IngestSeriesValidationError(seriesId, `${seriesId} attempt did not succeed`);
+    }
     if (attempt.rowCount === 0 && !activeSeries.has(seriesId)) {
-      throw new Error(`${seriesId} returned empty without active production history`);
+      throw new IngestSeriesValidationError(
+        seriesId,
+        `${seriesId} returned empty without active production history`,
+      );
     }
   }
 }
