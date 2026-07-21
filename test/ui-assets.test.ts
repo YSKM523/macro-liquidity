@@ -111,10 +111,24 @@ describe('static UI assets', () => {
   it('keeps command-center layout classes when rendering state', () => {
     const js = read('public/app.js');
 
-    expect(js).toContain("card.classList.remove('bull', 'bear', 'neutral')");
+    expect(js).toContain("card.classList.remove('bull', 'bear', 'neutral', 'unknown')");
     expect(js).toContain('card.classList.add(VERDICT_CLASS[displayV])');
     expect(js).toContain("card.dataset.tone = g.tone || 'neutral'");
     expect(js).not.toContain("card.className = 'card guidance '");
+  });
+
+  it('renders UNKNOWN live-risk state explicitly and cache-busts the updated assets', () => {
+    const html = read('public/index.html');
+    const css = read('public/styles.css');
+    const js = read('public/app.js');
+
+    expect(js).toContain("UNKNOWN: '风险未知'");
+    expect(js).toContain("stress.status === 'UNKNOWN'");
+    expect(js).toContain('实时风险层不可用');
+    expect(css).toContain('.verdict.unknown');
+    expect(css).toContain('.g-badge.unknown');
+    expect(html).toContain('/styles.css?v=0721a');
+    expect(html).toContain('/app.js?v=0721a');
   });
 
   it('sizes charts from their rendered container', () => {

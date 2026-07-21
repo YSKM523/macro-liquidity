@@ -1,8 +1,11 @@
 export interface LivePrices { spx: number|null; vix: number|null; dxy: number|null; us10y: number|null; asof: string }
 export interface StressSeries { spx: number[]; vix: number[]; us10y: number[]; dxy: number[]; }
+export type StressStatus = 'NORMAL' | 'STRESSED' | 'UNKNOWN';
 export interface LiveStress {
+  status: StressStatus;
   stressed: boolean;
   reasons: string[];
+  unavailable: string[];
   signals: { vix: number|null; spx5d: number|null; us10y5d: number|null; dxy5d: number|null };
   thresholds: { vix: number; spxDd: number; y10: number; dxy: number };
 }
@@ -127,7 +130,7 @@ import { STRESS } from './config';
 
 export function evaluateLiveStress(s: StressSeries, t = STRESS): LiveStress {
   const last = (a: number[]) => a.length ? a[a.length - 1] : null;
-  const ago5 = (a: number[]) => a.length >= 6 ? a[a.length - 6] : (a.length ? a[0] : null);
+  const ago5 = (a: number[]) => a.length >= 6 ? a[a.length - 6] : null;
 
   const vix = last(s.vix);
   const spx_c = last(s.spx), spx_a = ago5(s.spx);
@@ -143,9 +146,20 @@ export function evaluateLiveStress(s: StressSeries, t = STRESS): LiveStress {
   if (us10y5d != null && us10y5d > t.y10) reasons.push(`10Y 5日 +${us10y5d.toFixed(2)}pp`);
   if (dxy5d != null && dxy5d > t.dxy) reasons.push(`美元 5日 +${(dxy5d * 100).toFixed(1)}%`);
 
+  const unavailable: string[] = [];
+  if (s.vix.length < 1) unavailable.push('VIX');
+  if (s.spx.length < 6) unavailable.push('SPX 5日');
+  if (s.us10y.length < 6) unavailable.push('10Y 5日');
+  if (s.dxy.length < 6) unavailable.push('DXY 5日');
+  const status: StressStatus = unavailable.length > 0
+    ? 'UNKNOWN'
+    : reasons.length > 0 ? 'STRESSED' : 'NORMAL';
+
   return {
-    stressed: reasons.length > 0,
+    status,
+    stressed: status === 'STRESSED',
     reasons,
+    unavailable,
     signals: { vix, spx5d, us10y5d, dxy5d },
     thresholds: { vix: t.vix, spxDd: t.spxDd, y10: t.y10, dxy: t.dxy },
   };

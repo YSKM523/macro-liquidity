@@ -3,8 +3,8 @@ const FACTOR_LABELS = {
   rates: '利率冲量', dollar: '美元', vol: '波动',
   reserveAdequacy: '准备金', curve: '收益率曲线',
 };
-const VERDICT_CN = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性' };
-const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral' };
+const VERDICT_CN = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性', UNKNOWN: '风险未知' };
+const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral', UNKNOWN: 'unknown' };
 const REGIME_CN = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住' };
 const POLICY_CN = { QE: 'QE(宽松)', QT: 'QT(紧缩)', RESERVE_MGMT: '准备金管理(QT已结束)', NEUTRAL: '中性' };
 const fmt = (x, d = 2) => (x == null ? '—' : Number(x).toFixed(d));
@@ -119,7 +119,7 @@ function renderVerdict(res) {
   const card = document.getElementById('verdict-card');
   const macroV = s.verdict || 'NEUTRAL';
   const displayV = s.display_verdict || macroV;
-  card.classList.remove('bull', 'bear', 'neutral');
+  card.classList.remove('bull', 'bear', 'neutral', 'unknown');
   card.classList.add(VERDICT_CLASS[displayV]);
   document.getElementById('verdict-label').textContent = VERDICT_CN[displayV] || '—';
   const token = document.getElementById('regime-token');
@@ -130,7 +130,13 @@ function renderVerdict(res) {
   const stress = s.live_stress;
   const banner = document.getElementById('stress-banner');
   const note = document.getElementById('stress-note');
-  if (stress && stress.stressed) {
+  if (stress && stress.status === 'UNKNOWN') {
+    const missing = (stress.unavailable || []).join('、');
+    banner.textContent = '⚠️ 实时风险层不可用' + (missing ? '：' + missing : '');
+    banner.style.display = '';
+    note.textContent = `(宏观判断 ${VERDICT_CN[macroV]} 保留；实时风险未知，暂停加仓)`;
+    note.style.display = '';
+  } else if (stress && stress.status === 'STRESSED') {
     banner.textContent = '⚠️ 实时风险覆盖:' + stress.reasons.join('、');
     banner.style.display = '';
     if (displayV !== macroV) {

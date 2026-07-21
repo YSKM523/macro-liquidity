@@ -75,7 +75,7 @@ export default {
         previousVerdict: r.verdict,
         netliqDir: r.netliq_dir,
         qeQtRegime: r.qe_qt_regime,
-        stressed: stress.stressed,
+        stressStatus: stress.status,
       });
       const snap = {
         ...r,

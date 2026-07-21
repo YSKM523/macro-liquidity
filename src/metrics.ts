@@ -1,4 +1,5 @@
 import type { Obs } from './fred';
+import type { StressStatus } from './prices';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
@@ -175,7 +176,7 @@ export interface GuidanceInput {
   verdict: Verdict;
   netliqDir: Direction;
   qeQtRegime: Impulse;
-  stressed: boolean;      // raw live_stress trigger
+  stressStatus: StressStatus;
   stressApplied?: boolean;
 }
 
@@ -186,7 +187,7 @@ export interface GuidanceTrigger {
 }
 
 export interface Guidance {
-  tone: 'bull' | 'neutral' | 'bear' | 'brake';
+  tone: 'bull' | 'neutral' | 'bear' | 'brake' | 'unknown';
   tierLabel: string;
   exposure: string;
   lean: string;
@@ -195,7 +196,8 @@ export interface Guidance {
 }
 
 export function buildGuidance(input: GuidanceInput): Guidance {
-  const { score, verdict, netliqDir, qeQtRegime, stressed } = input;
+  const { score, verdict, netliqDir, qeQtRegime, stressStatus } = input;
+  const stressed = stressStatus === 'STRESSED';
   const stressApplied = input.stressApplied ?? stressed;
 
   // Tier logic (ordered: stress first, then score bands)
@@ -204,7 +206,12 @@ export function buildGuidance(input: GuidanceInput): Guidance {
   let exposure: string;
   let lean: string;
 
-  if (stressApplied) {
+  if (stressStatus === 'UNKNOWN') {
+    tone = 'unknown';
+    tierLabel = '实时风险层不可用';
+    exposure = '暂停加仓,风险敞口不高于基准';
+    lean = '等待实时风险数据恢复';
+  } else if (stressApplied) {
     tone = 'brake';
     tierLabel = 'RISK-OFF · 刹车';
     exposure = '立刻停止加仓、收到基准以下';
@@ -266,7 +273,9 @@ export function buildGuidance(input: GuidanceInput): Guidance {
         armed: true,
       };
 
-  const trigger1: GuidanceTrigger = stressed
+  const trigger1: GuidanceTrigger = stressStatus === 'UNKNOWN'
+    ? { label: '实时风险层不可用', detail: '实时风险层不可用：关键行情缺失,当前风险状态未知', armed: true }
+    : stressed
     ? stressApplied
       ? { label: '实时风险(stress)触发 → 立刻刹车', detail: '已触发', armed: true }
       : {
@@ -320,26 +329,28 @@ export interface DecisionInput {
   previousVerdict?: Verdict;
   netliqDir: Direction;
   qeQtRegime: Impulse;
-  stressed: boolean;
+  stressStatus: StressStatus;
 }
 
 export interface DecisionState {
   macroVerdict: Verdict;
-  displayVerdict: Verdict;
+  displayVerdict: Verdict | 'UNKNOWN';
   reason: string;
   guidance: Guidance;
 }
 
 export function deriveDecisionState(input: DecisionInput): DecisionState {
   const macroVerdict = verdictFromScore(input.score, input.previousVerdict);
-  const stressApplied = input.stressed && input.score < STRESS_SCORE_CEILING;
-  const displayVerdict = stressApplied ? downgradeVerdict(macroVerdict) : macroVerdict;
+  const stressApplied = input.stressStatus === 'STRESSED' && input.score < STRESS_SCORE_CEILING;
+  const displayVerdict = input.stressStatus === 'UNKNOWN'
+    ? 'UNKNOWN'
+    : stressApplied ? downgradeVerdict(macroVerdict) : macroVerdict;
   const guidance = buildGuidance({
     score: input.score,
     verdict: macroVerdict,
     netliqDir: input.netliqDir,
     qeQtRegime: input.qeQtRegime,
-    stressed: input.stressed,
+    stressStatus: input.stressStatus,
     stressApplied,
   });
   return {
@@ -406,7 +417,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     previousVerdict: prev,
     netliqDir,
     qeQtRegime: bsImpulse,
-    stressed: false,
+    stressStatus: 'NORMAL',
   });
 
   const adequacy = [

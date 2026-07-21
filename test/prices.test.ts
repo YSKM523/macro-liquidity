@@ -58,8 +58,9 @@ describe('evaluateLiveStress', () => {
     dxy: [103, 103, 103, 103, 103, 103],
   };
 
-  it('calm series → stressed===false, reasons empty', () => {
+  it('complete calm series → NORMAL, stressed=false, reasons empty', () => {
     const result = evaluateLiveStress(calm);
+    expect(result.status).toBe('NORMAL');
     expect(result.stressed).toBe(false);
     expect(result.reasons).toHaveLength(0);
   });
@@ -67,6 +68,7 @@ describe('evaluateLiveStress', () => {
   it('VIX=35 → stressed, reasons contains VIX', () => {
     const s: StressSeries = { ...calm, vix: [14, 15, 14, 15, 14, 35] };
     const result = evaluateLiveStress(s);
+    expect(result.status).toBe('STRESSED');
     expect(result.stressed).toBe(true);
     expect(result.reasons.some(r => r.includes('VIX'))).toBe(true);
   });
@@ -93,14 +95,24 @@ describe('evaluateLiveStress', () => {
     expect(result.reasons.some(r => r.includes('美元'))).toBe(true);
   });
 
-  it('empty arrays → not stressed, signals null, no crash', () => {
+  it('empty arrays → UNKNOWN rather than false-safe', () => {
     const s: StressSeries = { spx: [], vix: [], us10y: [], dxy: [] };
     const result = evaluateLiveStress(s);
+    expect(result.status).toBe('UNKNOWN');
     expect(result.stressed).toBe(false);
+    expect(result.unavailable).toEqual(['VIX', 'SPX 5日', '10Y 5日', 'DXY 5日']);
     expect(result.signals.vix).toBeNull();
     expect(result.signals.spx5d).toBeNull();
     expect(result.signals.us10y5d).toBeNull();
     expect(result.signals.dxy5d).toBeNull();
+  });
+
+  it('one insufficient critical series makes the whole risk layer UNKNOWN', () => {
+    const result = evaluateLiveStress({ ...calm, dxy: [103] });
+
+    expect(result.status).toBe('UNKNOWN');
+    expect(result.stressed).toBe(false);
+    expect(result.unavailable).toEqual(['DXY 5日']);
   });
 });
 
