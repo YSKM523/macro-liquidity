@@ -15,7 +15,7 @@
 | PR-03 | 已完成 | `1c53681` | 实时 Stress 改为 NORMAL/STRESSED/UNKNOWN 并 fail closed |
 | PR-04 | 已完成 | `6367de0`–`19ceabc` | 独立 freshness、FactorResult、DATA_INCOMPLETE 与质量传播 |
 | PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
-| PR-06 | 已完成（本地） | 本分支提交见 `git log` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、租约锁与失败审计 |
+| PR-06 | 已完成（本地） | `cf7463c`–`8a8ab9e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1869,7 +1869,7 @@ feat: model versioning, CI, staging, observability and backup
 - [x] 缺关键数据返回 DATA_INCOMPLETE
 - [x] stale 序列不会无限 forward-fill
 - [ ] mixed vintage 不会进入生产
-- [ ] 同时运行 cron 和 refresh 不会并发写坏数据
+- [x] 同时运行 cron 和 refresh 不会并发写坏数据
 
 ## Point-in-Time
 
