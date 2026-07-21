@@ -173,7 +173,7 @@ Command:
 env -u NODE_OPTIONS npm test
 ```
 
-Result: PASS — 24 test files, 380 tests passed, 0 failed.
+Result: PASS — 24 test files, 393 tests passed, 0 failed.
 
 ### TypeScript
 
@@ -203,7 +203,7 @@ Command:
 env -u NODE_OPTIONS npm run migrate:local
 ```
 
-Result: PASS — migrations `0001` through `0007` applied successfully to the worktree-local database under `.wrangler/state/v3/d1`. Wrangler explicitly reported local execution; no `--remote` command was used.
+Result: PASS — Wrangler explicitly reported local execution and `No migrations to apply!`; the worktree-local database under `.wrangler/state/v3/d1` already has migrations `0001` through `0007`. No `--remote` command was used.
 
 Local schema confirmation:
 
@@ -261,12 +261,14 @@ None by design. Champion scoring formulas, factor definitions, weights, threshol
 - `9a1a54ec554ebc8b75ef2da8c882906775708f81` — `fix: renew active ingest leases`
 - `a444bf7` — `docs: add PR-06 implementation report`
 - `f931617` — `fix: harden atomic ingest completion`
+- `4109599` — `fix: audit semantic ingest failures`
+- `cbc4725` — `fix: fence atomic ingest publication`
 
-The task-review fix commit hash is returned in the handoff because a file cannot stably contain the hash of the commit that contains itself.
+The final verification/report follow-up commit hash is returned in the handoff because a file cannot stably contain the hash of the commit that contains itself.
 
 ## Worktree state
 
-Final clean-state command, executed after the review-fix commit:
+Final clean-state command, executed after the verification/report follow-up commit:
 
 ```bash
 git status --short

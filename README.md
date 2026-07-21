@@ -142,7 +142,7 @@ flowchart TD
 - **Cloudflare Worker**(TypeScript)+ **Workers Static Assets** + **D1**(SQLite)+ **Cron Triggers**
 - 数据:**FRED**(宏观)+ **Yahoo / Stooq**(实时价格)
 - 前端:原生 HTML / CSS / JS + 自托管 [Lightweight-Charts](https://github.com/tradingview/lightweight-charts),仿 Stripe 纯色风格
-- 测试:**Vitest**(380 测试，覆盖模型逻辑、原子摄取、锁与 API)
+- 测试:**Vitest**(393 测试，覆盖模型逻辑、原子摄取、锁与 API)
 - 部署:`wrangler`
 
 ---
