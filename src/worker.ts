@@ -9,6 +9,7 @@ import {
   countOfficialSnapshots,
   officialSnapshotOnOrBefore,
   loadSeriesMap,
+  ingestRunSummary,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -84,10 +85,11 @@ export default {
 
     if (p === '/api/health' || p === '/health') {
       try {
-        const [row, meta, count] = await Promise.all([
+        const [row, meta, count, ingestRuns] = await Promise.all([
           latestOfficialSnapshot(env.DB),
           getAllMeta(env.DB),
           countOfficialSnapshots(env.DB),
+          ingestRunSummary(env.DB),
         ]);
         const h = assessHealth({
           dataDate: (row as any)?.date ?? null,
@@ -100,18 +102,19 @@ export default {
           now: new Date().toISOString(),
           staleHours: INGEST_STALE_HOURS,
         });
-        return json(h, h.ok ? 200 : 503);
+        return json({ ...h, ingest_runs: ingestRuns }, h.ok ? 200 : 503);
       } catch (e) {
         return json({ ok: false, stale: true, error: 'db_unreachable', message: String((e as any)?.message ?? e) }, 503);
       }
     }
     if (p === '/api/snapshot') {
-      const [officialRow, nowcastRow, live, stress, meta] = await Promise.all([
+      const [officialRow, nowcastRow, live, stress, meta, ingestRuns] = await Promise.all([
         latestOfficialSnapshot(env.DB),
         latestNowcastSnapshot(env.DB),
         fetchLivePrices(new Date().toISOString()),
         fetchStressSeries().then(s => evaluateLiveStress(s)),
         getAllMeta(env.DB),
+        ingestRunSummary(env.DB),
       ]);
       const ingest = {
         ingest_at: meta.last_ingest_at ?? null,
@@ -120,6 +123,7 @@ export default {
           ? (Date.now() - Date.parse(meta.last_ingest_at)) / 3600000
           : null,
         ingest_status: meta.last_status ?? null,
+        runs: ingestRuns,
       };
       const official = presentSnapshot(officialRow, stress, 'OFFICIAL');
       const nowcast = presentSnapshot(nowcastRow, stress, 'PROVISIONAL');
@@ -218,7 +222,8 @@ export default {
       const auth = req.headers.get('authorization') ?? '';
       if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return json({ error: 'unauthorized' }, 401);
       const rebuildAll = url.searchParams.get('all') === '1';
-      return json(await runIngest(env, rebuildAll));
+      const result = await runIngest(env, rebuildAll);
+      return json(result, result.status === 'conflict' ? 409 : 200);
     }
     // not an API route → static assets
     return env.ASSETS.fetch(req);

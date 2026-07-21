@@ -17,6 +17,202 @@ export async function upsertObservations(db: D1Database, seriesId: string, rows:
   for (let i = 0; i < batch.length; i += 100) await db.batch(batch.slice(i, i + 100));
 }
 
+export type IngestRunState = 'RUNNING' | 'ACTIVE' | 'FAILED' | 'SUPERSEDED';
+
+export interface IngestSeriesAttempt {
+  seriesId: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  rowCount: number;
+}
+
+export interface IngestFailure {
+  step: string;
+  seriesId?: string;
+  error: string;
+}
+
+export async function acquireIngestLock(
+  db: D1Database,
+  runId: string,
+  acquiredAt: string,
+  expiresAt: string,
+): Promise<boolean> {
+  const result = await db.prepare(
+    `INSERT INTO ingest_lock (lock_name, owner_run_id, acquired_at, expires_at)
+     VALUES ('fred_ingest', ?, ?, ?)
+     ON CONFLICT(lock_name) DO UPDATE SET
+       owner_run_id = excluded.owner_run_id,
+       acquired_at = excluded.acquired_at,
+       expires_at = excluded.expires_at
+     WHERE ingest_lock.expires_at <= ?`
+  ).bind(runId, acquiredAt, expiresAt, acquiredAt).run();
+  return Number((result.meta as any)?.changes ?? 0) === 1;
+}
+
+export async function releaseIngestLock(db: D1Database, runId: string): Promise<boolean> {
+  const result = await db.prepare(
+    `DELETE FROM ingest_lock WHERE lock_name = 'fred_ingest' AND owner_run_id = ?`
+  ).bind(runId).run();
+  return Number((result.meta as any)?.changes ?? 0) === 1;
+}
+
+export async function createIngestRun(
+  db: D1Database,
+  runId: string,
+  mode: 'INCREMENTAL' | 'FULL',
+  startedAt: string,
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO ingest_runs (run_id, state, mode, started_at)
+     VALUES (?, 'RUNNING', ?, ?)`
+  ).bind(runId, mode, startedAt).run();
+}
+
+function assertStagedRows(seriesId: string, rows: Obs[]): void {
+  for (const row of rows) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date) || !Number.isFinite(row.value)) {
+      throw new Error(`${seriesId} staged an invalid observation`);
+    }
+  }
+}
+
+export async function stageSeriesAttempt(
+  db: D1Database,
+  runId: string,
+  seriesId: string,
+  rows: Obs[],
+  now: string,
+): Promise<void> {
+  assertStagedRows(seriesId, rows);
+  await db.prepare(
+    `INSERT INTO ingest_series_attempts
+       (run_id, series_id, status, started_at, row_count)
+     VALUES (?, ?, 'RUNNING', ?, 0)`
+  ).bind(runId, seriesId, now).run();
+
+  if (rows.length > 0) {
+    const statement = db.prepare(
+      `INSERT INTO staging_observations (run_id, series_id, date, value)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(run_id, series_id, date) DO UPDATE SET value = excluded.value`
+    );
+    const writes = rows.map(row => statement.bind(runId, seriesId, row.date, row.value));
+    for (let index = 0; index < writes.length; index += 100) {
+      await db.batch(writes.slice(index, index + 100));
+    }
+  }
+
+  await db.prepare(
+    `UPDATE ingest_series_attempts
+     SET status = 'SUCCEEDED', completed_at = ?, row_count = ?
+     WHERE run_id = ? AND series_id = ?`
+  ).bind(now, rows.length, runId, seriesId).run();
+}
+
+export function validateSeriesAttempts(
+  configuredSeries: string[],
+  attempts: IngestSeriesAttempt[],
+  activeSeries: Set<string>,
+): void {
+  const bySeries = new Map(attempts.map(attempt => [attempt.seriesId, attempt]));
+  for (const seriesId of configuredSeries) {
+    const attempt = bySeries.get(seriesId);
+    if (!attempt) throw new Error(`${seriesId} has no ingest attempt`);
+    if (attempt.status !== 'SUCCEEDED') throw new Error(`${seriesId} attempt did not succeed`);
+    if (attempt.rowCount === 0 && !activeSeries.has(seriesId)) {
+      throw new Error(`${seriesId} returned empty without active production history`);
+    }
+  }
+}
+
+export async function validateIngestRun(
+  db: D1Database,
+  runId: string,
+  configuredSeries: string[],
+): Promise<void> {
+  const [attemptRows, activeRows] = await Promise.all([
+    db.prepare(
+      `SELECT series_id, status, row_count
+       FROM ingest_series_attempts WHERE run_id = ?`
+    ).bind(runId).all<{ series_id: string; status: IngestSeriesAttempt['status']; row_count: number }>(),
+    db.prepare('SELECT DISTINCT series_id FROM observations').all<{ series_id: string }>(),
+  ]);
+  const attempts = (attemptRows.results ?? []).map(row => ({
+    seriesId: row.series_id,
+    status: row.status,
+    rowCount: row.row_count,
+  }));
+  validateSeriesAttempts(
+    configuredSeries,
+    attempts,
+    new Set((activeRows.results ?? []).map(row => row.series_id)),
+  );
+}
+
+export async function activateIngestRun(
+  db: D1Database,
+  runId: string,
+  completedAt: string,
+): Promise<void> {
+  await db.batch([
+    db.prepare(
+      `INSERT INTO observations (series_id, date, value)
+       SELECT series_id, date, value FROM staging_observations
+       WHERE run_id = ? AND 1 = 1
+       ON CONFLICT(series_id, date) DO UPDATE SET value = excluded.value`
+    ).bind(runId),
+    db.prepare(
+      `UPDATE ingest_runs SET state = 'SUPERSEDED'
+       WHERE state = 'ACTIVE' AND run_id <> ?`
+    ).bind(runId),
+    db.prepare(
+      `UPDATE ingest_runs SET
+         state = 'ACTIVE', completed_at = ?,
+         row_count = (SELECT COUNT(*) FROM staging_observations WHERE run_id = ?),
+         series_count = (SELECT COUNT(*) FROM ingest_series_attempts
+                         WHERE run_id = ? AND status = 'SUCCEEDED')
+       WHERE run_id = ? AND state = 'RUNNING'`
+    ).bind(completedAt, runId, runId, runId),
+  ]);
+}
+
+export async function failIngestRun(
+  db: D1Database,
+  runId: string,
+  failure: IngestFailure,
+  completedAt = new Date().toISOString(),
+): Promise<void> {
+  await db.prepare(
+    `UPDATE ingest_runs SET
+       state = 'FAILED', completed_at = ?, failed_step = ?, failed_series = ?, error = ?,
+       row_count = (SELECT COUNT(*) FROM staging_observations WHERE run_id = ?),
+       series_count = (SELECT COUNT(*) FROM ingest_series_attempts
+                       WHERE run_id = ? AND status = 'SUCCEEDED')
+     WHERE run_id = ? AND state = 'RUNNING'`
+  ).bind(
+    completedAt, failure.step, failure.seriesId ?? null, failure.error,
+    runId, runId, runId,
+  ).run();
+}
+
+export async function ingestRunSummary(db: D1Database): Promise<{
+  active: Record<string, unknown> | null;
+  latestFailed: Record<string, unknown> | null;
+}> {
+  const [active, latestFailed] = await Promise.all([
+    db.prepare(
+      `SELECT run_id, state, mode, started_at, completed_at, row_count, series_count
+       FROM ingest_runs WHERE state = 'ACTIVE' LIMIT 1`
+    ).first<Record<string, unknown>>(),
+    db.prepare(
+      `SELECT run_id, state, mode, started_at, completed_at, failed_step, failed_series,
+              error, row_count, series_count
+       FROM ingest_runs WHERE state = 'FAILED' ORDER BY started_at DESC LIMIT 1`
+    ).first<Record<string, unknown>>(),
+  ]);
+  return { active: active ?? null, latestFailed: latestFailed ?? null };
+}
+
 export async function loadSeriesMap(db: D1Database, from = '1900-01-01'): Promise<SeriesMap> {
   const rs = await db.prepare(
     'SELECT series_id, date, value FROM observations WHERE date >= ? ORDER BY series_id, date'

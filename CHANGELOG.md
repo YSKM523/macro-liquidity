@@ -4,6 +4,15 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-06 — Atomic ingest runs and staging activation
+
+- Added durable `RUNNING` / `ACTIVE` / `FAILED` ingest-run audit state, per-series attempts, run-scoped staging observations, and an expiring database-backed lease.
+- Kept `observations` unchanged during fetch and validation, then promoted staging and switched the single ACTIVE run in one transactional D1 `db.batch()`.
+- Preserved failed-run context and the prior production view; snapshot writers now run only after successful activation and retain PR-05 official/nowcast routing.
+- Made manual lock contention explicit with HTTP 409 and scheduled contention an explicit typed result.
+- Exposed the current ACTIVE and latest FAILED run through snapshot ingest metadata and health responses.
+- Added local-only migration `0006_atomic_ingest.sql` without dropping or redirecting legacy production tables.
+
 ### PR-05 — Official weekly snapshots and daily nowcasts
 
 - Split persisted model output into official `model_snapshot_weekly` and provisional `nowcast_snapshot_daily` channels.

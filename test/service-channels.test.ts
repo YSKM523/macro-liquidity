@@ -16,6 +16,13 @@ vi.mock('../src/prices', () => ({
   spliceSeries: vi.fn((official: unknown[]) => official),
 }));
 vi.mock('../src/db', () => ({
+  acquireIngestLock: vi.fn(async () => true),
+  releaseIngestLock: vi.fn(async () => true),
+  createIngestRun: vi.fn(async () => undefined),
+  stageSeriesAttempt: vi.fn(async () => undefined),
+  validateIngestRun: vi.fn(async () => undefined),
+  activateIngestRun: vi.fn(async () => undefined),
+  failIngestRun: vi.fn(async () => undefined),
   decisionWeek: (date: string) => {
     const d = new Date(`${date}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));

@@ -21,7 +21,7 @@
 flowchart LR
   FRED["FRED API（宏观序列，唯一真相源）"] -->|"cron 每 3 小时"| W["Cloudflare Worker"]
   YH["Yahoo / Stooq（实时价格，仅展示）"] -->|"每次请求"| W
-  W -->|"读写"| D1[("D1：observations / official weekly / daily nowcast")]
+  W -->|"分批 staging，原子激活"| D1[("D1：ingest runs / observations / official weekly / daily nowcast")]
   W --> ST["Static Assets：public/ 前端"]
   W -->|"/api/*"| U["用户浏览器"]
   ST --> U
@@ -29,7 +29,7 @@ flowchart LR
 
 - **单个 Cloudflare Worker** 托管前端(Workers Static Assets)、`/api/*` 接口和每日 `cron`。
 - **FRED = 历史与逻辑的唯一真相源**;实时价格(Yahoo 主 / Stooq 备)只贴顶部当前数字、**不入库**(口径隔离)。
-- **D1**(SQLite)分别存观测值、正式周频快照与 `PROVISIONAL` 日频 nowcast；`cron` 每 3 小时增量更新 nowcast，正式历史只由全量重建写入。
+- **D1**(SQLite)先按 `run_id` 保存逐序列尝试与 staging 数据；全部校验通过后在一个事务中更新兼容表 `observations` 并切换唯一 ACTIVE run。失败 run 保留审计信息且不改变生产观测。`cron` 每 3 小时增量更新 nowcast，正式历史只由全量重建写入。
 
 ---
 
@@ -142,7 +142,7 @@ flowchart TD
 - **Cloudflare Worker**(TypeScript)+ **Workers Static Assets** + **D1**(SQLite)+ **Cron Triggers**
 - 数据:**FRED**(宏观)+ **Yahoo / Stooq**(实时价格)
 - 前端:原生 HTML / CSS / JS + 自托管 [Lightweight-Charts](https://github.com/tradingview/lightweight-charts),仿 Stripe 纯色风格
-- 测试:**Vitest**(176 测试,纯逻辑全在 `src/metrics.ts`)
+- 测试:**Vitest**(360 测试，覆盖模型逻辑、原子摄取、锁与 API)
 - 部署:`wrangler`
 
 ---
@@ -155,14 +155,14 @@ src/
   config.ts       SERIES / WEIGHTS / 阈值
   backtest.ts     /api/backtest（IC / 命中率 / Sharpe）
   walkforward.ts  /api/walkforward（样本外裁决）
-  service.ts      FRED 增量 / 回填流水线
+  service.ts      FRED staging / 原子激活 / 回填流水线
   worker.ts       路由 + snapshot 组装（display_verdict / live_stress / guidance）
-  db.ts           D1 读写
+  db.ts           D1 读写、ingest run、租约锁与激活事务
 public/           前端：index.html / app.js / styles.css / algorithm.html
 docs/             ALGORITHM.md（算法全文）/ ROADMAP / qeqt（分析师评审）
 scripts/          全球流动性长史研究（离线，Fed+ECB+BOJ vs SPX）
 test/             Vitest
-migrations/       D1 schema（observations + official weekly + provisional daily nowcast）
+migrations/       D1 schema（ingest runs/staging + observations + official weekly + provisional daily nowcast）
 ```
 
 ---
@@ -171,12 +171,13 @@ migrations/       D1 schema（observations + official weekly + provisional daily
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress |
+| `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress + ACTIVE/最近 FAILED ingest run |
+| `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 审计状态 |
 | `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
 | `GET /api/prices` | 实时价格(Yahoo/Stooq) |
 | `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |
 | `GET /api/walkforward` | 样本外三臂裁决 |
-| `POST /api/admin/refresh` | 回填(Bearer `ADMIN_TOKEN`;`?all=1` 全量) |
+| `POST /api/admin/refresh` | 回填(Bearer `ADMIN_TOKEN`;`?all=1` 全量)；已有有效 ingest 租约时返回 `409` |
 
 ---
 

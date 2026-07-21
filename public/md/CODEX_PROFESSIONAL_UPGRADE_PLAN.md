@@ -15,7 +15,8 @@
 | PR-03 | 已完成 | `1c53681` | 实时 Stress 改为 NORMAL/STRESSED/UNKNOWN 并 fail closed |
 | PR-04 | 已完成 | `6367de0`–`19ceabc` | 独立 freshness、FactorResult、DATA_INCOMPLETE 与质量传播 |
 | PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
-| PR-06～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
+| PR-06 | 已完成（本地） | 本分支提交见 `git log` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、租约锁与失败审计 |
+| PR-07～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -499,7 +500,7 @@ public/app.js
 }
 ```
 
-新增：
+已实现：
 
 ```ts
 asOfFresh(series, date, freshnessRule)
@@ -609,7 +610,9 @@ FAILED
 
 ```sql
 ingest_runs
+ingest_series_attempts
 staging_observations
+ingest_lock
 ```
 
 流程：
@@ -619,15 +622,19 @@ staging_observations
 2. 所有新数据写 staging
 3. 完整性与数量级检查
 4. 全部成功后标记 ACTIVE
-5. 正式查询只读取最后一个 ACTIVE run
+5. 兼容表 `observations` 只在激活事务中更新，正式查询继续只读该生产最新视图
 6. 失败 run 标记 FAILED，不影响生产数据
 ```
 
-同时增加任务锁，防止 cron 和手动 refresh 并发。
+数据库租约锁由 `runIngest()` 自身获取；有效租约拒绝第二个 run，过期租约可接管，且 `finally` 只按 owner `run_id` 释放。手动争用返回 HTTP 409，scheduled 争用返回显式 typed conflict。
 
 ### 验收标准
 
-任一系列失败时，生产快照仍使用上一批完整数据。
+- [x] 任一系列失败时，旧 `observations` 与 ACTIVE run 保持不变
+- [x] 零行增量被记录为成功尝试，仅在生产已有该序列时通过校验
+- [x] 激活使用一个事务性的 D1 `db.batch()`
+- [x] 激活失败不触发 official / nowcast snapshot 写入
+- [x] staging 不进入 backtest / walk-forward / robustness
 
 ---
 
@@ -1711,11 +1718,15 @@ feat: atomic ingest runs and staging activation
 
 内容：
 
-- ingest_runs
-- staging
-- active run
-- 并发锁
-- 故障回滚测试
+- [x] `ingest_runs` 的 RUNNING / ACTIVE / FAILED / SUPERSEDED 审计状态
+- [x] `ingest_series_attempts` 与 run-scoped `staging_observations`
+- [x] 单个 ACTIVE run 与 `observations` 兼容生产视图的原子激活
+- [x] 带过期时间、owner-scoped release 的数据库并发锁
+- [x] 手动 HTTP 409 与 scheduled typed conflict
+- [x] fetch / validation / activation 故障回滚测试
+- [x] 激活后才重建快照，且 full→official、incremental→nowcast 不变
+- [x] health / snapshot API 暴露 ACTIVE 与最近 FAILED run
+- [x] 本地 migration、全量测试与 TypeScript strict 验证
 
 ---
 
@@ -1881,7 +1892,7 @@ feat: model versioning, CI, staging, observability and backup
 
 - [x] TypeScript strict 通过
 - [x] 全部 Vitest 通过
-- [ ] migration dry-run 通过
+- [x] worktree-local D1 migration apply 通过（未访问 remote D1）
 - [ ] staging 部署通过
 - [ ] 结构化日志可查
 - [ ] 失败告警可触发

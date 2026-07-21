@@ -80,3 +80,4 @@ export const INGEST_STALE_HOURS = 6;
 export const MAIN_CRON = '0 */3 * * *';
 export const RETRY_MAX_AGE_HOURS = 4;
 export const ALERT_MIN_INTERVAL_HOURS = 12;
+export const INGEST_LOCK_LEASE_SECONDS = 15 * 60;

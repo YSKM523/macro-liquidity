@@ -36,9 +36,14 @@ vi.mock('../src/db', () => ({
   loadBacktestRows: vi.fn(async () => []),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
+  ingestRunSummary: vi.fn(async () => ({
+    active: { run_id: 'active-1', state: 'ACTIVE', row_count: 20, series_count: 18 },
+    latestFailed: { run_id: 'failed-1', state: 'FAILED', failed_step: 'fetch', failed_series: 'SOFR' },
+  })),
 }));
 
 import worker from '../src/worker';
+import { runIngest } from '../src/service';
 
 const env = {
   DB: {} as D1Database,
@@ -74,6 +79,23 @@ describe('/api/snapshot explicit channels', () => {
     expect(body.nowcast.date).toBe('2026-07-21');
     expect(body.nowcast.channel_status).toBe('PROVISIONAL');
     expect(body.snapshot).toBeUndefined();
+    expect(body.ingest.runs.active).toMatchObject({ run_id: 'active-1', state: 'ACTIVE' });
+    expect(body.ingest.runs.latestFailed).toMatchObject({ run_id: 'failed-1', failed_series: 'SOFR' });
+  });
+});
+
+describe('/api/admin/refresh contention', () => {
+  it('returns HTTP 409 when another ingest owns the database lease', async () => {
+    vi.mocked(runIngest).mockResolvedValueOnce({ status: 'conflict', runId: 'run-2' } as any);
+
+    const response = await worker.fetch(new Request('https://example.test/api/admin/refresh', {
+      method: 'POST',
+      headers: { authorization: 'Bearer test' },
+    }), env);
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({ status: 'conflict', runId: 'run-2' });
   });
 });
 
