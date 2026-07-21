@@ -37,12 +37,12 @@ describe('attributeScoreChange', () => {
     const xs = arr.map(c => Math.abs(c.deltaContribution));
     for (let i = 1; i < xs.length; i++) expect(xs[i - 1]).toBeGreaterThanOrEqual(xs[i]);
   });
-  it('attributes only real factors common to both snapshots and renormalizes them', () => {
+  it('withholds attribution when current and reference factor availability differs', () => {
     const arr = attributeScoreChange(
       { netliqTrend: 80, credit: 20 },
       { netliqTrend: 60, funding: 90 },
     );
-    expect(arr).toEqual([{ key: 'netliqTrend', deltaFactor: 20, weight: 1, deltaContribution: 20 }]);
+    expect(arr).toEqual([]);
   });
 
   it('withholds attribution when there is no real common scoring factor', () => {

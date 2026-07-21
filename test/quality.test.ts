@@ -121,6 +121,8 @@ describe('snapshot data quality', () => {
     expect(snapshot.factorResults.funding.asOf).toBe(DATE);
     expect(snapshot.factorResults.funding.status).toBe('OK');
     expect(snapshot.factorResults.vol.quality).toBe(1);
+    expect(snapshot.factorResults.netliqTrend.status).toBe('OK');
+    expect(snapshot.factorResults.impulse.status).toBe('OK');
   });
 
   it('uses the oldest required component observation as a factor as-of date', () => {
@@ -278,5 +280,39 @@ describe('snapshot data quality', () => {
     expect(snapshot.decisionStatus).toBe('DATA_INCOMPLETE');
     expect(snapshot.score).toBeNull();
     expect(snapshot.verdict).toBeNull();
+  });
+
+  it.each([
+    ['sparse annual', Array.from({ length: 14 }, (_, index) => ({ date: `${2011 + index}-07-24`, value: 6000 + index * 15 }))],
+    ['compressed daily', Array.from({ length: 14 }, (_, index) => ({
+      date: new Date(Date.UTC(2024, 6, 11 + index)).toISOString().slice(0, 10),
+      value: 6000 + index * 15,
+    }))],
+  ] as const)('rejects %s critical observations that do not represent weekly cadence', (_label, walcl) => {
+    const map = completeMap();
+    const date = walcl.at(-1)!.date;
+    map.WALCL = [...walcl];
+    map.WDTGAL = walcl.map((observation, index) => ({ date: observation.date, value: 700 + index }));
+    map.RRPONTSYD = walcl.map((observation, index) => ({ date: observation.date, value: 500 - index }));
+
+    const snapshot = computeSnapshot(map, date) as any;
+
+    expect(snapshot.factorResults.netliqTrend.status).toBe('MISSING');
+    expect(snapshot.factorResults.impulse.status).toBe('MISSING');
+    expect(snapshot.decisionStatus).toBe('DATA_INCOMPLETE');
+  });
+
+  it('does not score a fresh dollar observation backed by a sparse 200-row history', () => {
+    const map = completeMap();
+    map.DTWEXBGS = [
+      ...Array.from({ length: 199 }, (_, index) => ({ date: `${1825 + index}-07-24`, value: 100 + index })),
+      { date: DATE, value: 120 },
+    ];
+
+    const snapshot = computeSnapshot(map, DATE) as any;
+
+    expect(snapshot.freshness.DTWEXBGS.status).toBe('FRESH');
+    expect(snapshot.factorResults.dollar.status).toBe('MISSING');
+    expect(snapshot.factorResults.dollar.score).toBeNull();
   });
 });

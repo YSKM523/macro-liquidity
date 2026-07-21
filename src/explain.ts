@@ -10,6 +10,16 @@ function availableScoringKeys(...factorSets: Record<string, number>[]): string[]
   );
 }
 
+export function sameScoringFactorAvailability(
+  current: Record<string, number>,
+  reference: Record<string, number>,
+): boolean {
+  const currentKeys = availableScoringKeys(current);
+  const referenceKeys = availableScoringKeys(reference);
+  return currentKeys.length === referenceKeys.length
+    && currentKeys.every((key, index) => key === referenceKeys[index]);
+}
+
 function normalizedWeight(key: string, keys: string[]): number {
   const availableWeight = keys.reduce((sum, availableKey) => sum + W[availableKey], 0);
   return availableWeight > 0 ? W[key] / availableWeight : 0;
@@ -31,6 +41,7 @@ export interface FactorAttribution { key: string; deltaFactor: number; weight: n
 
 // 变化归因:weight × (cur − ref);Σ = 未封顶(curScore − refScore)。按 |拉动| 降序。
 export function attributeScoreChange(cur: Record<string, number>, ref: Record<string, number>): FactorAttribution[] {
+  if (!sameScoringFactorAvailability(cur, ref)) return [];
   const keys = availableScoringKeys(cur, ref);
   return keys
     .map((key) => {

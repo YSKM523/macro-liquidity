@@ -14,6 +14,7 @@ const dbState = vi.hoisted(() => ({
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
   } as any,
   reference: null as any,
+  meta: {} as Record<string, string>,
 }));
 
 vi.mock('../src/service', () => ({
@@ -23,7 +24,7 @@ vi.mock('../src/service', () => ({
 
 vi.mock('../src/db', () => ({
   latestSnapshot: vi.fn(async () => dbState.row),
-  getAllMeta: vi.fn(async () => ({})),
+  getAllMeta: vi.fn(async () => dbState.meta),
   countSnapshots: vi.fn(async () => 1),
   snapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => []),
@@ -49,6 +50,7 @@ beforeEach(() => {
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
   };
   dbState.reference = null;
+  dbState.meta = {};
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -120,6 +122,26 @@ describe('/api/snapshot persisted macro quality', () => {
     expect(body.contributions).toBeUndefined();
   });
 
+  it('withholds explain attribution and names a factor availability change', async () => {
+    dbState.row = {
+      ...dbState.row,
+      score: 65,
+      factors_json: '{"netliqTrend":80,"credit":40}',
+      walcl: 6000, tga: 700, rrp: 100, netliq: 5200,
+    };
+    dbState.reference = {
+      date: '2026-07-01', score: 55, decision_status: 'OK',
+      factors_json: '{"netliqTrend":60}', walcl: 5900, tga: 700, rrp: 100, netliq: 5100,
+    };
+
+    const response = await worker.fetch(new Request('https://example.test/api/explain'), env);
+    const body = await response.json() as any;
+
+    expect(body.attribution).toBeNull();
+    expect(body.attribution_unavailable_reason).toBe('factor_availability_changed');
+    expect(body.attribution_message).toContain('因子可用性');
+  });
+
   it('treats legacy rows without quality columns conservatively', async () => {
     dbState.row = {
       date: '2024-01-01', score: 60, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
@@ -149,5 +171,20 @@ describe('/api/snapshot live stress status', () => {
     expect(body.snapshot.guidance.tierLabel).toBe('实时风险层不可用');
     expect(body.snapshot.guidance.exposure).not.toContain('+15~20pp');
     expect(body.snapshot.guidance.triggers[1].detail).not.toContain('当前未触发');
+  });
+});
+
+describe('/api/health persisted decision quality', () => {
+  it('returns 503 for a fresh successful ingest whose latest snapshot is incomplete', async () => {
+    dbState.row = { ...dbState.row, decision_status: 'DATA_INCOMPLETE', score: null, verdict: null };
+    dbState.meta = { last_ingest_at: new Date().toISOString(), last_status: 'ok' };
+
+    const response = await worker.fetch(new Request('https://example.test/api/health'), env);
+    const body = await response.json() as any;
+
+    expect(response.status).toBe(503);
+    expect(body.ok).toBe(false);
+    expect(body.stale).toBe(true);
+    expect(body.decision_status).toBe('DATA_INCOMPLETE');
   });
 });

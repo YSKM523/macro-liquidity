@@ -49,6 +49,34 @@ function businessDaysBetween(fromDate: string, toDate: string): number {
   return businessDays;
 }
 
+function recentObservationWindow(series: Obs[], date: string, required: number): Obs[] {
+  return series.filter(observation => observation.date <= date).slice(-required);
+}
+
+function hasPlausibleCadence(observations: Obs[], frequency: FreshnessRule['expectedFrequency']): boolean {
+  if (observations.length < 2) return false;
+  const bounds = frequency === 'DAILY' ? { min: 1, max: 4 }
+    : frequency === 'WEEKLY' ? { min: 5, max: 10 }
+    : frequency === 'MONTHLY' ? { min: 20, max: 45 }
+    : null;
+  if (bounds == null) return true;
+  for (let index = 1; index < observations.length; index++) {
+    const gap = utcDayNumber(observations[index].date) - utcDayNumber(observations[index - 1].date);
+    if (!Number.isFinite(gap) || gap < bounds.min || gap > bounds.max) return false;
+  }
+  return true;
+}
+
+function hasPlausibleRecentWindow(
+  series: Obs[],
+  date: string,
+  required: number,
+  rule: FreshnessRule,
+): boolean {
+  const observations = recentObservationWindow(series, date, required);
+  return observations.length === required && hasPlausibleCadence(observations, rule.expectedFrequency);
+}
+
 export function asOfFresh(series: Obs[], date: string, freshnessRule: FreshnessRule): FreshnessResult {
   let latest: Obs | null = null;
   for (const observation of series) {
@@ -93,7 +121,7 @@ function buildRecentWeeklyNetliqFresh(
   upTo: string,
   observationsRequired: number,
 ): { values: number[]; cadenceObservations: number } {
-  const walcl = (m.WALCL ?? []).filter(observation => observation.date <= upTo).slice(-observationsRequired);
+  const walcl = recentObservationWindow(m.WALCL ?? [], upTo, observationsRequired);
   const out: number[] = [];
   for (const observation of walcl) {
     const tga = asOfFresh(m.WDTGAL ?? [], observation.date, SERIES.WDTGAL).value;
@@ -547,7 +575,8 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     };
   };
 
-  const walclWeekly = (m.WALCL ?? []).filter(o => o.date <= date).map(o => o.value);
+  const recentWalcl = recentObservationWindow(m.WALCL ?? [], date, NETLIQ_TREND_WEEKS + 1);
+  const walclWeekly = recentWalcl.map(o => o.value);
   const recentNetliq = buildRecentWeeklyNetliqFresh(m, date, NETLIQ_TREND_WEEKS + 1);
   const netliqWeekly = recentNetliq.values;
 
@@ -577,9 +606,12 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const curveSlope = freshness.T10Y2Y.value;
   const curveChange20 = changeOverDaysFresh(m.T10Y2Y ?? [], date, 20, SERIES.T10Y2Y);
 
+  const walclCadenceUsable = hasPlausibleCadence(recentWalcl, SERIES.WALCL.expectedFrequency);
   const netliqHistoryUsable = recentNetliq.cadenceObservations === NETLIQ_TREND_WEEKS + 1
+    && walclCadenceUsable
     && netliqWeekly.length === recentNetliq.cadenceObservations;
-  const impulseHistoryUsable = walclWeekly.length >= 14;
+  const impulseHistoryUsable = recentWalcl.length === NETLIQ_TREND_WEEKS + 1 && walclCadenceUsable;
+  const dollarHistoryUsable = hasPlausibleRecentWindow(m.DTWEXBGS ?? [], date, 200, SERIES.DTWEXBGS);
   const fundingUsable = sofrIorb != null;
   const factorResults: FactorResults = {
     netliqTrend: result(
@@ -608,9 +640,9 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     ),
     dollar: result(
       ['DTWEXBGS'],
-      (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200 ? scoreDollar(m.DTWEXBGS ?? [], date) : null,
+      dollarHistoryUsable ? scoreDollar(m.DTWEXBGS ?? [], date) : null,
       {
-        historyUsable: (m.DTWEXBGS ?? []).filter(o => o.date <= date).length >= 200,
+        historyUsable: dollarHistoryUsable,
         extra: { historyObservations: (m.DTWEXBGS ?? []).filter(o => o.date <= date).length },
       },
     ),

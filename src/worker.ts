@@ -1,7 +1,7 @@
 import type { Env } from './service';
 import { runIngest, scheduledIngest } from './service';
 import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots, snapshotOnOrBefore, loadSeriesMap } from './db';
-import { factorContributions, attributeScoreChange, decomposeNetliq } from './explain';
+import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
 import { policyRegime, deriveDecisionState } from './metrics';
 import { INGEST_STALE_HOURS, COVERAGE_FACTORS } from './config';
@@ -53,6 +53,7 @@ export default {
           dataDate: (row as any)?.date ?? null,
           snapshots: count,
           coverage: (row as any)?.coverage ?? null,
+          decisionStatus: (row as any)?.decision_status,
           lastIngestAt: meta.last_ingest_at ?? null,
           lastStatus: meta.last_status ?? null,
           lastError: meta.last_error ?? null,
@@ -131,8 +132,11 @@ export default {
 
       const curFactors = JSON.parse(cur.factors_json ?? '{}');
       const contributions = factorContributions(curFactors);
-      const attribution = reference
-        ? attributeScoreChange(curFactors, JSON.parse(reference.factors_json ?? '{}'))
+      const referenceFactors = reference ? JSON.parse(reference.factors_json ?? '{}') : null;
+      const availabilityChanged = referenceFactors != null
+        && !sameScoringFactorAvailability(curFactors, referenceFactors);
+      const attribution = reference && !availabilityChanged
+        ? attributeScoreChange(curFactors, referenceFactors)
         : null;
       const netliq = decomposeNetliq(
         { walcl: cur.walcl, tga: cur.tga, rrp: cur.rrp },
@@ -148,6 +152,8 @@ export default {
         deltaScore: reference ? cur.score - reference.score : null,
         contributions,
         attribution,
+        attribution_unavailable_reason: availabilityChanged ? 'factor_availability_changed' : null,
+        attribution_message: availabilityChanged ? '当前与基准的因子可用性发生变化，暂不进行分数变化归因' : null,
         netliq,
       });
     }

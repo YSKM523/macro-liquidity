@@ -144,7 +144,7 @@ describe('runIngest hysteresis continuity', () => {
   it('inherits the verdict immediately before an incremental rebuild window', async () => {
     state.snapshots.set('2024-05-08', makeSnapshot('2024-05-08', 'BULLISH'));
 
-    await runIngest(env, false);
+    await runIngest(env, false, new Date('2024-05-29T12:00:00.000Z'));
 
     expect(state.snapshots.get('2024-05-15')?.verdict).toBe('BULLISH');
     expect(state.snapshots.get('2024-05-29')?.verdict).toBe('BULLISH');
@@ -160,7 +160,7 @@ describe('runIngest hysteresis continuity', () => {
       ]),
     );
 
-    await runIngest(env, false);
+    await runIngest(env, false, new Date('2024-05-29T12:00:00.000Z'));
 
     for (const [date, expected] of official) {
       const actual = state.snapshots.get(date);

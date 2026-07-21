@@ -18,9 +18,13 @@ function eachDay(from: string, to: string): string[] {
   return out;
 }
 
-export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated: number; snapshots: number }> {
+export async function runIngest(
+  env: Env,
+  rebuildAll = false,
+  now = new Date(),
+): Promise<{ updated: number; snapshots: number }> {
   const prevMeta = await getAllMeta(env.DB);
-  await setMeta(env.DB, 'last_attempt_at', new Date().toISOString());
+  await setMeta(env.DB, 'last_attempt_at', now.toISOString());
   try {
     // 1) pull FRED incrementally
     let updated = 0;
@@ -38,12 +42,12 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
     const lastWalcl = (m.WALCL ?? []).at(-1)?.date;
     let snapshots = 0;
     if (lastWalcl) {
-      const lastDate = lastWalcl;
       // Full rebuild samples at the weekly WALCL cadence the macro data actually moves on.
       // The daily cron (rebuildAll=false) keeps the most recent 14 days at daily granularity.
+      const currentAsOf = now.toISOString().slice(0, 10);
       const dates = rebuildAll
-        ? (m.WALCL ?? []).map(o => o.date).filter(d => d <= lastDate)
-        : eachDay(addDays(lastDate, -14), lastDate);
+        ? (m.WALCL ?? []).map(o => o.date).filter(d => d <= lastWalcl)
+        : eachDay(addDays(currentAsOf, -14), currentAsOf);
       const prior = rebuildAll ? null : await snapshotBefore(env.DB, dates[0]);
       let prev: Verdict | undefined = prior?.verdict ?? undefined;
       for (const date of dates) {
@@ -54,7 +58,7 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
         snapshots++;
       }
     }
-    await setMeta(env.DB, 'last_ingest_at', new Date().toISOString());
+    await setMeta(env.DB, 'last_ingest_at', now.toISOString());
     await setMeta(env.DB, 'last_status', 'ok');
     await setMeta(env.DB, 'last_error', '');
     await setMeta(env.DB, 'last_updated', String(updated));
@@ -64,18 +68,18 @@ export async function runIngest(env: Env, rebuildAll = false): Promise<{ updated
     const errMsg = String((e as any)?.message ?? e);
     await setMeta(env.DB, 'last_status', 'error');
     await setMeta(env.DB, 'last_error', errMsg);
-    const now = new Date().toISOString();
+    const nowIso = now.toISOString();
     if (shouldAlert({
       prevStatus: prevMeta.last_status ?? null,
       attemptOk: false,
       lastAlertAt: prevMeta.last_alert_at ?? null,
-      now,
+      now: nowIso,
       minIntervalHours: ALERT_MIN_INTERVAL_HOURS,
     })) {
       const sent = await sendAlertEmail(env, buildAlertEmail({
-        error: errMsg, lastIngestAt: prevMeta.last_ingest_at ?? null, now,
+        error: errMsg, lastIngestAt: prevMeta.last_ingest_at ?? null, now: nowIso,
       }));
-      if (sent) await setMeta(env.DB, 'last_alert_at', now);
+      if (sent) await setMeta(env.DB, 'last_alert_at', nowIso);
     }
     throw e;
   }

@@ -5,6 +5,7 @@ const base = {
   dataDate: '2026-06-17',
   snapshots: 558,
   coverage: 1,
+  decisionStatus: 'OK',
   lastIngestAt: '2026-06-20T18:00:00.000Z',
   lastStatus: 'ok',
   lastError: '',
@@ -17,6 +18,7 @@ describe('assessHealth', () => {
     const h = assessHealth(base);
     expect(h.ok).toBe(true);
     expect(h.stale).toBe(false);
+    expect(h.decision_status).toBe('OK');
     expect(h.ingest_age_hours).toBeCloseTo(1);
   });
 
@@ -48,5 +50,12 @@ describe('assessHealth', () => {
     const h = assessHealth({ ...base, lastIngestAt: null, lastStatus: null });
     expect(h.ok).toBe(false);
     expect(h.ingest_age_hours).toBeNull();
+  });
+
+  it.each(['DATA_INCOMPLETE', undefined] as const)('fresh successful ingest with latest decision %s is unhealthy', decisionStatus => {
+    const h = assessHealth({ ...base, decisionStatus });
+    expect(h.ok).toBe(false);
+    expect(h.stale).toBe(true);
+    expect(h.decision_status).toBe('DATA_INCOMPLETE');
   });
 });

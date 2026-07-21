@@ -128,7 +128,7 @@ describe('static UI assets', () => {
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
     expect(html).toContain('/styles.css?v=0721b');
-    expect(html).toContain('/app.js?v=0721b');
+    expect(html).toContain('/app.js?v=0721c');
   });
 
   it('sizes charts from their rendered container', () => {
@@ -155,5 +155,14 @@ describe('static UI assets', () => {
     expect(css).toContain('.factor-status.stale');
     expect(css).toContain('.factor-status.missing');
     expect(css).toContain('.fb.is-unavailable');
+  });
+
+  it('explains factor availability changes without labelling the residual as a score-cap adjustment', () => {
+    const js = read('public/app.js');
+
+    expect(js).toContain("res.attribution_unavailable_reason === 'factor_availability_changed'");
+    expect(js).toContain('因子可用性发生变化');
+    expect(js.indexOf("res.attribution_unavailable_reason === 'factor_availability_changed'"))
+      .toBeLessThan(js.indexOf('含分数封顶调整'));
   });
 });

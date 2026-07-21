@@ -429,6 +429,10 @@ function renderExplain(res) {
 // 信号变化归因 = Δ分瀑布图(从基准分逐因子累加落到当前分)
 function renderAttribution(res) {
   const label = EX_WINDOW_LABEL[res.window] || '基准';
+  if (res.attribution_unavailable_reason === 'factor_availability_changed') {
+    return `<div class="ex-sub">这次为什么变(较${label})</div>`
+      + `<p class="ex-note">因子可用性发生变化，当前与基准无法可靠比较，暂不生成变化归因。</p>`;
+  }
   if (!res.attribution || res.reference == null || res.deltaScore == null) {
     return `<div class="ex-sub">这次为什么变(较${label})</div>`
       + `<p class="ex-note">基准数据不足(历史不够),换更短的时间档试试。</p>`;

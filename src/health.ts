@@ -2,6 +2,7 @@ export interface HealthInput {
   dataDate: string | null;
   snapshots: number;
   coverage: number | null;
+  decisionStatus: string | null | undefined;
   lastIngestAt: string | null;
   lastStatus: string | null;
   lastError: string | null;
@@ -19,6 +20,7 @@ export interface HealthResult {
   ingest_error: string | null;
   snapshots: number;
   coverage: number | null;
+  decision_status: 'OK' | 'DATA_INCOMPLETE';
   stale: boolean;
 }
 
@@ -34,7 +36,8 @@ export function assessHealth(i: HealthInput): HealthResult {
   const hasData = i.snapshots > 0 && i.dataDate != null;
   const ingestFresh = ingestAgeHours != null && ingestAgeHours < i.staleHours;
   const statusOk = i.lastStatus === 'ok';
-  const ok = hasData && statusOk && ingestFresh;
+  const decisionStatus = i.decisionStatus === 'OK' ? 'OK' : 'DATA_INCOMPLETE';
+  const ok = hasData && statusOk && ingestFresh && decisionStatus === 'OK';
 
   return {
     ok,
@@ -46,6 +49,7 @@ export function assessHealth(i: HealthInput): HealthResult {
     ingest_error: i.lastError || null,
     snapshots: i.snapshots,
     coverage: i.coverage,
+    decision_status: decisionStatus,
     stale: !ok,
   };
 }
