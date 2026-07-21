@@ -2,7 +2,7 @@ import type { Obs } from './fred';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, COVERAGE_FACTORS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH } from './config';
+import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, COVERAGE_FACTORS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH, STRESS_SCORE_CEILING } from './config';
 
 export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
@@ -172,10 +172,11 @@ export function weightedScore(f: Factors): number {
 
 export interface GuidanceInput {
   score: number;
-  verdict: string;        // macro verdict BULLISH/NEUTRAL/BEARISH
-  netliqDir: string;      // 'UP' | 'DOWN' | 'FLAT'
-  qeQtRegime: string;     // 'EXPANDING' | 'CONTRACTING' | 'FLAT'
-  stressed: boolean;      // live_stress.stressed
+  verdict: Verdict;
+  netliqDir: Direction;
+  qeQtRegime: Impulse;
+  stressed: boolean;      // raw live_stress trigger
+  stressApplied?: boolean;
 }
 
 export interface GuidanceTrigger {
@@ -194,7 +195,8 @@ export interface Guidance {
 }
 
 export function buildGuidance(input: GuidanceInput): Guidance {
-  const { score, netliqDir, qeQtRegime, stressed } = input;
+  const { score, verdict, netliqDir, qeQtRegime, stressed } = input;
+  const stressApplied = input.stressApplied ?? stressed;
 
   // Tier logic (ordered: stress first, then score bands)
   let tone: Guidance['tone'];
@@ -202,12 +204,12 @@ export function buildGuidance(input: GuidanceInput): Guidance {
   let exposure: string;
   let lean: string;
 
-  if (stressed) {
+  if (stressApplied) {
     tone = 'brake';
     tierLabel = 'RISK-OFF · 刹车';
     exposure = '立刻停止加仓、收到基准以下';
     lean = '现金/防御,等实时风险解除';
-  } else if (score >= 55) {
+  } else if (verdict === 'BULLISH') {
     if (netliqDir === 'DOWN') {
       tone = 'neutral';
       tierLabel = '偏多但留意背离';
@@ -219,7 +221,7 @@ export function buildGuidance(input: GuidanceInput): Guidance {
       exposure = '基准 +15~20pp';
       lean = 'beta/成长(QQQ、高弹性)';
     }
-  } else if (score < 45) {
+  } else if (verdict === 'BEARISH') {
     if (netliqDir === 'DOWN') {
       tone = 'bear';
       tierLabel = '逆风 · 减仓';
@@ -252,23 +254,27 @@ export function buildGuidance(input: GuidanceInput): Guidance {
   }
 
   // Triggers (two fixed)
-  const trigger0: GuidanceTrigger = score >= 45
+  const trigger0: GuidanceTrigger = score >= VERDICT_BANDS.bear
     ? {
-        label: '分数跌破 45 → 主动减一档',
-        detail: '当前 ' + score.toFixed(1) + ',距 45 还有 ' + (score - 45).toFixed(1),
-        armed: (score - 45) <= 2,
+        label: `分数跌破 ${VERDICT_BANDS.bear} → 主动减一档`,
+        detail: '当前 ' + score.toFixed(1) + `,距 ${VERDICT_BANDS.bear} 还有 ` + (score - VERDICT_BANDS.bear).toFixed(1),
+        armed: (score - VERDICT_BANDS.bear) <= 2,
       }
     : {
-        label: '分数已在 45 下方 → 维持减仓',
+        label: `分数已在 ${VERDICT_BANDS.bear} 下方 → 维持减仓`,
         detail: '当前 ' + score.toFixed(1),
         armed: true,
       };
 
-  const trigger1: GuidanceTrigger = {
-    label: '实时风险(stress)触发 → 立刻刹车',
-    detail: stressed ? '已触发' : '当前未触发',
-    armed: stressed,
-  };
+  const trigger1: GuidanceTrigger = stressed
+    ? stressApplied
+      ? { label: '实时风险(stress)触发 → 立刻刹车', detail: '已触发', armed: true }
+      : {
+          label: '实时风险已触发 · 强环境未降级',
+          detail: `已触发,但当前分数 ${score.toFixed(1)} 达到 ${STRESS_SCORE_CEILING} 豁免线,强环境未下调`,
+          armed: true,
+        }
+    : { label: '实时风险(stress)触发 → 立刻刹车', detail: '当前未触发', armed: false };
 
   return { tone, tierLabel, exposure, lean, divergence, triggers: [trigger0, trigger1] };
 }
@@ -307,6 +313,41 @@ export function buildReason(impulse: Impulse, dir: Direction, verdict: Verdict):
     (impulse === 'CONTRACTING' && dir === 'UP') ? '(缩表却放水,留意背离)' :
     (impulse === 'EXPANDING' && dir === 'DOWN') ? '(扩表却收水,留意背离)' : '';
   return `Fed ${IMPULSE_CN[impulse]}、净流动性${DIR_CN[dir]} → 环境${VERDICT_CN[verdict]}${divergence}`;
+}
+
+export interface DecisionInput {
+  score: number;
+  previousVerdict?: Verdict;
+  netliqDir: Direction;
+  qeQtRegime: Impulse;
+  stressed: boolean;
+}
+
+export interface DecisionState {
+  macroVerdict: Verdict;
+  displayVerdict: Verdict;
+  reason: string;
+  guidance: Guidance;
+}
+
+export function deriveDecisionState(input: DecisionInput): DecisionState {
+  const macroVerdict = verdictFromScore(input.score, input.previousVerdict);
+  const stressApplied = input.stressed && input.score < STRESS_SCORE_CEILING;
+  const displayVerdict = stressApplied ? downgradeVerdict(macroVerdict) : macroVerdict;
+  const guidance = buildGuidance({
+    score: input.score,
+    verdict: macroVerdict,
+    netliqDir: input.netliqDir,
+    qeQtRegime: input.qeQtRegime,
+    stressed: input.stressed,
+    stressApplied,
+  });
+  return {
+    macroVerdict,
+    displayVerdict,
+    reason: buildReason(input.qeQtRegime, input.netliqDir, macroVerdict),
+    guidance,
+  };
 }
 
 export type PolicyRegime = 'QE' | 'QT' | 'RESERVE_MGMT' | 'NEUTRAL';
@@ -360,7 +401,13 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     curve: scoreCurve(curveSlope, curveChange20),
   };
   const score = weightedScore(factors);
-  const verdict = verdictFromScore(score, prev);
+  const decision = deriveDecisionState({
+    score,
+    previousVerdict: prev,
+    netliqDir,
+    qeQtRegime: bsImpulse,
+    stressed: false,
+  });
 
   const adequacy = [
     netliqWeekly.length >= NETLIQ_TREND_WEEKS + 1,                        // netliqTrend
@@ -376,12 +423,12 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
 
   return {
     date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),
-    sofrIorb, hyOas, dgs10, dxy, vix, bsImpulse, netliqDir, verdict, score, factors,
+    sofrIorb, hyOas, dgs10, dxy, vix, bsImpulse, netliqDir, verdict: decision.macroVerdict, score, factors,
     p0: factors.rates >= 50 && factors.funding >= 50 && factors.credit >= 50,
     p1: factors.netliqTrend >= 50 || factors.impulse >= 50,
     p2: factors.dollar >= 50,
     p3: factors.vol >= 50,
-    reason: buildReason(bsImpulse, netliqDir, verdict),
+    reason: decision.reason,
     coverage,
   };
 }

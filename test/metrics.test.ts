@@ -5,7 +5,7 @@ import {
   scoreRates, scoreVol, weightedScore, scoreReserveAdequacy, scoreCurve,
   buildGuidance,
 } from '../src/metrics';
-import { verdictFromScore, buildReason, computeSnapshot, policyRegime, downgradeVerdict } from '../src/metrics';
+import { verdictFromScore, buildReason, computeSnapshot, policyRegime, downgradeVerdict, deriveDecisionState } from '../src/metrics';
 import { WEIGHTS } from '../src/config';
 
 const obs = (pairs: [string, number][]) => pairs.map(([date, value]) => ({ date, value }));
@@ -159,6 +159,50 @@ describe('verdict + snapshot', () => {
     expect(['EXPANDING','CONTRACTING','FLAT']).toContain(snap.bsImpulse);
     expect(snap.netliq).toBeCloseTo(snap.walcl! - snap.tga! - snap.rrp!);
     expect(typeof snap.reason).toBe('string');
+  });
+});
+
+describe('deriveDecisionState', () => {
+  const base = {
+    netliqDir: 'FLAT',
+    qeQtRegime: 'FLAT',
+    stressed: false,
+  } as const;
+
+  it.each([
+    { score: 45, previousVerdict: 'BULLISH', expected: 'BULLISH', tone: 'bull' },
+    { score: 50, previousVerdict: undefined, expected: 'NEUTRAL', tone: 'neutral' },
+    { score: 55, previousVerdict: 'BEARISH', expected: 'BEARISH', tone: 'bear' },
+  ] as const)(
+    'uses one hysteresis result for score=$score verdict, display, reason, and guidance',
+    ({ score, previousVerdict, expected, tone }) => {
+      const state = deriveDecisionState({ score, previousVerdict, ...base });
+
+      expect(state.macroVerdict).toBe(expected);
+      expect(state.displayVerdict).toBe(expected);
+      expect(state.guidance.tone).toBe(tone);
+      expect(state.reason).toContain(
+        expected === 'BULLISH' ? '偏多' : expected === 'BEARISH' ? '偏空' : '中性',
+      );
+    },
+  );
+
+  it('applies sub-ceiling stress consistently to display verdict and guidance', () => {
+    const state = deriveDecisionState({ score: 60, previousVerdict: 'BULLISH', ...base, stressed: true });
+
+    expect(state.macroVerdict).toBe('BULLISH');
+    expect(state.displayVerdict).toBe('NEUTRAL');
+    expect(state.guidance.tone).toBe('brake');
+  });
+
+  it('applies the existing score ceiling consistently to display verdict and guidance', () => {
+    const state = deriveDecisionState({ score: 65, previousVerdict: 'BULLISH', ...base, stressed: true });
+
+    expect(state.macroVerdict).toBe('BULLISH');
+    expect(state.displayVerdict).toBe('BULLISH');
+    expect(state.guidance.tone).toBe('bull');
+    expect(state.guidance.triggers[1].armed).toBe(true);
+    expect(state.guidance.triggers[1].detail).toContain('强环境未下调');
   });
 });
 

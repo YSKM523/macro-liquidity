@@ -3,8 +3,8 @@ import { runIngest, scheduledIngest } from './service';
 import { latestSnapshot, snapshotHistory, loadBacktestRows, getAllMeta, countSnapshots, snapshotOnOrBefore, loadSeriesMap } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
-import { policyRegime, downgradeVerdict, buildGuidance } from './metrics';
-import { STRESS_SCORE_CEILING, INGEST_STALE_HOURS, COVERAGE_FACTORS } from './config';
+import { policyRegime, deriveDecisionState } from './metrics';
+import { INGEST_STALE_HOURS, COVERAGE_FACTORS } from './config';
 import { assessHealth } from './health';
 import { runBacktest } from './backtest';
 import { runWalkForward } from './walkforward';
@@ -70,12 +70,9 @@ export default {
       };
       if (!row) return json({ snapshot: null, live, ingest, error: 'no_data' });
       const r: any = row;
-      const display_verdict = (stress.stressed && r.score < STRESS_SCORE_CEILING)
-        ? downgradeVerdict(r.verdict)
-        : r.verdict;
-      const guidance = buildGuidance({
+      const decision = deriveDecisionState({
         score: r.score,
-        verdict: r.verdict,
+        previousVerdict: r.verdict,
         netliqDir: r.netliq_dir,
         qeQtRegime: r.qe_qt_regime,
         stressed: stress.stressed,
@@ -83,9 +80,10 @@ export default {
       const snap = {
         ...r,
         policy_regime: policyRegime(r.qe_qt_regime, r.date),
-        display_verdict,
+        reason: decision.reason,
+        display_verdict: decision.displayVerdict,
         live_stress: stress,
-        guidance,
+        guidance: decision.guidance,
         coverage_total: COVERAGE_FACTORS.length,
       };
       return json({ snapshot: snap, live, ingest });
