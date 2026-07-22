@@ -20,7 +20,7 @@
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
 | PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
 | PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
-| PR-11 | 已完成（本地候选） | `276eeb5`–待复审 | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与冻结 FRED snapshot 已实现；当前版本证据结论 `INCONCLUSIVE` / `DROP_RESEARCH`，`RESEARCH_CURRENT_VINTAGE`、replacementEligible=false，Champion 不变 |
+| PR-11 | 已完成（本地） | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
 | PR-12～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1851,12 +1851,13 @@ research: continuous net liquidity challenger
 - [x] 保留抓取前原预注册；初版报告标记 `INVALIDATED_BY_REVIEW`，corrected 报告一次性生成
 - [x] 冻结结论 `INCONCLUSIVE`、决策 `DROP_RESEARCH`、`RESEARCH_CURRENT_VINTAGE`、replacementEligible=false
 - [x] Shadow only；未修改 Champion、正式 API/快照、仓位或数据库
+- [x] review-correction 后独立 task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）
 
 PR-11 审计版本 `PR11_RESEARCH_V2_REVIEW_AMENDED`明确记录三项修订：节假日发布正确性使 availability 从 Wed+2 变为 `Wed+7`；7 日 SPX 行匹配上限属 `POST_FETCH_DATA_HYGIENE`而非原预注册；快照改为严格验证的 schema-v2 provenance。公式、权重、prior-only MAD、horizon、folds、bootstrap 与 gate 均未调参。
 
 PR-11 corrected 实证摘要：Raw overlapping/non-overlapping IC 为 0.2655/0.2201（n=509/40），Smooth 为 0.2846/0.3229（n=509/40），agreement-confirmed 为 0.2959/0.1559（n=465/39），bootstrap 95% CI [0.1019, 0.4455]、p=0.0015，agreement rate 91.36%。固定六 fold 中两个因 FRED SP500 仅覆盖 2016-07 起而为空，2013–2016 可评估尾段为负，其余三个为正；空 fold 未动态重分，正 fold 数 3 未达到至少 4 个的未改变门槛。
 
-PR-11 已知限制：本地 artifact 是 2026-07-22 抓取的 FRED 当前版本，不是 ALFRED/PIT，无法证明历史时点可见值；SP500 是不含股息的价格指数且只有约 10 年；`Wed+7` 保守 lag 只修复节假日周时序，不能修复 revision bias；本研究只报告 IC/排序，不是可交易组合回测。
+PR-11 已知限制：本地 artifact 是 2026-07-22 抓取的 FRED 当前版本，不是 ALFRED/PIT，无法证明历史时点可见值；SP500 是不含股息的价格指数且只有约 10 年；`Wed+7` 保守 lag 只修复节假日周时序，不能修复 revision bias；本研究只报告 IC/排序，不是可交易组合回测。Snapshot/manifest 是未签名的 content-addressed artifact；若两者与全部哈希被协同替换，完整性依赖 Git object/commit 作为外部锚。
 
 PR-11 回滚：回退 base `f803705` 后的 PR-11 commits 即可；本 PR 无 migration、无生产/远程数据库写入，不需要删除或恢复任何数据库数据。
 
