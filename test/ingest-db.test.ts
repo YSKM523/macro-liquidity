@@ -129,7 +129,8 @@ describe('ingest repository contracts', () => {
   it('promotes observations and switches ACTIVE with exactly one D1 batch', async () => {
     const statements: Array<{ sql: string; binds: unknown[] }> = [];
     const batch = vi.fn(async (_statements: D1PreparedStatement[]) => [
-      { meta: { changes: 1 } }, { meta: { changes: 1 } }, { meta: { changes: 1 } }, {},
+      {}, { meta: { changes: 1 } }, { meta: { changes: 1 } },
+      { meta: { changes: 1 } }, { meta: { changes: 1 } }, {},
     ]);
     const db = {
       prepare(sql: string) {
@@ -143,16 +144,16 @@ describe('ingest repository contracts', () => {
     await (ingestDb as any).activateIngestRun(db, 'run-1', '2024-01-01T00:05:00Z');
 
     expect(batch).toHaveBeenCalledTimes(1);
-    expect(batch.mock.calls[0][0]).toHaveLength(4);
-    expect(statements[0].sql).toMatch(/INSERT INTO observations[\s\S]*staging_observations/i);
-    expect(statements[0].sql).toMatch(/EXISTS[\s\S]*state\s*=\s*'RUNNING'/i);
-    expect(statements[0].sql).toMatch(/ingest_lock[\s\S]*owner_run_id[\s\S]*'now'/i);
-    expect(statements[1].sql).toMatch(/SUPERSEDED[\s\S]*ACTIVE/i);
-    expect(statements[1].sql).toMatch(/EXISTS[\s\S]*state\s*=\s*'RUNNING'/i);
-    expect(statements[1].sql).toMatch(/ingest_lock[\s\S]*owner_run_id[\s\S]*'now'/i);
-    expect(statements[2].sql).toMatch(/state = 'ACTIVE'/i);
+    expect(batch.mock.calls[0][0]).toHaveLength(6);
+    expect(statements[0].sql).toMatch(/conflicting append-only PIT observation/i);
+    expect(statements[1].sql).toMatch(/INSERT INTO observations_pit[\s\S]*staging_observations_pit/i);
+    expect(statements[2].sql).toMatch(/INSERT INTO observations[\s\S]*staging_observations/i);
+    expect(statements[2].sql).toMatch(/EXISTS[\s\S]*state\s*=\s*'RUNNING'/i);
     expect(statements[2].sql).toMatch(/ingest_lock[\s\S]*owner_run_id[\s\S]*'now'/i);
-    expect(statements[3].sql).toMatch(/SELECT[\s\S]*ingest_lock[\s\S]*'now'/i);
+    expect(statements[3].sql).toMatch(/SUPERSEDED[\s\S]*ACTIVE/i);
+    expect(statements[3].sql).toMatch(/EXISTS[\s\S]*state\s*=\s*'RUNNING'/i);
+    expect(statements[4].sql).toMatch(/state = 'ACTIVE'/i);
+    expect(statements[5].sql).toMatch(/SELECT[\s\S]*ingest_lock[\s\S]*'now'/i);
   });
 
   it.each(['transferred', 'expired'] as const)(
