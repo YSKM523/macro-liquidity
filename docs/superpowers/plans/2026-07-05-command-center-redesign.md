@@ -147,7 +147,7 @@ Replace the top-level first viewport with this structure, keeping the existing s
 
     <section class="panel factor-panel card">
       <div class="panel-kicker">Factor Wall</div>
-      <h2>9 因子状态</h2>
+      <h2>8 个宏观计分因子状态</h2>
       <div class="factor-bars" id="factor-bars"></div>
     </section>
   </section>

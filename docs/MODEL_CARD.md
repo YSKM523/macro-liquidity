@@ -32,7 +32,7 @@ FRED/ALFRED supplies macro series and immutable vintages. Yahoo, Stooq, and name
 | Rates | 0.05 |
 | Funding | 0.04 |
 
-The eight scoring-factor weights sum to 1.00. Volatility belongs to the independent live-risk overlay, not the macro score.
+The eight scoring-factor weights sum to 1.00. The persisted `vol` field is a FRED `VIXCLS`-based legacy zero-weight macro diagnostic (`LEGACY_ZERO_WEIGHT_DIAGNOSTIC`): it is neither a ninth scoring factor nor the live-risk overlay. The independent overlay separately consumes live multi-provider VIX, SPX, 10Y, and DXY inputs.
 
 ## Thresholds and policy
 

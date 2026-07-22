@@ -172,7 +172,7 @@ async function main() {
     lines.push(`- 有效覆盖: ${coverageFirst} → ${coverageLast}`);
     lines.push(`- standalone IC@13w = **${fmt(standalone)}**(非重叠 IC=${fmt(nonov.ic)})`);
     lines.push(`- bootstrap:95%CI [${fmt(boot.ci_lo)}, ${fmt(boot.ci_hi)}], p(IC≤0)=${fmt(boot.p_value,3)}, iters=${boot.iters}`);
-    lines.push(`- 增量:等权 IC ${fmt(incr.ic9)}(Champion 描述符：8 个计分因子 + vol 风控控制项) → ${fmt(incr.ic10)}(+候选), Δ=**${fmt(incr.delta)}**;残差 IC=${fmt(incr.resid)}`);
+    lines.push(`- 增量:等权 IC ${fmt(incr.ic9)}(LEGACY_9_SIGNAL_DIAGNOSTIC：8 个正权重 Champion 因子 + 1 个零权重 vol 历史诊断；不是 live overlay) → ${fmt(incr.ic10)}(+候选), Δ=**${fmt(incr.delta)}**;残差 IC=${fmt(incr.resid)}`);
     const topCorrMd = Object.entries(corr).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 3)
       .map(([k, val]) => `${k} ${fmt(val,2)}`).join(', ');
     lines.push(`- 与现有因子相关(top3):${topCorrMd}`);

@@ -3,6 +3,7 @@ const FACTOR_LABELS = {
   rates: '利率冲量', dollar: '美元', vol: '波动',
   reserveAdequacy: '准备金', curve: '收益率曲线',
 };
+const SCORING_FACTOR_KEYS = ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve'];
 const VERDICT_CN = { BULLISH: '偏多', BEARISH: '偏空', NEUTRAL: '中性', UNKNOWN: '风险未知' };
 const VERDICT_CLASS = { BULLISH: 'bull', BEARISH: 'bear', NEUTRAL: 'neutral', UNKNOWN: 'unknown' };
 const REGIME_CN = { EXPANDING: '扩表', CONTRACTING: '缩表', FLAT: '横住' };
@@ -362,7 +363,8 @@ function renderScore(s) {
   const factorQuality = s.factor_quality || {};
   const host = document.getElementById('factor-bars');
   host.innerHTML = '';
-  for (const [k, label] of Object.entries(FACTOR_LABELS)) {
+  for (const k of SCORING_FACTOR_KEYS) {
+    const label = FACTOR_LABELS[k];
     const result = factorQuality[k] || { score: null, quality: 0, status: 'MISSING', asOf: null };
     const val = result.score == null ? null : Math.round(result.score);
     const st = val == null ? 'unavailable' : val >= 55 ? 'up' : val <= 45 ? 'down' : 'flat';

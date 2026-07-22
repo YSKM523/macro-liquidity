@@ -43,7 +43,7 @@ First viewport module:
     - chart title and legend
     - large `#chart` canvas area
   - Right panel `.factor-panel`
-    - 9 factor rows rendered by the existing `renderScore` data path
+    - 8 scoring-factor rows rendered by the existing `renderScore` data path; legacy zero-weight `vol` is not a Factor Wall row
     - factor rows retain labels, bar tracks, values, and up/down/flat coloring
 
 The current standalone verdict card, guidance card, score card, and chart card should be merged into this first viewport. The DOM can be restructured, but existing element IDs should remain where practical so current JS data binding remains simple.

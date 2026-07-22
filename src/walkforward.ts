@@ -54,6 +54,11 @@ function topWeights(w: Record<string, number>): string[] {
 }
 
 export interface WalkForwardResult {
+  methodology: 'LEGACY_9_SIGNAL_DIAGNOSTIC';
+  signal_classification: {
+    champion_positive_weight_factors: 8;
+    legacy_zero_weight_diagnostics: ['vol'];
+  };
   config: {
     horizon_weeks: number;
     initialTrain: number;
@@ -140,6 +145,11 @@ export function runWalkForward(
   });
 
   return {
+    methodology: 'LEGACY_9_SIGNAL_DIAGNOSTIC',
+    signal_classification: {
+      champion_positive_weight_factors: 8,
+      legacy_zero_weight_diagnostics: ['vol'],
+    },
     config: { horizon_weeks: horizon, initialTrain, testN, embargo, folds: folds.length },
     n_snapshots: snaps.length,
     oos: {
