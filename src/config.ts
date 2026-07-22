@@ -80,6 +80,7 @@ export const EVENT_BACKTEST_ASSUMPTIONS = {
   executionCloseUtc: '23:59:59Z',
   cashRate: 'SOFR',
   cashDayCount: 'ACT/360',
+  cashFixingAvailability: 'PRIOR_DATE_ONLY',
   cashRateMaxStaleCalendarDays: 4,
   commissionBps: 1,
   baseSlippageBps: 2,

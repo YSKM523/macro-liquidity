@@ -679,7 +679,7 @@ function renderEventBacktest(result) {
   const assumption = (value) => value == null ? '—' : value;
   const disclosure = `<div class="rb-sub">正式绩效 · event-time</div>`
     + `<p class="rb-note">日频收盘执行：tradable_at 之后首个 SPX 23:59:59Z 收盘；周频信号不等于执行日。</p>`
-    + `<p class="rb-note">现金：SOFR ACT/360 · 手续费 ${assumption(assumptions.commissionBps)}bp · 基础滑点 ${assumption(assumptions.baseSlippageBps)}bp · 高波动额外滑点 ${assumption(assumptions.highVolExtraSlippageBps)}bp（VIX≥${assumption(assumptions.vixStressLevel)}，陈旧/缺失同样保守计入）。</p>`
+    + `<p class="rb-note">现金：SOFR ACT/360（仅使用区间起点之前日期的已知 fixing）· 手续费 ${assumption(assumptions.commissionBps)}bp · 基础滑点 ${assumption(assumptions.baseSlippageBps)}bp · 高波动额外滑点 ${assumption(assumptions.highVolExtraSlippageBps)}bp（VIX≥${assumption(assumptions.vixStressLevel)}，陈旧/缺失同样保守计入）。</p>`
     + `<p class="rb-note">超过 100% 敞口：SOFR + ${assumption(assumptions.financingSpreadBps)}bp 融资；SPX adjusted_close 为 FRED 指数收盘，不含股息。</p>`;
   const legacy = result.strategy_long_flat && result.strategy_long_flat.methodology === 'LEGACY_WEEKLY'
     ? '<p class="rb-note">旧 weekly long/flat 仅保留为 LEGACY_WEEKLY 诊断，不代表正式绩效。</p>'

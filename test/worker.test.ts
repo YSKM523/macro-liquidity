@@ -30,7 +30,7 @@ const dbState = vi.hoisted(() => ({
       { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500' },
     ],
     vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
-    cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+    cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR' }],
   } as any,
 }));
 
@@ -96,7 +96,7 @@ beforeEach(() => {
       { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500' },
     ],
     vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
-    cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+    cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR' }],
   };
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });

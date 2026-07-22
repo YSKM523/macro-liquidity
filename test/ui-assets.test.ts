@@ -154,6 +154,7 @@ describe('static UI assets', () => {
     expect(js).toContain("fetch('/api/backtest')");
     expect(js).toContain('日频收盘');
     expect(js).toContain('SOFR ACT/360');
+    expect(js).toContain('区间起点之前日期');
     expect(js).toContain('手续费');
     expect(js).toContain('基础滑点');
     expect(js).toContain('高波动额外滑点');

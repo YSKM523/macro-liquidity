@@ -175,6 +175,15 @@ function latestOnOrBefore<T extends { date: string }>(rows: T[], date: string): 
   return match;
 }
 
+function latestBefore<T extends { date: string }>(rows: T[], date: string): T | undefined {
+  let match: T | undefined;
+  for (const row of rows) {
+    if (row.date >= date) break;
+    match = row;
+  }
+  return match;
+}
+
 function incomplete(
   reason: string,
   nav: EventNavRow[],
@@ -216,7 +225,10 @@ export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktest
     if (index > firstIndex) {
       const previous = prices[index - 1];
       const days = calendarDays(previous.date, current.date);
-      const fixing = latestOnOrBefore(cashRates, previous.date);
+      // SOFR for a business date is published on the following business day.
+      // With date-only materialization, excluding the interval-start date is
+      // the conservative no-lookahead representation of "known at start".
+      const fixing = latestBefore(cashRates, previous.date);
       if (!fixing) return incomplete(`SOFR missing at ${previous.date}`, nav, schedule, tradingCost);
       if (calendarDays(fixing.date, previous.date) > EVENT_BACKTEST_ASSUMPTIONS.cashRateMaxStaleCalendarDays) {
         return incomplete(`SOFR stale at ${previous.date}`, nav, schedule, tradingCost);

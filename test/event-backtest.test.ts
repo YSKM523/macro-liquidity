@@ -74,7 +74,7 @@ const daily = [
 ];
 const longSignal = { signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 };
 const calmVix = [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }];
-const sofr = [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }];
+const sofr = [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR' }];
 
 describe('daily event-time NAV', () => {
   it('emits one NAV row per session from the first execution onward and charges base costs once', () => {
@@ -94,6 +94,16 @@ describe('daily event-time NAV', () => {
     expect(result.nav[1].cashReturn).toBeCloseTo(0.05 * 3 / 360, 12);
     expect(result.nav[2].cashReturn).toBeCloseTo(0.05 / 360, 12);
     expect(result.nav[2].nav).toBeGreaterThan(1);
+  });
+
+  it('does not look ahead to a same-date SOFR fixing that was not known at interval start', () => {
+    const flat = { ...longSignal, score: 40 };
+    const result = runEventTimeBacktest({
+      signals: [flat], prices: daily, vix: calmVix,
+      cashRates: [...sofr, { date: '2024-01-05', rate: 99, source: 'FRED:SOFR' }],
+    });
+    expect(result.status).toBe('OK');
+    expect(result.nav[1].cashReturn).toBeCloseTo(0.05 * 3 / 360, 12);
   });
 
   it.each([
