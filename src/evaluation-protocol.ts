@@ -266,11 +266,16 @@ export function runFrozenHoldout(snaps: ValidationSnap[]) {
   if (pairs.length < VALIDATION_PROTOCOL.minimumRateN) {
     return { status: 'PENDING_MATURITY' as const, frozen, provenance, overlappingN: pairs.length, independentN: greedyIndependentPairs(pairs).length, metrics: null };
   }
+  const metrics = evaluateValidationMetrics(pairs, frozen.q10, frozen.trainingN);
+  if (frozen.calibrationStatus === 'PARTIAL_LEGACY_CALIBRATION') {
+    metrics.tail.recall = { ...metrics.tail.recall, value: null, status: 'PARTIAL_LEGACY_CALIBRATION' };
+    metrics.tail.precision = { ...metrics.tail.precision, value: null, status: 'PARTIAL_LEGACY_CALIBRATION' };
+  }
   return {
     status: 'OK' as const, frozen, provenance,
     overlappingN: pairs.length,
     independentN: greedyIndependentPairs(pairs).length,
-    metrics: evaluateValidationMetrics(pairs, frozen.q10, frozen.trainingN),
+    metrics,
   };
 }
 
@@ -291,21 +296,24 @@ export function runPurgedValidation(
   const totalCaught = folds.reduce((sum, fold) => sum + fold.metrics.tail.caught, 0);
   const totalRiskCalls = folds.reduce((sum, fold) => sum + fold.metrics.tail.riskCalls, 0);
   const legacyCalibration = folds.some(fold => fold.tailCalibrationStatus === 'PARTIAL_LEGACY_CALIBRATION');
+  const missingRiskSignal = folds.some(fold => fold.metrics.tail.recall.status === 'MISSING_FORMAL_SIGNAL');
   const calibrationReady = folds.length > 0 && !legacyCalibration
     && folds.every(fold => fold.metrics.tail.calibrationN >= VALIDATION_PROTOCOL.minimumTailCalibrationN);
-  const tailReady = calibrationReady && totalTailEvents >= VALIDATION_PROTOCOL.minimumTestTailEvents;
+  const tailReady = calibrationReady && !missingRiskSignal && totalTailEvents >= VALIDATION_PROTOCOL.minimumTestTailEvents;
   const aggregateTail = aggregateBase == null ? null : {
     recall: {
       value: tailReady ? totalCaught / totalTailEvents : null,
       hits: totalCaught, n: totalTailEvents, abstentions: testPairs.length - totalTailEvents,
       minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
-      status: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const : tailReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+      status: missingRiskSignal ? 'MISSING_FORMAL_SIGNAL' as const
+        : legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const : tailReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     },
     precision: {
       value: tailReady && totalRiskCalls > 0 ? totalCaught / totalRiskCalls : null,
       hits: totalCaught, n: totalRiskCalls, abstentions: testPairs.length - totalRiskCalls,
       minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
-      status: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const
+      status: missingRiskSignal ? 'MISSING_FORMAL_SIGNAL' as const
+        : legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const
         : tailReady && totalRiskCalls > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     },
     tailEvents: totalTailEvents,
