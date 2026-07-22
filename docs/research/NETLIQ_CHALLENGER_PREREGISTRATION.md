@@ -1,8 +1,10 @@
 # Continuous Net Liquidity Challenger — Preregistration
 
-Status: `PREREGISTERED_BEFORE_FETCH`  
-Evidence class: `RESEARCH_CURRENT_VINTAGE`  
-Production status: shadow research only  
+Status: `PREREGISTERED_BEFORE_FETCH`
+
+Evidence class: `RESEARCH_CURRENT_VINTAGE`
+
+Production status: shadow research only
 Replacement eligibility: `false`
 
 This contract was committed before the PR-11 FRED snapshot was fetched. After the fetch, the formula, direction, windows, folds, bootstrap, and decision gate must not be changed in response to results.
