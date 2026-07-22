@@ -202,6 +202,11 @@ describe('runWalkForward', () => {
     expect(result.oos).toBeDefined();
     expect(result.folds).toBeInstanceOf(Array);
     expect(result.caveats).toBeInstanceOf(Array);
+    expect(result.methodology).toBe('LEGACY_9_SIGNAL_DIAGNOSTIC');
+    expect(result.signal_classification).toEqual({
+      champion_positive_weight_factors: 8,
+      legacy_zero_weight_diagnostics: ['vol'],
+    });
   });
 
   it('produces at least 1 fold', () => {

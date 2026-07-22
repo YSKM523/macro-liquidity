@@ -34,6 +34,27 @@ describe('parseFredJson', () => {
 });
 
 describe('FRED bounded retries', () => {
+  it('times out each hung FRED attempt without using wall-clock waits', async () => {
+    const signals: AbortSignal[] = [];
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init!.signal as AbortSignal);
+      return new Promise<Response>(() => {});
+    });
+
+    await expect(fetchFredSeries('WALCL', '2024-01-01', 'key', {
+      fetchFn: fetchFn as any,
+      maxAttempts: 3,
+      attemptTimeoutMs: 100,
+      sleep: async () => undefined,
+      setTimeoutFn: ((callback: () => void) => { queueMicrotask(callback); return 1; }) as any,
+      clearTimeoutFn: vi.fn(),
+    })).rejects.toThrow(/timeout/i);
+
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(new Set(signals).size).toBe(3);
+    expect(signals.every(signal => signal.aborted)).toBe(true);
+  });
+
   it('recovers from a transient FRED response before parsing', async () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(new Response('', { status: 503 }))
@@ -67,6 +88,24 @@ describe('FRED bounded retries', () => {
 });
 
 describe('ALFRED vintages', () => {
+  it('times out each hung ALFRED page attempt without using wall-clock waits', async () => {
+    const fetchFn = vi.fn(async () => new Promise<Response>(() => {}));
+
+    await expect(fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-04', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      {
+        fetchFn: fetchFn as any,
+        maxAttempts: 3,
+        attemptTimeoutMs: 100,
+        sleep: async () => undefined,
+        setTimeoutFn: ((callback: () => void) => { queueMicrotask(callback); return 1; }) as any,
+        clearTimeoutFn: vi.fn(),
+      },
+    )).rejects.toThrow(/timeout/i);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
   it('recovers from a transient ALFRED page response', async () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(new Response('', { status: 429 }))

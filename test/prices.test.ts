@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { normalizeTnx, parseYahooQuote, parseStooqCsv, parseYahooCloses, parseYahooDailyObs, spliceSeries, evaluateLiveStress, fetchLivePrices, fetchStressSeries, fetchDxyDaily, YahooMarketDataProvider, StooqMarketDataProvider, FredMarketDataProvider } from '../src/prices';
+import { createHttpAttemptBudget } from '../src/http-retry';
 import type { StressSeries } from '../src/prices';
 
 describe('price parsing', () => {
@@ -585,12 +586,53 @@ describe('provider fallback and provenance', () => {
     }));
 
     const result = await Promise.race([
-      (fetchLivePrices as any)(fetchedAt, { providerTimeoutMs: 5 }),
+      (fetchLivePrices as any)(fetchedAt, {
+        providerTimeoutMs: 5, sleep: async () => undefined, random: () => 0,
+      }),
       new Promise<null>(resolve => setTimeout(() => resolve(null), 100)),
     ]);
 
     expect(result).not.toBeNull();
     expect((result as any).quotes.spx.status).toBe('OK');
+  });
+
+  it('reports helper-owned abort-aware provider timeouts as TIMEOUT', async () => {
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init!.signal!.addEventListener('abort', () => {
+          reject(new DOMException('fetch observed abort', 'AbortError'));
+        }, { once: true });
+      }));
+    const provider = new YahooMarketDataProvider(fetchFn as typeof fetch, {
+      maxAttempts: 1,
+      attemptTimeoutMs: 100,
+      setTimeoutFn: (callback) => { queueMicrotask(callback); return 1; },
+      clearTimeoutFn: vi.fn(),
+    });
+
+    await expect(provider.fetchQuote({ symbol: '^GSPC', fetchedAt: '2026-07-17T22:00:00.000Z' }))
+      .resolves.toMatchObject({ status: 'FAILED', reasonCode: 'TIMEOUT' });
+  });
+
+  it('shares an atomic attempt budget across a cold live-price and stress load', async () => {
+    const fetchFn = vi.fn(async () => new Response('unavailable', { status: 503 }));
+    const attemptBudget = createHttpAttemptBudget(32);
+    const options = {
+      fetchFn: fetchFn as typeof fetch,
+      attemptBudget,
+      maxAttempts: 3,
+      sleep: async () => undefined,
+    };
+
+    const [prices, stress] = await Promise.all([
+      fetchLivePrices('2026-07-17T22:00:00.000Z', options),
+      fetchStressSeries({ ...options, fetchedAt: '2026-07-17T22:00:00.000Z' }),
+    ]);
+
+    expect(fetchFn).toHaveBeenCalledTimes(32);
+    expect(attemptBudget.used).toBe(32);
+    expect(Object.values(prices.quotes).every(result => result.status === 'FAILED')).toBe(true);
+    expect(Object.values(stress.inputs ?? {}).every(result => result.status === 'FAILED')).toBe(true);
   });
 });
 

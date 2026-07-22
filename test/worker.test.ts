@@ -126,6 +126,7 @@ beforeEach(() => {
 
 describe('/api/snapshot explicit channels', () => {
   it('returns official and provisional nowcast snapshots separately', async () => {
+    dbState.row.factor_quality_json = '{"vol":{"score":40,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}';
     const response = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
     const body = await response.json() as any;
 
@@ -136,6 +137,12 @@ describe('/api/snapshot explicit channels', () => {
     });
     expect(body.nowcast.date).toBe('2026-07-21');
     expect(body.nowcast.channel_status).toBe('PROVISIONAL');
+    expect(body.official.factor_classification).toEqual({
+      scoring_factor_keys: ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve'],
+      legacy_zero_weight_diagnostics: { vol: 'LEGACY_ZERO_WEIGHT_DIAGNOSTIC' },
+      live_risk_overlay_inputs: ['vix', 'spx', 'us10y', 'dxy'],
+    });
+    expect(body.official.factor_quality.vol.classification).toBe('LEGACY_ZERO_WEIGHT_DIAGNOSTIC');
     expect(body.snapshot).toBeUndefined();
     expect(body.ingest.runs.active).toMatchObject({ run_id: 'active-1', state: 'ACTIVE' });
     expect(body.ingest.runs.active).toMatchObject({ snapshot_state: 'FAILED', snapshot_count: 2 });
