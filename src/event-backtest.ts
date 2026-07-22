@@ -92,6 +92,50 @@ export interface EventNavRow {
   tradeCost: number;
 }
 
+export interface PortfolioMetrics {
+  totalReturn: number | null;
+  averageBeta: number | null;
+  annualizedVolatility: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  maxDrawdown: number | null;
+  maxDrawdownDurationSessions: number | null;
+}
+
+export interface DailyPortfolioSimulation {
+  status: 'OK' | 'DATA_INCOMPLETE';
+  reason: string | null;
+  nav: EventNavRow[];
+  tradingCostRate: number | null;
+}
+
+export interface BenchmarkTargets {
+  spxBuyHold: number[];
+  betaMatchedStatic: number[];
+  volatilityTarget: number[];
+  movingAverage200: number[];
+}
+
+export interface PortfolioComparisonEntry {
+  methodology: string;
+  sessions: number;
+  tradingCostRate: number;
+  metrics: PortfolioMetrics;
+}
+
+export interface EventPortfolioAnalytics {
+  methodology: 'DASHBOARD_EXPOSURE_TIERS_V1';
+  stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY';
+  timingAlpha: number | null;
+  strategy: PortfolioComparisonEntry;
+  benchmarks: {
+    spxBuyHold: PortfolioComparisonEntry;
+    betaMatchedStatic: PortfolioComparisonEntry;
+    volatilityTarget: PortfolioComparisonEntry;
+    movingAverage200: PortfolioComparisonEntry;
+  };
+}
+
 export interface EventBacktestResult {
   status: 'OK' | 'DATA_INCOMPLETE';
   reason: string | null;
@@ -102,6 +146,7 @@ export interface EventBacktestResult {
   totals: { totalReturn: number | null; tradingCostRate: number | null; sessions: number | null };
   assumptions: typeof EVENT_BACKTEST_ASSUMPTIONS;
   provenance: InputProvenance;
+  portfolio: EventPortfolioAnalytics | null;
 }
 
 export interface InputProvenance {
@@ -236,6 +281,158 @@ function latestBefore<T extends { date: string }>(rows: T[], date: string): T | 
   return match;
 }
 
+function populationStd(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+export function buildBenchmarkTargets(
+  prices: DailyMarketPrice[],
+  strategyExposures: number[],
+): BenchmarkTargets {
+  if (prices.length !== strategyExposures.length) throw new Error('benchmark exposure length mismatch');
+  if (strategyExposures.some(value => !Number.isFinite(value) || value < 0 || value > 1)) {
+    throw new Error('invalid strategy exposure for benchmark');
+  }
+  const averageBeta = strategyExposures.length === 0
+    ? 0
+    : strategyExposures.reduce((sum, value) => sum + value, 0) / strategyExposures.length;
+  const volatilityTarget = prices.map((_row, index) => {
+    if (index < 21) return 0;
+    const priorReturns: number[] = [];
+    for (let cursor = index - 20; cursor < index; cursor++) {
+      priorReturns.push(prices[cursor].adjustedClose / prices[cursor - 1].adjustedClose - 1);
+    }
+    const dailyVolatility = populationStd(priorReturns);
+    if (dailyVolatility == null) return 0;
+    if (dailyVolatility === 0) return 1;
+    return Math.min(1, 0.10 / (dailyVolatility * Math.sqrt(252)));
+  });
+  const movingAverage200 = prices.map((_row, index) => {
+    if (index < 200) return 0;
+    const priorCloses = prices.slice(index - 200, index).map(row => row.adjustedClose);
+    const average = priorCloses.reduce((sum, value) => sum + value, 0) / priorCloses.length;
+    return priorCloses[priorCloses.length - 1] > average ? 1 : 0;
+  });
+  return {
+    spxBuyHold: prices.map(() => 1),
+    betaMatchedStatic: prices.map(() => averageBeta),
+    volatilityTarget,
+    movingAverage200,
+  };
+}
+
+export function simulateDailyPortfolio(input: {
+  prices: DailyMarketPrice[];
+  targetExposures: number[];
+  vix: DailyVix[];
+  cashRates: DailyCashRate[];
+}): DailyPortfolioSimulation {
+  const prices = validateDatedSeries(input.prices, row => row.adjustedClose, 'market');
+  if (prices.some(row => row.adjustedClose <= 0)) throw new Error('invalid market price');
+  if (prices.length !== input.targetExposures.length) throw new Error('target exposure length mismatch');
+  if (input.targetExposures.some(value => !Number.isFinite(value) || value < 0)) {
+    throw new Error('invalid target exposure');
+  }
+  const vix = validateDatedSeries(input.vix, row => row.value, 'VIX');
+  if (vix.some(row => row.value < 0)) throw new Error('invalid VIX value');
+  const cashRates = validateDatedSeries(input.cashRates, row => row.rate, 'SOFR');
+  if (prices.length < 2) {
+    return { status: 'DATA_INCOMPLETE', reason: 'insufficient market sessions', nav: [], tradingCostRate: null };
+  }
+
+  let navValue = 1;
+  let exposure = 0;
+  let tradingCost = 0;
+  const nav: EventNavRow[] = [];
+  for (let index = 0; index < prices.length; index++) {
+    const current = prices[index];
+    let assetReturn = 0;
+    let cashReturn = 0;
+    let financingReturn = 0;
+    if (index > 0) {
+      const previous = prices[index - 1];
+      const days = calendarDays(previous.date, current.date);
+      const fixing = latestBefore(cashRates, previous.date);
+      if (!fixing) return { status: 'DATA_INCOMPLETE', reason: `SOFR missing at ${previous.date}`, nav: [], tradingCostRate: null };
+      if (calendarDays(fixing.date, previous.date) > EVENT_BACKTEST_ASSUMPTIONS.cashRateMaxStaleCalendarDays) {
+        return { status: 'DATA_INCOMPLETE', reason: `SOFR stale at ${previous.date}`, nav: [], tradingCostRate: null };
+      }
+      assetReturn = exposure * (current.adjustedClose / previous.adjustedClose - 1);
+      const annualCashRate = fixing.rate / 100;
+      if (exposure <= 1) cashReturn = (1 - exposure) * annualCashRate * days / 360;
+      else financingReturn = (1 - exposure) *
+        (annualCashRate + EVENT_BACKTEST_ASSUMPTIONS.financingSpreadBps / 10_000) * days / 360;
+      navValue *= 1 + assetReturn + cashReturn + financingReturn;
+    }
+
+    const newExposure = input.targetExposures[index];
+    const turnover = Math.abs(newExposure - exposure);
+    let tradeCost = 0;
+    if (turnover > 0) {
+      const vixFixing = latestOnOrBefore(vix, current.date);
+      const conservativeExtra = !vixFixing ||
+        calendarDays(vixFixing.date, current.date) > EVENT_BACKTEST_ASSUMPTIONS.vixMaxStaleCalendarDays ||
+        vixFixing.value >= EVENT_BACKTEST_ASSUMPTIONS.vixStressLevel;
+      const costBps = EVENT_BACKTEST_ASSUMPTIONS.commissionBps +
+        EVENT_BACKTEST_ASSUMPTIONS.baseSlippageBps +
+        (conservativeExtra ? EVENT_BACKTEST_ASSUMPTIONS.highVolExtraSlippageBps : 0);
+      tradeCost = turnover * costBps / 10_000;
+      navValue *= 1 - tradeCost;
+      tradingCost += tradeCost;
+    }
+    exposure = newExposure;
+    if (![navValue, exposure, assetReturn, cashReturn, financingReturn, turnover, tradeCost].every(Number.isFinite)) {
+      throw new Error('non-finite portfolio NAV output');
+    }
+    nav.push({ date: current.date, nav: navValue, exposure, assetReturn, cashReturn, financingReturn, turnover, tradeCost });
+  }
+  return { status: 'OK', reason: null, nav, tradingCostRate: tradingCost };
+}
+
+export function computePortfolioMetrics(rows: Array<Pick<EventNavRow, 'date' | 'nav' | 'exposure'>>): PortfolioMetrics {
+  const empty: PortfolioMetrics = {
+    totalReturn: null, averageBeta: null, annualizedVolatility: null,
+    sharpe: null, sortino: null, maxDrawdown: null, maxDrawdownDurationSessions: null,
+  };
+  if (rows.length < 2) return empty;
+  if (rows.some(row => !Number.isFinite(row.nav) || row.nav <= 0 || !Number.isFinite(row.exposure))) {
+    throw new Error('invalid portfolio metric input');
+  }
+  const returns = rows.slice(1).map((row, index) => row.nav / rows[index].nav - 1);
+  const averageReturn = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+  const volatility = populationStd(returns);
+  const downside = returns.filter(value => value < 0);
+  const downsideDeviation = downside.length === 0
+    ? null
+    : Math.sqrt(downside.reduce((sum, value) => sum + value ** 2, 0) / downside.length);
+  let peak = 1;
+  let maxDrawdown = 0;
+  let currentDuration = 0;
+  let maxDuration = 0;
+  for (const row of rows) {
+    if (row.nav >= peak) {
+      peak = row.nav;
+      currentDuration = 0;
+    } else {
+      currentDuration += 1;
+      maxDuration = Math.max(maxDuration, currentDuration);
+      maxDrawdown = Math.min(maxDrawdown, row.nav / peak - 1);
+    }
+  }
+  return {
+    totalReturn: rows[rows.length - 1].nav - 1,
+    averageBeta: rows.reduce((sum, row) => sum + row.exposure, 0) / rows.length,
+    annualizedVolatility: volatility == null ? null : volatility * Math.sqrt(252),
+    sharpe: volatility == null || volatility === 0 ? null : averageReturn / volatility * Math.sqrt(252),
+    sortino: downsideDeviation == null || downsideDeviation === 0 ? null : averageReturn / downsideDeviation * Math.sqrt(252),
+    maxDrawdown,
+    maxDrawdownDurationSessions: maxDuration,
+  };
+}
+
 function incomplete(
   reason: string,
   schedule: ExecutionSchedule,
@@ -247,6 +444,46 @@ function incomplete(
     totals: { totalReturn: null, tradingCostRate: null, sessions: null },
     assumptions: EVENT_BACKTEST_ASSUMPTIONS,
     provenance,
+    portfolio: null,
+  };
+}
+
+function portfolioAnalytics(
+  strategy: DailyPortfolioSimulation,
+  prices: DailyMarketPrice[],
+  vix: DailyVix[],
+  cashRates: DailyCashRate[],
+): EventPortfolioAnalytics {
+  if (strategy.status !== 'OK' || strategy.tradingCostRate == null) throw new Error('strategy simulation incomplete');
+  const targets = buildBenchmarkTargets(prices, strategy.nav.map(row => row.exposure));
+  const run = (methodology: string, targetExposures: number[]): PortfolioComparisonEntry => {
+    const simulation = simulateDailyPortfolio({ prices, targetExposures, vix, cashRates });
+    if (simulation.status !== 'OK' || simulation.tradingCostRate == null) {
+      throw new Error(`benchmark simulation incomplete: ${simulation.reason ?? methodology}`);
+    }
+    return {
+      methodology, sessions: simulation.nav.length, tradingCostRate: simulation.tradingCostRate,
+      metrics: computePortfolioMetrics(simulation.nav),
+    };
+  };
+  const strategyEntry: PortfolioComparisonEntry = {
+    methodology: 'DASHBOARD_EXPOSURE_TIERS_V1', sessions: strategy.nav.length,
+    tradingCostRate: strategy.tradingCostRate, metrics: computePortfolioMetrics(strategy.nav),
+  };
+  const betaMatchedStatic = run('STATIC_SPX_CASH_AVERAGE_BETA', targets.betaMatchedStatic);
+  const strategyReturn = strategyEntry.metrics.totalReturn;
+  const betaReturn = betaMatchedStatic.metrics.totalReturn;
+  return {
+    methodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
+    stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
+    timingAlpha: strategyReturn == null || betaReturn == null ? null : strategyReturn - betaReturn,
+    strategy: strategyEntry,
+    benchmarks: {
+      spxBuyHold: run('SPX_BUY_HOLD', targets.spxBuyHold),
+      betaMatchedStatic,
+      volatilityTarget: run('PRIOR_20_SESSION_10PCT_VOL_TARGET_CAP_100', targets.volatilityTarget),
+      movingAverage200: run('PRIOR_CLOSE_200DMA_RISK_CONTROL', targets.movingAverage200),
+    },
   };
 }
 
@@ -320,67 +557,29 @@ export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktest
   if (firstIndex < 0 || firstIndex >= prices.length - 1) {
     return incomplete('insufficient executable market sessions', schedule, provenance);
   }
-  let navValue = 1;
+  const evaluationPrices = prices.slice(firstIndex);
   let exposure = 0;
-  let tradingCost = 0;
-  const nav: EventNavRow[] = [];
-
-  for (let index = firstIndex; index < prices.length; index++) {
-    const current = prices[index];
-    let assetReturn = 0;
-    let cashReturn = 0;
-    let financingReturn = 0;
-    if (index > firstIndex) {
-      const previous = prices[index - 1];
-      const days = calendarDays(previous.date, current.date);
-      // SOFR for a business date is published on the following business day.
-      // With date-only materialization, excluding the interval-start date is
-      // the conservative no-lookahead representation of "known at start".
-      const fixing = latestBefore(cashRates, previous.date);
-      if (!fixing) return incomplete(`SOFR missing at ${previous.date}`, schedule, provenance);
-      if (calendarDays(fixing.date, previous.date) > EVENT_BACKTEST_ASSUMPTIONS.cashRateMaxStaleCalendarDays) {
-        return incomplete(`SOFR stale at ${previous.date}`, schedule, provenance);
-      }
-      assetReturn = exposure * (current.adjustedClose / previous.adjustedClose - 1);
-      const annualCashRate = fixing.rate / 100;
-      if (exposure <= 1) cashReturn = (1 - exposure) * annualCashRate * days / 360;
-      else financingReturn = (1 - exposure) *
-        (annualCashRate + EVENT_BACKTEST_ASSUMPTIONS.financingSpreadBps / 10_000) * days / 360;
-      navValue *= 1 + assetReturn + cashReturn + financingReturn;
-    }
-
-    const execution = executionByDate.get(current.date);
-    const turnover = execution ? Math.abs(execution.newExposure - exposure) : 0;
-    let tradeCost = 0;
-    if (execution && turnover > 0) {
-      const vixFixing = latestOnOrBefore(vix, current.date);
-      const conservativeExtra = !vixFixing ||
-        calendarDays(vixFixing.date, current.date) > EVENT_BACKTEST_ASSUMPTIONS.vixMaxStaleCalendarDays ||
-        vixFixing.value >= EVENT_BACKTEST_ASSUMPTIONS.vixStressLevel;
-      const costBps = EVENT_BACKTEST_ASSUMPTIONS.commissionBps +
-        EVENT_BACKTEST_ASSUMPTIONS.baseSlippageBps +
-        (conservativeExtra ? EVENT_BACKTEST_ASSUMPTIONS.highVolExtraSlippageBps : 0);
-      tradeCost = turnover * costBps / 10_000;
-      navValue *= 1 - tradeCost;
-      tradingCost += tradeCost;
-      exposure = execution.newExposure;
-    } else if (execution) {
-      exposure = execution.newExposure;
-    }
-    if (![navValue, exposure, assetReturn, cashReturn, financingReturn, turnover, tradeCost].every(Number.isFinite)) {
-      throw new Error('non-finite event-time NAV output');
-    }
-    nav.push({
-      date: current.date, nav: navValue, exposure,
-      assetReturn, cashReturn, financingReturn, turnover, tradeCost,
-    });
+  const targetExposures = evaluationPrices.map(price => {
+    const execution = executionByDate.get(price.date);
+    if (execution) exposure = execution.newExposure;
+    return exposure;
+  });
+  const simulation = simulateDailyPortfolio({ prices: evaluationPrices, targetExposures, vix, cashRates });
+  if (simulation.status !== 'OK' || simulation.tradingCostRate == null) {
+    return incomplete(simulation.reason ?? 'portfolio simulation incomplete', schedule, provenance);
   }
+  const portfolio = portfolioAnalytics(simulation, evaluationPrices, vix, cashRates);
 
   return {
-    status: 'OK', reason: null, nav,
+    status: 'OK', reason: null, nav: simulation.nav,
     executions: schedule.executions, unexecuted: schedule.unexecuted, superseded: schedule.superseded,
-    totals: { totalReturn: navValue - 1, tradingCostRate: tradingCost, sessions: nav.length },
+    totals: {
+      totalReturn: simulation.nav[simulation.nav.length - 1].nav - 1,
+      tradingCostRate: simulation.tradingCostRate,
+      sessions: simulation.nav.length,
+    },
     assumptions: EVENT_BACKTEST_ASSUMPTIONS,
     provenance,
+    portfolio,
   };
 }

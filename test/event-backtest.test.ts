@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runEventTimeBacktest, scheduleExecutions } from '../src/event-backtest';
+import { runEventTimeBacktest, scheduleExecutions, simulateDailyPortfolio } from '../src/event-backtest';
 import type { DailyMarketPrice } from '../src/event-backtest';
 import { EVENT_BACKTEST_ASSUMPTIONS } from '../src/config';
 
@@ -135,6 +135,27 @@ describe('daily event-time NAV', () => {
     expect(result.totals.tradingCostRate).toBeCloseTo(0.0003, 12);
   });
 
+  it('reports dashboard-tier portfolio metrics and four benchmarks over the identical window', () => {
+    const result = runEventTimeBacktest({ asOfCutoff, signals: [longSignal], prices: daily, vix: calmVix, cashRates: sofr });
+    expect(result.portfolio).toMatchObject({
+      methodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
+      stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
+      strategy: { metrics: { averageBeta: 1 } },
+      benchmarks: {
+        spxBuyHold: { methodology: 'SPX_BUY_HOLD' },
+        betaMatchedStatic: { methodology: 'STATIC_SPX_CASH_AVERAGE_BETA' },
+        volatilityTarget: { methodology: 'PRIOR_20_SESSION_10PCT_VOL_TARGET_CAP_100' },
+        movingAverage200: { methodology: 'PRIOR_CLOSE_200DMA_RISK_CONTROL' },
+      },
+    });
+    expect(result.portfolio?.strategy.metrics).toHaveProperty('maxDrawdownDurationSessions');
+    expect(result.portfolio?.timingAlpha).toBeCloseTo(0, 12);
+    for (const benchmark of Object.values(result.portfolio!.benchmarks)) {
+      expect(benchmark.metrics).toHaveProperty('sortino');
+      expect(benchmark.sessions).toBe(result.totals.sessions);
+    }
+  });
+
   it('accrues positive SOFR ACT/360 cash carry across one-day and weekend gaps', () => {
     const flat = { ...longSignal, score: 40, targetExposure: 0.25, portfolioTier: 'HEADWIND' as const };
     const result = runEventTimeBacktest({ asOfCutoff, signals: [flat], prices: daily, vix: calmVix, cashRates: sofr });
@@ -176,8 +197,10 @@ describe('daily event-time NAV', () => {
   });
 
   it('charges cash rate plus financing spread for synthetic exposure above 100%', () => {
-    const levered = { ...longSignal, targetExposure: 1.5 };
-    const result = runEventTimeBacktest({ asOfCutoff, signals: [levered], prices: daily.map(row => ({ ...row, adjustedClose: 100 })), vix: calmVix, cashRates: sofr });
+    const result = simulateDailyPortfolio({
+      prices: daily.map(row => ({ ...row, adjustedClose: 100 })),
+      targetExposures: [1.5, 1.5, 1.5], vix: calmVix, cashRates: sofr,
+    });
     expect(result.status).toBe('OK');
     expect(result.nav[1].financingReturn).toBeCloseTo(-0.5 * 0.06 * 3 / 360, 12);
     expect(result.nav[1].cashReturn).toBe(0);
