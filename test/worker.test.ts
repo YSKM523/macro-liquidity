@@ -143,6 +143,27 @@ describe('/api/snapshot explicit channels', () => {
   });
 });
 
+describe('public error contract', () => {
+  it('returns only a stable code and request id while redacting the logged exception', async () => {
+    const errorSink = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const throwingEnv = {
+      ...env,
+      ASSETS: { fetch: vi.fn(async () => {
+        throw new Error('authorization=Bearer super-secret token=also-secret');
+      }) } as unknown as Fetcher,
+    };
+    const response = await worker.fetch(new Request('https://example.test/not-api', {
+      headers: { 'x-request-id': 'public-request-1' },
+    }), throwingEnv);
+    const body = await response.json() as any;
+    expect(response.status).toBe(500);
+    expect(body).toEqual({ error: 'internal_error', error_code: 'INTERNAL_ERROR', request_id: 'public-request-1' });
+    expect(JSON.stringify(body)).not.toContain('super-secret');
+    expect(errorSink).toHaveBeenCalledOnce();
+    expect(errorSink.mock.calls[0][0]).not.toMatch(/super-secret|also-secret/);
+  });
+});
+
 describe('/api/v1 governance routes', () => {
   it('returns strict joint legacy/governed provenance instead of permanently rejecting legacy history', async () => {
     const legacy = {

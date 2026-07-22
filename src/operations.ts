@@ -22,11 +22,28 @@ export function fullRebuildConfirmed(req: Request): boolean {
   return req.headers.get('x-confirm-full-rebuild') === 'FULL_REBUILD';
 }
 
-function safeField(key: string, value: unknown): unknown {
-  if (/(?:authorization|token|secret|api.?key|password)/i.test(key)) return '[REDACTED]';
-  if (typeof value === 'string') return value.slice(0, 512);
+const SECRET_KEY = /(?:authorization|token|secret|api.?key|password)/i;
+
+export function redactText(value: string): string {
+  return value
+    .replace(
+      /(["']?(?:authorization|access[_-]?token|refresh[_-]?token|token|api[_-]?key|password|secret)["']?\s*[:=]\s*["']?)(?:Bearer\s+)?([^"'\s,;}&]+)/gi,
+      '$1[REDACTED]',
+    )
+    .replace(/\bBearer\s+[^"'\s,;}&]+/gi, 'Bearer [REDACTED]');
+}
+
+function safeField(key: string, value: unknown, depth = 0): unknown {
+  if (SECRET_KEY.test(key)) return '[REDACTED]';
+  if (typeof value === 'string') return redactText(value).slice(0, 512);
   if (typeof value === 'number' || typeof value === 'boolean' || value == null) return value;
-  return String(value).slice(0, 512);
+  if (depth >= 4) return '[TRUNCATED]';
+  if (Array.isArray(value)) return value.slice(0, 32).map(child => safeField('', child, depth + 1));
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 64)
+      .map(([childKey, child]) => [childKey, safeField(childKey, child, depth + 1)]));
+  }
+  return redactText(String(value)).slice(0, 512);
 }
 
 export function structuredLog(
@@ -121,7 +138,7 @@ export async function deliverAlert(
       ? { outcome: 'SENT', status: response.status }
       : { outcome: 'FAILED', status: response.status, error: `HTTP_${response.status}` };
   } catch (error) {
-    return { outcome: 'FAILED', error: String((error as Error).message).slice(0, 512) };
+    return { outcome: 'FAILED', error: redactText(String((error as Error).message)).slice(0, 512) };
   }
 }
 

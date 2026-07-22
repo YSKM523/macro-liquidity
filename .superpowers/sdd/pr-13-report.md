@@ -67,6 +67,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - GREEN: `npx vitest run test/backup-restore.test.ts` passed 3/3; standalone restore returned `PASS`; typecheck, lint, and diff check passed.
 - The drill now applies migrations 0001–0010 to a source D1, seeds representative data, generates a schema/data SQL export, restores into a second D1, and compares all tables, indexes, triggers, table counts, migration metadata, governed metadata, and application queries. Its quote/comment-aware splitter never folds SQL whitespace; `alpha␠␠beta\n␠gamma` round-trips exactly.
 
+### Review remediation 5 — content redaction and stable public errors
+
+- RED: focused operations/worker tests failed because credentials embedded in an exception value reached logs and a rejected static-assets promise bypassed the outer catch.
+- GREEN: operations/worker tests passed 2 files / 39 tests; typecheck, lint, and diff check passed.
+- Structured logging now recursively sanitizes nested values and redacts bearer/key/token/password/secret content, not only secret-shaped field names. Unexpected and schema/DB errors emit stable server `error_code` values and return generic client errors with `request_id`; raw exception text is never returned. Static asset fetch is awaited inside the error boundary.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

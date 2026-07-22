@@ -30,7 +30,7 @@ The D1 lease remains the write-concurrency fence. `409` means another owner hold
 
 ## Structured logs and SLOs
 
-Search JSON logs by `event` and `run_id`. Key events are `ingest_start`, `ingest_series_attempt`, `snapshot_publication`, `ingest_complete`, `ingest_lock_contention`, `admin_refresh`, `alert_delivery`, and `request_failure`. Secret-shaped keys are redacted and errors are bounded. Targets are page availability 99.9%, post-release ingest success 99%, and mandatory critical-snapshot alerting.
+Search JSON logs by `event`, `run_id`, `request_id`, and stable `error_code`. Key events are `ingest_start`, `ingest_series_attempt`, `snapshot_publication`, `ingest_complete`, `ingest_lock_contention`, `admin_refresh`, `alert_delivery`, and `request_failure`. Secret-shaped keys and credential patterns embedded inside strings/nested objects are redacted, and values are bounded. Client error responses contain only a generic error, stable code, and request ID; investigate details in redacted server logs. Targets are page availability 99.9%, post-release ingest success 99%, and mandatory critical-snapshot alerting.
 
 For an ingest incident: check `/api/health`, ACTIVE `snapshot_state`, latest failed run, per-series event, then alert outcome. `SKIPPED` means provider configuration is absent; `FAILED` means delivery was attempted but not accepted. Correct configuration through the secret manager; never place credentials in logs or Git.
 

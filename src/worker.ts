@@ -83,6 +83,14 @@ async function loadLive(env: Env) {
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 
+function requestIdFor(req: Request): string {
+  return (req.headers.get('cf-ray') ?? req.headers.get('x-request-id')
+    ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0, 128);
+}
+
+const errorJson = (requestId: string, error: string, errorCode: string, status: number) =>
+  json({ error, error_code: errorCode, request_id: requestId }, status);
+
 function parseJsonObject(value: unknown): Record<string, unknown> {
   if (typeof value !== 'string') return {};
   try {
@@ -140,6 +148,7 @@ const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const requestId = requestIdFor(req);
     try {
     const url = new URL(req.url);
     const p = url.pathname;
@@ -193,7 +202,10 @@ export default {
           },
         }, health.ok ? 200 : 503);
       } catch (e) {
-        return json({ ok: false, stale: true, error: 'db_unreachable', message: String((e as any)?.message ?? e) }, 503);
+        structuredLog('request_failure', {
+          request_id: requestId, error_code: 'DB_UNREACHABLE', error: String((e as Error).message),
+        }, console.error);
+        return errorJson(requestId, 'service_unavailable', 'DB_UNREACHABLE', 503);
       }
     }
     if (p === '/api/snapshot' || p === '/api/v1/snapshot') {
@@ -222,7 +234,10 @@ export default {
           if (officialRow) assertSnapshotVersionMetadata(officialRow);
           if (nowcastRow) assertSnapshotVersionMetadata(nowcastRow);
         } catch (error) {
-          return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+          structuredLog('request_failure', {
+            request_id: requestId, error_code: 'SNAPSHOT_SCHEMA_INVALID', error: String((error as Error).message),
+          }, console.error);
+          return errorJson(requestId, 'schema_validation_failed', 'SNAPSHOT_SCHEMA_INVALID', 503);
         }
       }
       if (!official && !nowcast) return json({ official: null, nowcast: null, live, ingest, error: 'no_data' });
@@ -298,7 +313,7 @@ export default {
       } catch (error) {
         const message = String((error as any)?.message ?? error);
         if (/^(?:invalid|future) backtest as_of$/i.test(message)) {
-          return json({ error: 'invalid_as_of', message }, 400);
+          return errorJson(requestId, 'invalid_as_of', 'INVALID_AS_OF', 400);
         }
         throw error;
       }
@@ -313,7 +328,10 @@ export default {
           normalizedRows = rows.map(normalizeSnapshotProvenance);
           governedModels = governedSnapshotModels(normalizedRows);
         } catch (error) {
-          return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+          structuredLog('request_failure', {
+            request_id: requestId, error_code: 'SNAPSHOT_SCHEMA_INVALID', error: String((error as Error).message),
+          }, console.error);
+          return errorJson(requestId, 'schema_validation_failed', 'SNAPSHOT_SCHEMA_INVALID', 503);
         }
       }
       return json({
@@ -353,7 +371,10 @@ export default {
           snapshot_provenance: summarizeSnapshotProvenance(normalizedRows), result,
         });
       } catch (error) {
-        return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+        structuredLog('request_failure', {
+          request_id: requestId, error_code: 'SNAPSHOT_SCHEMA_INVALID', error: String((error as Error).message),
+        }, console.error);
+        return errorJson(requestId, 'schema_validation_failed', 'SNAPSHOT_SCHEMA_INVALID', 503);
       }
     }
     if (p === '/api/v1/model') {
@@ -363,19 +384,22 @@ export default {
       let range: { from: string; to: string };
       try {
         range = parseDateRange(url);
-      } catch (error) {
-        return json({ api_version: 'v1', error: 'invalid_query', message: String((error as Error).message) }, 400);
+      } catch {
+        return errorJson(requestId, 'invalid_query', 'INVALID_QUERY', 400);
       }
       const format = url.searchParams.get('format') ?? 'json';
       if (format !== 'json' && format !== 'csv') {
-        return json({ api_version: 'v1', error: 'invalid_query', message: 'format must be json or csv' }, 400);
+        return errorJson(requestId, 'invalid_query', 'INVALID_QUERY', 400);
       }
       const rows = await exportOfficialSnapshots(env.DB, range.from, range.to);
       let normalizedRows: NormalizedSnapshotRow[];
       try {
         normalizedRows = rows.map(normalizeSnapshotProvenance);
       } catch (error) {
-        return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+        structuredLog('request_failure', {
+          request_id: requestId, error_code: 'SNAPSHOT_SCHEMA_INVALID', error: String((error as Error).message),
+        }, console.error);
+        return errorJson(requestId, 'schema_validation_failed', 'SNAPSHOT_SCHEMA_INVALID', 503);
       }
       if (format === 'csv') {
         return new Response(snapshotsToCsv(normalizedRows), {
@@ -397,8 +421,6 @@ export default {
     }
     if (p === '/api/admin/refresh' && req.method === 'POST') {
       const attemptedAt = new Date().toISOString();
-      const requestId = (req.headers.get('cf-ray') ?? req.headers.get('x-request-id')
-        ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0, 128);
       const authMethod = authenticateAdmin(req, env);
       const rebuildAll = url.searchParams.get('all') === '1';
       const confirmed = !rebuildAll || fullRebuildConfirmed(req);
@@ -411,19 +433,20 @@ export default {
       if (!authMethod) {
         await audit('UNAUTHORIZED');
         structuredLog('admin_refresh', { request_id: requestId, authorized: false, rebuild_all: rebuildAll, outcome: 'UNAUTHORIZED' });
-        return json({ error: 'unauthorized' }, 401);
+        return errorJson(requestId, 'unauthorized', 'ADMIN_UNAUTHORIZED', 401);
       }
       if (!await adminRateLimitAllowed(env.DB, attemptedAt)) {
         await audit('RATE_LIMITED');
         structuredLog('admin_refresh', {
           request_id: requestId, auth_method: authMethod, rebuild_all: rebuildAll, outcome: 'RATE_LIMITED',
         });
-        return json({ error: 'rate_limited', retry_after_seconds: 60 }, 429);
+        return json({ error: 'rate_limited', error_code: 'ADMIN_RATE_LIMITED', request_id: requestId, retry_after_seconds: 60 }, 429);
       }
       if (!confirmed) {
         await audit('CONFIRMATION_REQUIRED');
         structuredLog('admin_refresh', { request_id: requestId, auth_method: authMethod, rebuild_all: true, outcome: 'CONFIRMATION_REQUIRED' });
-        return json({ error: 'confirmation_required', required_header: 'x-confirm-full-rebuild: FULL_REBUILD' }, 428);
+        return json({ error: 'confirmation_required', error_code: 'REBUILD_CONFIRMATION_REQUIRED', request_id: requestId,
+          required_header: 'x-confirm-full-rebuild: FULL_REBUILD' }, 428);
       }
       try {
         const result = await runIngest(env, rebuildAll);
@@ -438,10 +461,12 @@ export default {
       }
     }
     // not an API route → static assets
-    return env.ASSETS.fetch(req);
+    return await env.ASSETS.fetch(req);
     } catch (e) {
-      structuredLog('request_failure', { error: String((e as Error).message) }, console.error);
-      return json({ error: 'internal', message: String((e as any)?.message ?? e) }, 500);
+      structuredLog('request_failure', {
+        request_id: requestId, error_code: 'INTERNAL_ERROR', error: String((e as Error).message),
+      }, console.error);
+      return errorJson(requestId, 'internal_error', 'INTERNAL_ERROR', 500);
     }
   },
 

@@ -20,6 +20,19 @@ describe('production operations controls', () => {
     expect(String(record.error).length).toBeLessThanOrEqual(512);
   });
 
+  it('redacts credentials embedded in values and nested error content', () => {
+    const sink = vi.fn();
+    const record = structuredLog('request_failure', {
+      error_code: 'UPSTREAM_FAILURE',
+      error: 'authorization=Bearer abc.def api_key=sk-live password=hunter2',
+      context: { url: 'https://x.test?token=top-secret', nested: ['Bearer another-secret'] },
+    }, sink);
+    const serialized = JSON.stringify(record);
+    expect(serialized).toContain('UPSTREAM_FAILURE');
+    expect(serialized).not.toMatch(/abc\.def|sk-live|hunter2|top-secret|another-secret/);
+    expect(serialized).toContain('[REDACTED]');
+  });
+
   it('supports legacy bearer and exact Access service-token credentials', () => {
     const bindings = { ADMIN_TOKEN: 'legacy', ACCESS_CLIENT_ID: 'id', ACCESS_CLIENT_SECRET: 'secret' };
     expect(authenticateAdmin(new Request('https://x', { headers: { authorization: 'Bearer legacy' } }), bindings))
