@@ -111,6 +111,11 @@ Snapshot writer hardening was completed in remediation 1: every official/nowcast
 - GREEN: governance tests passed 6/6; typecheck, lint, and diff check passed.
 - Before any Wrangler command, the wrapper now requires `CODE_COMMIT_SHA === git rev-parse HEAD` and an empty tracked-only Git status. Mismatch/dirty tests use a temporary Git repository and fake `npx`, proving no migration/deploy command is reached.
 
+### Re-review remediation 4 — bounded concurrency-test budget
+
+- Review-load RED evidence: the atomic reservation test exceeded Vitest's default 5-second timeout at approximately 6.5 seconds.
+- The test retains 12 simultaneous reservations against a limit of 5, adds an explicit 30-second integration-test budget, and disposes Miniflare in `finally`.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

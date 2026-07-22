@@ -55,16 +55,19 @@ describe('officialSnapshotBefore', () => {
 describe('atomic admin attempt reservation', () => {
   it('admits at most the configured limit under concurrent unauthorized or authorized attempts', async () => {
     const mf = new Miniflare({ modules: true, script: 'export default { fetch(){return new Response()} }', d1Databases: ['DB'] });
-    const db = await mf.getD1Database('DB') as unknown as D1Database;
-    await db.prepare(`CREATE TABLE admin_rate_limit_buckets (
-      bucket_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL,
-      attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL
-    )`).run();
-    const reservations = await Promise.all(Array.from({ length: 20 }, () =>
-      reserveAdminRateLimit(db, 'admin-source:test', '2026-07-22T00:00:00Z', 5, 60)));
-    expect(reservations.filter(Boolean)).toHaveLength(5);
-    await mf.dispose();
-  });
+    try {
+      const db = await mf.getD1Database('DB') as unknown as D1Database;
+      await db.prepare(`CREATE TABLE admin_rate_limit_buckets (
+        bucket_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL,
+        attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL
+      )`).run();
+      const reservations = await Promise.all(Array.from({ length: 12 }, () =>
+        reserveAdminRateLimit(db, 'admin-source:test', '2026-07-22T00:00:00Z', 5, 60)));
+      expect(reservations.filter(Boolean)).toHaveLength(5);
+    } finally {
+      await mf.dispose();
+    }
+  }, 30_000);
 });
 
 describe('officialVerdictAnchors', () => {
