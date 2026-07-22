@@ -70,7 +70,7 @@ describe('purged folds and frozen holdout', () => {
 
   it('freezes the registered holdout date, protocol digest, weights, and q10 from pre-holdout rows', () => {
     expect(HOLDOUT_REGISTRATION.holdoutFrom).toBe('2026-07-23');
-    expect(HOLDOUT_REGISTRATION.protocolDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(HOLDOUT_REGISTRATION.protocolDigest).toBe('ceb72ac5a72619be17ca208f02f1229dca337d9d1f754074c009b65ce16d9b2e');
     const before = runFrozenHoldout(rows);
     const later = runFrozenHoldout([...rows, snap('2026-07-23', 101), snap('2026-11-01', 102, { spx: 300 })]);
     expect(later.frozen).toEqual(before.frozen);
