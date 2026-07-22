@@ -1,0 +1,42 @@
+{
+  "protocol": "SCORE_STRESS_DIAGNOSTICS_V1",
+  "registered_at": "2026-07-22T20:36:03Z",
+  "registration_commit": "d7aba3c2b5bd79cfaf7847cdc82770abb499fdcd",
+  "champion_change": false,
+  "score_buckets": [[0, 20], [20, 35], [35, 45], [45, 55], [55, 65], [65, 80], [80, 100]],
+  "bucket_interval_rule": "LEFT_CLOSED_RIGHT_OPEN_EXCEPT_FINAL_CLOSED",
+  "horizon_weeks": [4, 8, 13],
+  "entry_rule": "FIRST_ACTUAL_PIT_CLOSE_STRICTLY_AFTER_TRADABLE_AT_ELIGIBILITY",
+  "exit_rule": "FIRST_ACTUAL_PIT_CLOSE_ON_OR_AFTER_ENTRY_PLUS_HORIZON_CALENDAR_DAYS",
+  "outcome_tolerance_days": 14,
+  "return_interval": "ENTRY_EXCLUDED_EXIT_INCLUDED",
+  "independent_rule": "GREEDY_INTERVAL_NON_OVERLAP",
+  "quantile_rule": "TYPE7_LINEAR",
+  "negative_rule": "RETURN_LT_ZERO",
+  "minimum_probability_n": 5,
+  "bh": {
+    "alpha": 0.05,
+    "family_rule": "ISOLATED_BY_FAMILY",
+    "ranking_rule": "STABLE_ASCENDING_P_THEN_HYPOTHESIS_ID",
+    "missing_p_value": 1
+  },
+  "dsr": {
+    "method": "BAILEY_LOPEZ_DE_PRADO_2014",
+    "expected_maximum_rule": "EULER_MASCHERONI_INTERPOLATION_FROM_COMPLETE_TRIAL_SHARPE_VARIANCE",
+    "probability_rule": "PSR_WITH_SAMPLE_T_SKEWNESS_AND_NON_EXCESS_KURTOSIS",
+    "incomplete_trial_rule": "TRIAL_UNIVERSE_INCOMPLETE_NULL"
+  },
+  "events": [
+    ["2018_Q4", "2018-10-01", "2019-01-01"],
+    ["2019_REPO_STRESS", "2019-09-16", "2019-11-01"],
+    ["2020_COVID", "2020-02-19", "2020-05-01"],
+    ["2021_TGA_RRP", "2021-02-01", "2022-01-01"],
+    ["2022_HIKING_QT", "2022-03-16", "2023-01-01"],
+    ["2023_REGIONAL_BANKS", "2023-03-08", "2023-05-02"],
+    ["2024_YEN_CARRY", "2024-07-01", "2024-09-01"],
+    ["2025_2026_RESERVE_MGMT", "2025-01-01", "2027-01-01"]
+  ],
+  "event_interval_rule": "ENTRY_DATE_LEFT_CLOSED_RIGHT_OPEN",
+  "candidate_rule": "INDEPENDENTLY_VERSIONED_PIT_ARTIFACT_OR_CANDIDATE_NOT_PROVIDED",
+  "promotion_threshold": null
+}

@@ -1,0 +1,52 @@
+{
+  "schema_version": "HYPOTHESIS_LEDGER_V1",
+  "append_only": true,
+  "registered_at": "2026-07-22T20:36:03Z",
+  "registration_commit": "d7aba3c2b5bd79cfaf7847cdc82770abb499fdcd",
+  "entries": [
+    {
+      "hypothesis_id": "NETLIQ_CHALLENGER_V1",
+      "family": "NET_LIQUIDITY_CHALLENGER",
+      "lifecycle": "INVALIDATED",
+      "direction_count": 2,
+      "window_count": 3,
+      "parameter_count": 2,
+      "p_value": null,
+      "formal_daily_sharpe": null,
+      "reason": "INVALIDATED_BY_REVIEW"
+    },
+    {
+      "hypothesis_id": "NETLIQ_CHALLENGER_V2",
+      "family": "NET_LIQUIDITY_CHALLENGER",
+      "lifecycle": "FAILED_GATE",
+      "direction_count": 2,
+      "window_count": 3,
+      "parameter_count": 2,
+      "p_value": null,
+      "formal_daily_sharpe": null,
+      "reason": "CURRENT_VINTAGE_RETROSPECTIVE_DROP_RESEARCH"
+    },
+    {
+      "hypothesis_id": "RESERVE_ADEQUACY_V1",
+      "family": "RESERVE_ADEQUACY_CHALLENGER",
+      "lifecycle": "INVALIDATED",
+      "direction_count": 1,
+      "window_count": 3,
+      "parameter_count": 4,
+      "p_value": null,
+      "formal_daily_sharpe": null,
+      "reason": "INVALIDATED_BY_REVIEW"
+    },
+    {
+      "hypothesis_id": "RESERVE_ADEQUACY_V2",
+      "family": "RESERVE_ADEQUACY_CHALLENGER",
+      "lifecycle": "FAILED_GATE",
+      "direction_count": 1,
+      "window_count": 3,
+      "parameter_count": 4,
+      "p_value": null,
+      "formal_daily_sharpe": null,
+      "reason": "CURRENT_VINTAGE_RETROSPECTIVE_DROP_RESEARCH"
+    }
+  ]
+}
