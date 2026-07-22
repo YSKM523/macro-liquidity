@@ -4,7 +4,7 @@ Base: `ba74a6c`
 
 Branch: `codex/pr-12-reserve-adequacy`
 
-Candidate range: `7f64d10..HEAD`
+Implementation range: `7f64d10..9258a0a`
 
 ## 1. 修改摘要
 
@@ -31,7 +31,12 @@ Candidate range: `7f64d10..HEAD`
 
 ## 5. 测试结果
 
-待最终 fresh full verification 与 migration twice 后填写。
+- Focused reserve suite: 8 files / 29 tests passed.
+- Fresh full Vitest: 48 files / 633 tests passed.
+- `env -u NODE_OPTIONS npx tsc --noEmit`: passed.
+- `git diff --check ba74a6c..HEAD`: passed.
+- Fresh local migrations at `/tmp/pr12-migrations.CbpWa7`: 0001–0009 passed; immediate second run returned `No migrations to apply!`.
+- Worktree clean before review package generation.
 
 ## 6. 已知限制
 
