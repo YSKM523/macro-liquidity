@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HOLDOUT_REGISTRATION, buildForwardPairs, buildPurgedFolds, greedyIndependentPairs,
-  buildFormalForwardPairs, purgeTrainingPairs, runFrozenHoldout, runPurgedValidation,
+  buildFormalForwardPairs, purgeTrainingPairs, runFormalValidation, runFrozenHoldout, runPurgedValidation,
 } from '../src/evaluation-protocol';
 import type { ValidationSnap } from '../src/evaluation-protocol';
 import { addDays } from '../src/backtest';
@@ -77,6 +77,7 @@ describe('date interval labels', () => {
         score: 60, verdict: 'BULLISH', targetExposure: 1, factors: { netliqTrend: 60 },
         modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
         codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'run-formal',
+        recordedAt: '2026-07-23T19:00:00Z', dataCutoff: '2026-07-23T17:00:00Z', createdAt: '2026-07-23T19:00:01Z',
       }],
       prices: [
         { date: '2026-07-22', adjustedClose: 50, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-22T23:00:00Z', dataRunId: 'px-run', activationRunId: 'act-1', activatedAt: '2026-07-23T00:00:00Z' },
@@ -87,6 +88,7 @@ describe('date interval labels', () => {
     const [label] = buildFormalForwardPairs(input);
     expect(label).toMatchObject({ modelDate: '2026-07-22', signalDate: '2026-07-24', entryDate: '2026-07-24', outcomeDate: '2026-10-23' });
     expect(label.fwd).toBeCloseTo(.1);
+    expect(runFormalValidation(input).holdout).toMatchObject({ status: 'PENDING_MATURITY', overlappingN: 1 });
   });
 
   it('fails formal labels closed for non-PIT daily prices', () => {
@@ -94,6 +96,52 @@ describe('date interval labels', () => {
       { date: '2026-07-24', adjustedClose: 100, source: 'synthetic', provenanceStatus: 'SYNTHETIC_BACKFILL' },
     ], vix: [], cashRates: [] };
     expect(() => buildFormalForwardPairs(input)).toThrow(/PIT_RAW/);
+  });
+
+  it('fails formal validation closed on empty execution coverage and malformed canonical clocks', () => {
+    const governedSignal = {
+      signalDate: '2026-07-22', decisionAt: '2026-07-23T12:00:00Z', tradableAt: '2026-07-23T12:00:00Z',
+      score: 60, verdict: 'BULLISH', targetExposure: 1, factors: { netliqTrend: 60 },
+      modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
+      codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'run-formal',
+      recordedAt: '2026-07-23T13:00:00Z', dataCutoff: '2026-07-23T11:00:00Z', createdAt: '2026-07-23T13:00:01Z',
+    };
+    const empty = runFormalValidation({ asOfCutoff: '2026-12-01T00:00:00Z', signals: [governedSignal], prices: [], vix: [], cashRates: [] });
+    expect(empty).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'INVALID_FORMAL_INPUT' });
+
+    const badSignal = runFormalValidation({
+      asOfCutoff: '2026-12-01T00:00:00Z', signals: [{ ...governedSignal, recordedAt: 'not-a-clock' }],
+      prices: [{ date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-24T22:00:00Z', dataRunId: 'px', activationRunId: 'act', activatedAt: '2026-07-24T23:00:00Z' }], vix: [], cashRates: [],
+    });
+    expect(badSignal).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'INVALID_FORMAL_INPUT' });
+
+    const badPrice = runFormalValidation({
+      asOfCutoff: '2026-12-01T00:00:00Z', signals: [governedSignal],
+      prices: [{ date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-24T22:00:00Z', dataRunId: 'px', activationRunId: 'act', activatedAt: 'not-a-clock' }], vix: [], cashRates: [],
+    });
+    expect(badPrice).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'INVALID_FORMAL_INPUT' });
+  });
+
+  it('validates superseded signals and reports execution accounting', () => {
+    const input: EventBacktestInputs = {
+      asOfCutoff: '2026-12-01T00:00:00Z',
+      signals: [0, 1].map(index => ({
+        signalDate: '2026-07-22', decisionAt: `2026-07-23T12:00:0${index}Z`, tradableAt: '2026-07-23T12:00:01Z',
+        score: 60 + index, verdict: 'BULLISH', targetExposure: 1, factors: { netliqTrend: 60 + index },
+        modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
+        codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: `run-${index}`,
+        recordedAt: '2026-07-23T13:00:00Z', dataCutoff: '2026-07-23T11:00:00Z', createdAt: '2026-07-23T13:00:01Z',
+      })),
+      prices: [
+        { date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-24T22:00:00Z', dataRunId: 'px', activationRunId: 'act-1', activatedAt: '2026-07-24T23:00:00Z' },
+        { date: '2026-10-23', adjustedClose: 110, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-10-23T22:00:00Z', dataRunId: 'px', activationRunId: 'act-2', activatedAt: '2026-10-23T23:00:00Z' },
+      ], vix: [], cashRates: [],
+    };
+    expect(runFormalValidation(input)).toMatchObject({
+      executionCoverage: { signalCount: 2, executionCount: 1, supersededCount: 1, unexecutedCount: 0 },
+    });
+    input.signals[0] = { ...input.signals[0], configHash: 'b'.repeat(64) };
+    expect(runFormalValidation(input)).toMatchObject({ status: 'DATA_INCOMPLETE' });
   });
 });
 

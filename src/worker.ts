@@ -31,7 +31,7 @@ import { runBacktest } from './backtest';
 import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
-import { runFormalValidation } from './evaluation-protocol';
+import { formalValidationUnavailable, runFormalValidation } from './evaluation-protocol';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
 import {
@@ -398,29 +398,35 @@ export default {
       });
     }
     if (p === '/api/walkforward') {
-      const [rows, eventInputs] = await Promise.all([loadBacktestRows(env.DB), loadEventBacktestInputs(env.DB)]);
+      const [rows, validation] = await Promise.all([
+        loadBacktestRows(env.DB),
+        loadEventBacktestInputs(env.DB)
+          .then(runFormalValidation)
+          .catch(error => formalValidationUnavailable('EVENT_INPUT_LOAD_FAILED', String((error as Error).message))),
+      ]);
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
-      return json({ ...runWalkForward(snaps), validation: runFormalValidation(eventInputs) });
+      return json({ ...runWalkForward(snaps), validation });
     }
     if (p === '/api/robustness' || p === '/api/v1/robustness') {
       const v1 = p === '/api/v1/robustness';
-      const [rows, eventInputs] = await Promise.all([loadBacktestRows(env.DB), loadEventBacktestInputs(env.DB)]);
+      const [rows, validation] = await Promise.all([
+        loadBacktestRows(env.DB),
+        loadEventBacktestInputs(env.DB)
+          .then(runFormalValidation)
+          .catch(error => formalValidationUnavailable('EVENT_INPUT_LOAD_FAILED', String((error as Error).message))),
+      ]);
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({
           date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
-      const result = { ...runRobustness(snaps), validation: runFormalValidation(eventInputs) };
+      const result = { ...runRobustness(snaps), validation };
       if (!v1) return json(result);
       try {
-        const normalizedRows = eventInputs.signals.map(signal => normalizeSnapshotProvenance({
-          model_version: signal.modelVersion, config_hash: signal.configHash,
-          code_commit_sha: signal.codeCommitSha, data_run_id: signal.dataRunId,
-          data_cutoff: signal.dataCutoff, decision_at: signal.decisionAt, created_at: signal.createdAt,
-        }));
+        const normalizedRows = rows.map(normalizeSnapshotProvenance);
         return json({
           api_version: 'v1', runtime_model: presentModelDescriptor(await resolveModelIdentity(env)),
           snapshot_models: governedSnapshotModels(normalizedRows),

@@ -515,6 +515,29 @@ describe('/api/robustness legacy methodology', () => {
       status: 'DATA_INCOMPLETE', reason: 'MODEL_COHORT_MISMATCH', folds: [], aggregateMetrics: null,
     });
   });
+
+  it('preserves legacy robustness when formal event input loading fails', async () => {
+    vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('event input unavailable'));
+    const response = await worker.fetch(new Request('https://example.test/api/robustness'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.strategy.methodology).toBe('LEGACY_WEEKLY');
+    expect(body.validation).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'EVENT_INPUT_LOAD_FAILED' });
+  });
+
+  it('keeps v1 outer provenance bound to the legacy robustness row cohort', async () => {
+    dbState.backtestRows = [{
+      date: '2024-01-01', score: 60, spx: 100, verdict: 'BULLISH', netliq_dir: 'UP', vix_eod: 20,
+      factors_json: '{}', pit_status: 'PIT', model_version: CHAMPION_MODEL_VERSION,
+      config_hash: championConfigDigest(), code_commit_sha: '1111111111111111111111111111111111111111', data_run_id: 'outer-run',
+      data_cutoff: '2024-01-01T11:00:00Z', decision_at: '2024-01-01T12:00:00Z', created_at: '2024-01-01T12:00:01Z',
+    }];
+    dbState.eventInputs = formalEventInputs(1);
+    const response = await worker.fetch(new Request('https://example.test/api/v1/robustness'), env);
+    const body = await response.json() as any;
+    expect(body.snapshot_models).toEqual([expect.objectContaining({ codeCommitSha: '1111111111111111111111111111111111111111', dataRunId: 'outer-run' })]);
+    expect(body.snapshot_provenance).toMatchObject({ totalCount: 1, governedCount: 1 });
+  });
 });
 
 describe('/api/walkforward additive validation', () => {
@@ -530,6 +553,15 @@ describe('/api/walkforward additive validation', () => {
     const body = await response.json() as any;
     expect(body.methodology).toBe('LEGACY_9_SIGNAL_DIAGNOSTIC');
     expect(body.validation).toMatchObject({ status: 'INSUFFICIENT_SAMPLE', protocol: { protocol: 'PURGED_VALIDATION_V1' } });
+  });
+
+  it('preserves legacy walk-forward when formal event input loading fails', async () => {
+    vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('event input unavailable'));
+    const response = await worker.fetch(new Request('https://example.test/api/walkforward'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.methodology).toBe('LEGACY_9_SIGNAL_DIAGNOSTIC');
+    expect(body.validation).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'EVENT_INPUT_LOAD_FAILED' });
   });
 });
 

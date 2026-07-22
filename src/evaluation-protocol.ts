@@ -3,6 +3,7 @@ import { CHAMPION_MODEL_VERSION, championConfigDigest, sha256Hex } from './model
 import { CHAMPION_MODEL_CONFIG, SCORING_FACTOR_KEYS } from './config';
 import { scheduleExecutions } from './event-backtest';
 import type { EventBacktestInputs, EventSignal, ScheduledExecution } from './event-backtest';
+import { isoTimestampMs } from './pit';
 import { evaluateValidationMetrics, quantile } from './validation-metrics';
 import type { ValidationMetrics } from './validation-metrics';
 
@@ -166,21 +167,68 @@ function formalProvenance(signal: EventSignal): 'GOVERNED' | 'LEGACY' | 'INVALID
   return 'GOVERNED';
 }
 
-function prepareFormal(input: EventBacktestInputs): { pairs: ForwardPair[]; executions: ScheduledExecution[] } {
-  if (typeof input.asOfCutoff !== 'string' || !Number.isFinite(Date.parse(input.asOfCutoff))) {
+interface FormalExecutionCoverage {
+  signalCount: number;
+  executionCount: number;
+  supersededCount: number;
+  unexecutedCount: number;
+}
+
+function validateFormalSignal(signal: EventSignal, cutoffMs: number): void {
+  const provenance = formalProvenance(signal);
+  if (provenance === 'INVALID') throw new Error('formal validation requires complete signal provenance');
+  if (provenance === 'GOVERNED' && (signal.modelVersion !== HOLDOUT_REGISTRATION.modelVersion
+    || signal.configHash !== HOLDOUT_REGISTRATION.configHash)) throw new Error('formal validation model cohort mismatch');
+  if (signal.validationIssue || signal.factors == null) throw new Error('formal validation requires valid persisted scoring factors');
+  if (signal.policyIssue || (signal.verdict !== 'BULLISH' && signal.verdict !== 'BEARISH' && signal.verdict !== 'NEUTRAL')
+    || signal.targetExposure == null) throw new Error('formal validation requires complete persisted policy fields');
+  if (!signal.recordedAt || !signal.dataCutoff || !signal.createdAt) {
+    throw new Error('formal validation requires complete signal clocks');
+  }
+  const decisionMs = isoTimestampMs(signal.decisionAt, 'formal decisionAt');
+  const tradableMs = isoTimestampMs(signal.tradableAt, 'formal tradableAt');
+  const recordedMs = isoTimestampMs(signal.recordedAt, 'formal recordedAt');
+  const dataCutoffMs = isoTimestampMs(signal.dataCutoff, 'formal dataCutoff');
+  const createdMs = isoTimestampMs(signal.createdAt, 'formal createdAt');
+  if ([decisionMs, tradableMs, recordedMs, dataCutoffMs, createdMs].some(value => value >= cutoffMs)) {
+    throw new Error('formal validation signal not visible at cutoff');
+  }
+  if (dataCutoffMs > decisionMs || decisionMs > tradableMs || recordedMs < decisionMs || createdMs < decisionMs) {
+    throw new Error('formal validation signal clock ordering invalid');
+  }
+}
+
+function prepareFormal(input: EventBacktestInputs): {
+  pairs: ForwardPair[];
+  executions: ScheduledExecution[];
+  executionCoverage: FormalExecutionCoverage;
+} {
+  if (typeof input.asOfCutoff !== 'string') {
     throw new Error('formal validation requires an explicit as-of cutoff');
   }
+  const cutoffMs = isoTimestampMs(input.asOfCutoff, 'formal as-of cutoff');
+  input.signals.forEach(signal => validateFormalSignal(signal, cutoffMs));
+  if (input.signals.length > 0 && input.prices.length === 0) throw new Error('formal validation has no execution price coverage');
   for (const price of input.prices) {
     if (price.provenanceStatus !== 'PIT_RAW') throw new Error('formal validation requires PIT_RAW daily prices');
     if (!price.fetchedAt || !price.dataRunId || !price.activationRunId || !price.activatedAt) {
       throw new Error('formal validation requires complete daily price provenance');
     }
-    if (Date.parse(price.activatedAt) >= Date.parse(input.asOfCutoff)) throw new Error('formal validation price not visible at cutoff');
-  }
-  if (input.signals.some(signal => signal.validationIssue || signal.factors == null)) {
-    throw new Error('formal validation requires valid persisted scoring factors');
+    const fetchedMs = isoTimestampMs(price.fetchedAt, 'formal price fetchedAt');
+    const activatedMs = isoTimestampMs(price.activatedAt, 'formal price activatedAt');
+    if (fetchedMs > activatedMs) throw new Error('formal validation price fetched after activation');
+    if (activatedMs >= cutoffMs) throw new Error('formal validation price not visible at cutoff');
   }
   const schedule = scheduleExecutions(input.signals, input.prices);
+  const executionCoverage = {
+    signalCount: input.signals.length,
+    executionCount: schedule.executions.length,
+    supersededCount: schedule.superseded.length,
+    unexecutedCount: schedule.unexecuted.length,
+  };
+  if (schedule.unexecuted.length > 0 || (input.signals.length > 0 && schedule.executions.length === 0)) {
+    throw new Error('formal validation has unexecuted signal coverage');
+  }
   const prices = [...input.prices].sort((left, right) => left.date.localeCompare(right.date));
   const pairs: ForwardPair[] = [];
   for (let startIdx = 0; startIdx < schedule.executions.length; startIdx++) {
@@ -204,7 +252,7 @@ function prepareFormal(input: EventBacktestInputs): { pairs: ForwardPair[]; exec
       codeCommitSha: execution.codeCommitSha, dataRunId: execution.dataRunId,
     });
   }
-  return { pairs, executions: schedule.executions };
+  return { pairs, executions: schedule.executions, executionCoverage };
 }
 
 export function buildFormalForwardPairs(input: EventBacktestInputs): ForwardPair[] {
@@ -502,19 +550,24 @@ export function runFormalValidation(input: EventBacktestInputs) {
       provenanceStatus: formalProvenance(execution), modelVersion: execution.modelVersion,
       configHash: execution.configHash, codeCommitSha: execution.codeCommitSha, dataRunId: execution.dataRunId,
     }));
-    return runValidationPairs(prepared.pairs, prospective);
+    return { ...runValidationPairs(prepared.pairs, prospective), executionCoverage: prepared.executionCoverage };
   } catch (error) {
-    const protocol = { ...VALIDATION_PROTOCOL, protocolDigest: HOLDOUT_REGISTRATION.protocolDigest };
-    const provenance = { totalCount: 0, governedCount: 0, legacyCount: 0, invalidCount: 0, completeness: 'INCOMPLETE' as const };
-    return {
-      status: 'DATA_INCOMPLETE' as const, reason: 'INVALID_FORMAL_INPUT', detail: String((error as Error).message),
-      protocol, provenance, cohort: { governedCount: 0, modelCohorts: [], codeCommitShas: [], dataRunCount: 0 },
-      folds: [], aggregateMetrics: null, overlappingN: 0, independentN: 0,
-      holdout: {
-        status: 'DATA_INCOMPLETE' as const, reason: 'INVALID_FORMAL_INPUT', registration: HOLDOUT_REGISTRATION,
-        provenance, cohort: { governedCount: 0, modelCohorts: [], codeCommitShas: [], dataRunCount: 0 },
-        tailStatus: 'UNAVAILABLE_AT_REGISTRATION' as const, overlappingN: 0, independentN: 0, metrics: null,
-      },
-    };
+    const detail = String((error as Error).message);
+    return formalValidationUnavailable(/model cohort mismatch/i.test(detail) ? 'MODEL_COHORT_MISMATCH' : 'INVALID_FORMAL_INPUT', detail);
   }
+}
+
+export function formalValidationUnavailable(reason: string, detail?: string) {
+  const protocol = { ...VALIDATION_PROTOCOL, protocolDigest: HOLDOUT_REGISTRATION.protocolDigest };
+  const provenance = { totalCount: 0, governedCount: 0, legacyCount: 0, invalidCount: 0, completeness: 'INCOMPLETE' as const };
+  return {
+    status: 'DATA_INCOMPLETE' as const, reason, ...(detail ? { detail } : {}),
+    protocol, provenance, cohort: { governedCount: 0, modelCohorts: [] as string[], codeCommitShas: [] as string[], dataRunCount: 0 },
+    folds: [], aggregateMetrics: null, overlappingN: 0, independentN: 0,
+    holdout: {
+      status: 'DATA_INCOMPLETE' as const, reason, registration: HOLDOUT_REGISTRATION,
+      provenance, cohort: { governedCount: 0, modelCohorts: [] as string[], codeCommitShas: [] as string[], dataRunCount: 0 },
+      tailStatus: 'UNAVAILABLE_AT_REGISTRATION' as const, overlappingN: 0, independentN: 0, metrics: null,
+    },
+  };
 }
