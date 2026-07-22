@@ -120,6 +120,36 @@ describe('provider fallback and provenance', () => {
     expect(result).toMatchObject({ status: 'FAILED', reasonCode: 'INVALID_TIMESTAMP' });
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  it('applies the same transient policy to Stooq HTTP', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 429 }))
+      .mockResolvedValueOnce(new Response(stooqQuote('^SPX', '2026-07-17', '20:00:00', 5000)));
+    const provider = new StooqMarketDataProvider(fetchFn as any, { sleep: async () => undefined });
+
+    const result = await provider.fetchQuote({
+      symbol: '^spx', fetchedAt: '2026-07-17T22:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({ status: 'OK', sourceName: 'Stooq' });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('applies the same transient policy to live FRED fallback HTTP', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ observations: [{ date: '2026-07-17', value: '5000' }] }));
+    const provider = new FredMarketDataProvider(
+      'key', fetchFn as any, { sleep: async () => undefined },
+    );
+
+    const result = await provider.fetchQuote({
+      symbol: 'SP500', fetchedAt: '2026-07-17T22:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({ status: 'OK', sourceName: 'FRED', value: 5000 });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
   it('uses the timestamp paired with the last valid Yahoo history close', async () => {
     const fetchFn = vi.fn(async () => Response.json({ chart: { result: [{
       timestamp: [1784232000, 1784318400],
@@ -318,7 +348,9 @@ describe('provider fallback and provenance', () => {
     const points = await (fetchDxyDaily as any)({ fetchedAt: '2026-07-17T22:00:00.000Z' });
 
     expect(points).toEqual([{ date: '2026-07-16', value: 98 }, { date: '2026-07-17', value: 99 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('DX-Y.NYB'))).toHaveLength(3);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('dx.f'))).toHaveLength(1);
     expect(fetchMock.mock.calls.every(([input]) => /DX-Y\.NYB|dx\.f/.test(String(input)))).toBe(true);
   });
 

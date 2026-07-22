@@ -7,7 +7,7 @@ describe('bounded HTTP retry policy', () => {
       .mockResolvedValueOnce(new Response('', { status: 503 }))
       .mockResolvedValueOnce(new Response('', { status: 429 }))
       .mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    const sleep = vi.fn(async () => undefined);
+    const sleep = vi.fn(async (_delayMs: number) => undefined);
 
     const response = await fetchWithRetry(fetchFn, 'https://example.test', undefined, {
       maxAttempts: 3, baseDelayMs: 100, maxDelayMs: 500, random: () => 1, sleep,
@@ -20,7 +20,7 @@ describe('bounded HTTP retry policy', () => {
 
   it('caps delay and attempts even when callers request excessive values', async () => {
     const fetchFn = vi.fn(async () => new Response('', { status: 503 }));
-    const sleep = vi.fn(async () => undefined);
+    const sleep = vi.fn(async (_delayMs: number) => undefined);
 
     const response = await fetchWithRetry(fetchFn, 'https://example.test', undefined, {
       maxAttempts: 100, baseDelayMs: 20_000, maxDelayMs: 999_999, random: () => 1, sleep,
@@ -34,7 +34,7 @@ describe('bounded HTTP retry policy', () => {
   it('retries transport errors and rethrows the terminal error after exhaustion', async () => {
     const terminal = new TypeError('network unavailable');
     const fetchFn = vi.fn(async () => { throw terminal; });
-    const sleep = vi.fn(async () => undefined);
+    const sleep = vi.fn(async (_delayMs: number) => undefined);
 
     await expect(fetchWithRetry(fetchFn, 'https://example.test', undefined, {
       maxAttempts: 3, sleep, random: () => 0,
@@ -45,7 +45,7 @@ describe('bounded HTTP retry policy', () => {
 
   it('returns a non-retryable 4xx immediately', async () => {
     const fetchFn = vi.fn(async () => new Response('', { status: 404 }));
-    const sleep = vi.fn(async () => undefined);
+    const sleep = vi.fn(async (_delayMs: number) => undefined);
 
     const response = await fetchWithRetry(fetchFn, 'https://example.test', undefined, { sleep });
 

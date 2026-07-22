@@ -1,4 +1,6 @@
 import { MARKET_DATA_QUALITY, STRESS } from './config';
+import { fetchWithRetry } from './http-retry';
+import type { HttpRetryOptions } from './http-retry';
 
 export type ProviderStatus = 'OK' | 'STALE' | 'DIVERGENT' | 'FAILED';
 export type ProviderReasonCode = 'SOURCE_DIVERGENCE' | 'HTTP_ERROR' | 'INVALID_RESPONSE'
@@ -73,7 +75,7 @@ export interface LiveStress {
 }
 
 type Fetcher = typeof fetch;
-export interface ProviderFetchOptions {
+export interface ProviderFetchOptions extends HttpRetryOptions {
   fetchFn?: Fetcher;
   fetchedAt?: string;
   fredApiKey?: string;
@@ -277,12 +279,17 @@ function yahooSourceTimestamp(json: any): string | null {
 
 export class YahooMarketDataProvider implements MarketDataProvider {
   readonly name = 'Yahoo Finance';
-  constructor(private readonly fetchFn: Fetcher = fetch) {}
+  constructor(
+    private readonly fetchFn: Fetcher = fetch,
+    private readonly retryOptions: HttpRetryOptions = {},
+  ) {}
 
   async fetchQuote({ symbol, fetchedAt }: QuoteRequest): Promise<QuoteResult> {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
-      const response = await this.fetchFn(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const response = await fetchWithRetry(
+        this.fetchFn, url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, this.retryOptions,
+      );
       if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const parsed = parseYahooQuote(await response.json(), fetchedAt);
       if (!parsed) return failedQuote(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
@@ -302,7 +309,9 @@ export class YahooMarketDataProvider implements MarketDataProvider {
   async fetchHistory({ symbol, fetchedAt, range = '1mo' }: HistoryRequest): Promise<SeriesResult> {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
-      const response = await this.fetchFn(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const response = await fetchWithRetry(
+        this.fetchFn, url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, this.retryOptions,
+      );
       if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const json: any = await response.json();
       const points = parseYahooDailyObs(json);
@@ -328,12 +337,15 @@ export class YahooMarketDataProvider implements MarketDataProvider {
 
 export class StooqMarketDataProvider implements MarketDataProvider {
   readonly name = 'Stooq';
-  constructor(private readonly fetchFn: Fetcher = fetch) {}
+  constructor(
+    private readonly fetchFn: Fetcher = fetch,
+    private readonly retryOptions: HttpRetryOptions = {},
+  ) {}
 
   async fetchQuote({ symbol, fetchedAt }: QuoteRequest): Promise<QuoteResult> {
     try {
       const url = `https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&f=sd2t2ohlcv&h&e=csv`;
-      const response = await this.fetchFn(url);
+      const response = await fetchWithRetry(this.fetchFn, url, undefined, this.retryOptions);
       if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const body = await response.text();
       if (invalidStooqResponse(response, body)) return failedQuote(this.name, fetchedAt, 'INVALID_RESPONSE', symbol);
@@ -356,7 +368,7 @@ export class StooqMarketDataProvider implements MarketDataProvider {
     try {
       const start = new Date(Date.parse(fetchedAt) - 45 * 86400000).toISOString().slice(0, 10).replaceAll('-', '');
       const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&d1=${start}`;
-      const response = await this.fetchFn(url);
+      const response = await fetchWithRetry(this.fetchFn, url, undefined, this.retryOptions);
       if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const body = await response.text();
       if (invalidStooqResponse(response, body)) return failedSeries(this.name, fetchedAt, 'INVALID_RESPONSE', symbol);
@@ -383,7 +395,11 @@ export class StooqMarketDataProvider implements MarketDataProvider {
 
 export class FredMarketDataProvider implements MarketDataProvider {
   readonly name = 'FRED';
-  constructor(private readonly apiKey: string, private readonly fetchFn: Fetcher = fetch) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly fetchFn: Fetcher = fetch,
+    private readonly retryOptions: HttpRetryOptions = {},
+  ) {}
 
   private async observations(symbol: string, fetchedAt: string): Promise<SeriesResult> {
     if (!this.apiKey) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
@@ -393,7 +409,7 @@ export class FredMarketDataProvider implements MarketDataProvider {
       url.searchParams.set('api_key', this.apiKey);
       url.searchParams.set('file_type', 'json');
       url.searchParams.set('observation_start', new Date(Date.parse(fetchedAt) - 45 * 86400000).toISOString().slice(0, 10));
-      const response = await this.fetchFn(url.toString());
+      const response = await fetchWithRetry(this.fetchFn, url.toString(), undefined, this.retryOptions);
       if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const json: any = await response.json();
       const observations: any[] = Array.isArray(json?.observations) ? json.observations : [];
@@ -568,9 +584,9 @@ export function normalizeTnx(raw: number): number {
 
 export async function fetchLivePrices(nowIso: string, options: Omit<ProviderFetchOptions, 'fetchedAt'> = {}): Promise<LivePrices> {
   const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
-  const yahoo = new YahooMarketDataProvider(fetchFn);
-  const stooq = new StooqMarketDataProvider(fetchFn);
-  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn);
+  const yahoo = new YahooMarketDataProvider(fetchFn, options);
+  const stooq = new StooqMarketDataProvider(fetchFn, options);
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, options);
   const quoteCandidates = await Promise.all([
     Promise.all([
       yahoo.fetchQuote({ symbol: '^GSPC', fetchedAt: nowIso }),
@@ -618,9 +634,9 @@ function historyMeta(result: SeriesResult): HistoryProvenance {
 async function fetchMarketHistories(options: ProviderFetchOptions = {}): Promise<Record<MarketSymbol, SeriesResult>> {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
   const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
-  const yahoo = new YahooMarketDataProvider(fetchFn);
-  const stooq = new StooqMarketDataProvider(fetchFn);
-  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn);
+  const yahoo = new YahooMarketDataProvider(fetchFn, options);
+  const stooq = new StooqMarketDataProvider(fetchFn, options);
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, options);
   const candidates = await Promise.all([
     Promise.all([
       yahoo.fetchHistory({ symbol: '^GSPC', fetchedAt }),
@@ -668,9 +684,9 @@ export async function fetchStressSeries(options: ProviderFetchOptions = {}): Pro
 export async function fetchDxyDaily(options: ProviderFetchOptions = {}): Promise<ObsPoint[]> {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
   const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
-  const yahoo = new YahooMarketDataProvider(fetchFn);
-  const stooq = new StooqMarketDataProvider(fetchFn);
-  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn);
+  const yahoo = new YahooMarketDataProvider(fetchFn, options);
+  const stooq = new StooqMarketDataProvider(fetchFn, options);
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, options);
   const candidates = await Promise.all([
     yahoo.fetchHistory({ symbol: 'DX-Y.NYB', fetchedAt }),
     stooq.fetchHistory({ symbol: 'dx.f', fetchedAt }),

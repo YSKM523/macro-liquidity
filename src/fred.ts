@@ -1,10 +1,16 @@
 import { UNIT_BY_ID } from './config';
+import { fetchWithRetry } from './http-retry';
+import type { HttpFetcher, HttpRetryOptions } from './http-retry';
 import { deriveReleaseTiming, pitChecksum } from './pit';
 import type { PitObservation, ReleaseOverride, ReleaseRule } from './pit';
 
 export interface Obs { date: string; value: number }
 
 export type ReleaseRules = ReleaseRule | ReleaseRule[];
+
+export interface FredFetchOptions extends HttpRetryOptions {
+  fetchFn?: HttpFetcher;
+}
 
 export function parseFredJson(seriesId: string, json: any): Obs[] {
   const unit = UNIT_BY_ID[seriesId] ?? 'I';
@@ -20,13 +26,18 @@ export function parseFredJson(seriesId: string, json: any): Obs[] {
   return rows;
 }
 
-export async function fetchFredSeries(seriesId: string, fromDate: string, apiKey: string): Promise<Obs[]> {
+export async function fetchFredSeries(
+  seriesId: string,
+  fromDate: string,
+  apiKey: string,
+  options: FredFetchOptions = {},
+): Promise<Obs[]> {
   const url = new URL('https://api.stlouisfed.org/fred/series/observations');
   url.searchParams.set('series_id', seriesId);
   url.searchParams.set('api_key', apiKey);
   url.searchParams.set('file_type', 'json');
   url.searchParams.set('observation_start', fromDate);
-  const res = await fetch(url.toString());
+  const res = await fetchWithRetry(options.fetchFn ?? fetch, url.toString(), undefined, options);
   if (!res.ok) throw new Error(`FRED ${seriesId} ${res.status}`);
   return parseFredJson(seriesId, await res.json());
 }
@@ -99,6 +110,7 @@ export async function fetchFredSeriesPit(
   releaseRules: ReleaseRules,
   overrides: Map<string, ReleaseOverride>,
   observedAt: () => string = () => fetchedAt,
+  options: FredFetchOptions = {},
 ): Promise<{ latestRows: Obs[]; vintages: PitObservation[] }> {
   const all: PitObservation[] = [];
   const limit = 100000;
@@ -110,7 +122,7 @@ export async function fetchFredSeriesPit(
       observation_start: observationStart, realtime_start: realtimeStart,
       realtime_end: fetchedAt.slice(0, 10), limit: String(limit), offset: String(offset),
     })) url.searchParams.set(key, value);
-    const response = await fetch(url.toString());
+    const response = await fetchWithRetry(options.fetchFn ?? fetch, url.toString(), undefined, options);
     if (!response.ok) throw new Error(`ALFRED ${seriesId} ${response.status}`);
     const json: any = await response.json();
     const pageFetchedAt = observedAt();

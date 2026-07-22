@@ -94,6 +94,28 @@ describe('ALFRED vintages', () => {
     )).rejects.toThrow();
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  it('surfaces the terminal ALFRED status after bounded exhaustion', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 503 }));
+
+    await expect(fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-04', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, sleep: async () => undefined },
+    )).rejects.toThrow('ALFRED WALCL 503');
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry a non-transient ALFRED 4xx', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 404 }));
+
+    await expect(fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-04', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, sleep: async () => undefined },
+    )).rejects.toThrow('ALFRED WALCL 404');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
   it('parses revisions, preserves units, and skips missing values', async () => {
     const result = await parseFredPitJson('WALCL', {
       observations: [
