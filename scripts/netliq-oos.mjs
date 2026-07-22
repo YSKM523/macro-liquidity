@@ -40,10 +40,11 @@ export function alignForwardReturns(signals, spxRows, horizonWeeks = PREREGISTRA
     prior = signal.availableDate;
     if (!Number.isFinite(signal.score)) continue;
     const start = firstAtOrAfter(spxRows, signal.availableDate);
-    if (!start || calendarGapDays(signal.availableDate, start.date) > 7) continue;
+    if (!start
+      || calendarGapDays(signal.availableDate, start.date) > PREREGISTRATION.dataHygiene.maxStartGapDays) continue;
     const targetEnd = addDays(start.date, horizonWeeks * 7);
     const end = firstAtOrAfter(spxRows, targetEnd);
-    if (!end || calendarGapDays(targetEnd, end.date) > 7) continue;
+    if (!end || calendarGapDays(targetEnd, end.date) > PREREGISTRATION.dataHygiene.maxEndGapDays) continue;
     pairs.push({
       observationDate: signal.observationDate,
       availableDate: signal.availableDate,
@@ -269,6 +270,7 @@ export function evaluateNetLiquidityOos(challenger, spxRows, options = {}) {
   return {
     evidenceClass: PREREGISTRATION.evidenceClass,
     methodology: {
+      version: PREREGISTRATION.methodologyVersion,
       direction: 'POSITIVE',
       horizonWeeks: PREREGISTRATION.target.horizonWeeks,
       normalizationCapWeeks: PREREGISTRATION.normalization.capWeeks,
@@ -276,6 +278,10 @@ export function evaluateNetLiquidityOos(challenger, spxRows, options = {}) {
       foldCount: PREREGISTRATION.folds.count,
       bootstrapSeed: PREREGISTRATION.bootstrap.seed,
       bootstrapBlockLength: PREREGISTRATION.bootstrap.blockLength,
+      effectiveAvailabilityLagDays: PREREGISTRATION.availability.effectiveConservativeLagDays,
+      maxStartGapDays: PREREGISTRATION.dataHygiene.maxStartGapDays,
+      maxEndGapDays: PREREGISTRATION.dataHygiene.maxEndGapDays,
+      amendments: PREREGISTRATION.amendments.map(amendment => amendment.id),
       fittedParameters: false,
     },
     raw,

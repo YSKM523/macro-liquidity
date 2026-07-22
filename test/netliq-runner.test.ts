@@ -14,9 +14,11 @@ describe('net-liquidity research runner', () => {
     const second = await runNetLiquidityResearch(snapshot, snapshotText, manifest, { bootstrapIterations: 100 });
     expect(second).toEqual(first);
     expect(first).toMatchObject({
+      methodologyVersion: 'PR11_RESEARCH_V2_REVIEW_AMENDED',
       evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
       snapshotSha256: manifest.snapshotSha256,
       replacementEligible: false,
+      amendments: expect.arrayContaining([expect.objectContaining({ id: 'A-001' })]),
     });
     expect(first.sample.weeklyPointCount).toBeGreaterThan(1_000);
     expect(first.sample.rawScoredCount).toBeGreaterThan(900);

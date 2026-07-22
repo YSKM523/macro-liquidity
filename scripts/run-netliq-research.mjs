@@ -17,6 +17,8 @@ export async function runNetLiquidityResearch(snapshot, snapshotText, manifest, 
   return {
     schemaVersion: verified.schemaVersion,
     preregistrationStatus: PREREGISTRATION.status,
+    methodologyVersion: PREREGISTRATION.methodologyVersion,
+    amendments: PREREGISTRATION.amendments,
     evidenceClass: verified.evidenceClass,
     snapshotId: verified.snapshotId,
     snapshotSha256: verified.snapshotSha256,

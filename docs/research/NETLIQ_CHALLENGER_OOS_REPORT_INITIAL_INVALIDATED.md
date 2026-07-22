@@ -1,4 +1,6 @@
-# Continuous Net Liquidity Challenger — OOS Research Report
+# Continuous Net Liquidity Challenger — Initial Report (INVALIDATED_BY_REVIEW)
+
+> This artifact is retained only for audit history. It is not the canonical PR-11 result. Review found that the original Wed+2 availability rule could select a pre-release Friday during delayed holiday publication weeks. The corrected methodology uses Wed+7 and a separately generated corrected report. The original claim that every rule was frozen before fetch was also inaccurate because the seven-day SPX gap cap was added after fetch but before this initial report.
 
 > This report was generated once from the frozen preregistration and immutable normalized snapshot. No formula, window, direction, fold, or gate was changed after observing results.
 

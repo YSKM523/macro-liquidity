@@ -8,12 +8,29 @@ const foldRanges = [
 ];
 
 export const PREREGISTRATION = Object.freeze({
-  status: 'PREREGISTERED_BEFORE_FETCH',
+  status: 'AMENDED_AFTER_REVIEW',
+  methodologyVersion: 'PR11_RESEARCH_V2_REVIEW_AMENDED',
+  originalPreregistration: {
+    status: 'PREREGISTERED_BEFORE_FETCH',
+    commit: '0b120a4',
+    availabilityLagDays: 2,
+    nominalTradableDay: 'FRIDAY',
+  },
   evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
   series: ['WALCL', 'WDTGAL', 'WTREGEN', 'RRPONTSYD', 'SP500'],
   weights: { gap13: 0.45, impulse4: 0.35, impulse13: 0.20 },
   normalization: { method: 'PRIOR_ONLY_MAD', capWeeks: 156, minimumPriorWeeks: 52 },
-  availability: { anchor: 'WALCL_WEDNESDAY', nominalTradableDay: 'FRIDAY' },
+  availability: {
+    anchor: 'WALCL_WEDNESDAY',
+    originalLagDays: 2,
+    effectiveConservativeLagDays: 7,
+    effectiveRule: 'FIRST_SPX_CLOSE_ON_OR_AFTER_WEDNESDAY_PLUS_7_CALENDAR_DAYS',
+  },
+  dataHygiene: {
+    maxStartGapDays: 7,
+    maxEndGapDays: 7,
+    preregistered: false,
+  },
   target: { series: 'SP500', horizonWeeks: 13, direction: 'POSITIVE' },
   bootstrap: { method: 'SEEDED_MOVING_BLOCK', seed: 11_011, blockLength: 13, iterations: 2_000 },
   folds: {
@@ -23,6 +40,44 @@ export const PREREGISTRATION = Object.freeze({
     rationale: 'Fixed broad calendar eras chosen before fetch; boundaries never depend on observed scores or returns.',
   },
   decisionRule: 'KEEP_SHADOW iff agreement nonOverlappingIc > 0, positiveFoldCount >= 4, nonOverlappingN >= 10, bootstrapP <= 0.10, and agreementRate >= 0.50; otherwise DROP_RESEARCH.',
+  formulaAmended: false,
+  amendments: [
+    {
+      id: 'A-001',
+      kind: 'REVIEW_CORRECTNESS',
+      implementationCommit: '30f2ef9',
+      chronology: 'Added after initial report review; invalidates the initial report because Wed+2 could execute before delayed holiday publication.',
+      change: 'Availability bound changed from observation Wednesday +2 to +7 calendar days.',
+      tuning: false,
+    },
+    {
+      id: 'A-002',
+      kind: 'POST_FETCH_DATA_HYGIENE',
+      implementationCommit: '47e2358',
+      chronology: 'Added after frozen-data commit 8180851 and before the initial formal report command/publication commit 47e2358.',
+      change: 'Reject SPX start/end matches more than 7 calendar days beyond their requested bound.',
+      preregistered: false,
+      tuning: false,
+    },
+    {
+      id: 'A-003',
+      kind: 'REVIEW_TRUST_BOUNDARY',
+      implementationCommit: '0fff138',
+      chronology: 'Added after initial report review before corrected report generation.',
+      change: 'Canonical schema-v2 snapshot/manifest validation and exact id/cosd/coed URL binding.',
+      tuning: false,
+    },
+  ],
+  initialReport: {
+    status: 'INVALIDATED_BY_REVIEW',
+    publicationCommit: '47e2358',
+    verificationCommit: '4891ed0',
+    reason: 'Holiday-week timing could use a pre-release Friday.',
+  },
+  correctedReport: {
+    status: 'REQUIRED_AFTER_REVIEW',
+    snapshotSchemaVersion: 2,
+  },
   replacementEligible: false,
   allowedDecisions: ['KEEP_SHADOW', 'DROP_RESEARCH'],
 });
