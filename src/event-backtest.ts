@@ -232,7 +232,9 @@ export function scheduleExecutions(
   for (const price of prices) {
     const candidate = selected.get(price.date);
     if (!candidate) continue;
-    const newExposure = candidate.signal.targetExposure ?? (candidate.signal.score > 55 ? 1 : 0);
+    const newExposure = candidate.signal.targetExposure ?? (
+      candidate.signal.score > EVENT_BACKTEST_ASSUMPTIONS.legacyCompatibilityBullishScoreExclusive ? 1 : 0
+    );
     executions.push({
       ...candidate.signal,
       executionDate: price.date,
@@ -315,20 +317,26 @@ export function buildBenchmarkTargets(
     : returnBearingExposures.reduce((sum, value) => sum + value, 0) / returnBearingExposures.length;
   const volatilityTarget = evaluationPrices.map((_row, localIndex) => {
     const index = evaluationStartIndex + localIndex;
-    if (index < 21) return 0;
+    const lookback = EVENT_BACKTEST_ASSUMPTIONS.volatilityTargetLookbackSessions;
+    if (index < lookback + 1) return 0;
     const priorReturns: number[] = [];
-    for (let cursor = index - 20; cursor < index; cursor++) {
+    for (let cursor = index - lookback; cursor < index; cursor++) {
       priorReturns.push(prices[cursor].adjustedClose / prices[cursor - 1].adjustedClose - 1);
     }
     const dailyVolatility = populationStd(priorReturns);
     if (dailyVolatility == null) return 0;
-    if (dailyVolatility === 0) return 1;
-    return Math.min(1, 0.10 / (dailyVolatility * Math.sqrt(252)));
+    if (dailyVolatility === 0) return EVENT_BACKTEST_ASSUMPTIONS.volatilityTargetMaximumExposure;
+    return Math.min(
+      EVENT_BACKTEST_ASSUMPTIONS.volatilityTargetMaximumExposure,
+      EVENT_BACKTEST_ASSUMPTIONS.volatilityTargetAnnual /
+        (dailyVolatility * Math.sqrt(EVENT_BACKTEST_ASSUMPTIONS.annualizationSessions)),
+    );
   });
   const movingAverage200 = evaluationPrices.map((_row, localIndex) => {
     const index = evaluationStartIndex + localIndex;
-    if (index < 200) return 0;
-    const priorCloses = prices.slice(index - 200, index).map(row => row.adjustedClose);
+    const lookback = EVENT_BACKTEST_ASSUMPTIONS.movingAverageLookbackSessions;
+    if (index < lookback) return 0;
+    const priorCloses = prices.slice(index - lookback, index).map(row => row.adjustedClose);
     const average = priorCloses.reduce((sum, value) => sum + value, 0) / priorCloses.length;
     return priorCloses[priorCloses.length - 1] > average ? 1 : 0;
   });
@@ -377,10 +385,13 @@ export function simulateDailyPortfolio(input: {
         return { status: 'DATA_INCOMPLETE', reason: `SOFR stale at ${previous.date}`, nav: [], tradingCostRate: null };
       }
       assetReturn = exposure * (current.adjustedClose / previous.adjustedClose - 1);
-      const annualCashRate = fixing.rate / 100;
-      if (exposure <= 1) cashReturn = (1 - exposure) * annualCashRate * days / 360;
+      const annualCashRate = fixing.rate / EVENT_BACKTEST_ASSUMPTIONS.cashRatePercentDenominator;
+      if (exposure <= 1) cashReturn = (1 - exposure) * annualCashRate * days /
+        EVENT_BACKTEST_ASSUMPTIONS.cashDayCountDenominator;
       else financingReturn = (1 - exposure) *
-        (annualCashRate + EVENT_BACKTEST_ASSUMPTIONS.financingSpreadBps / 10_000) * days / 360;
+        (annualCashRate + EVENT_BACKTEST_ASSUMPTIONS.financingSpreadBps /
+          EVENT_BACKTEST_ASSUMPTIONS.basisPointsDenominator) * days /
+          EVENT_BACKTEST_ASSUMPTIONS.cashDayCountDenominator;
       navValue *= 1 + assetReturn + cashReturn + financingReturn;
     }
 
@@ -395,7 +406,7 @@ export function simulateDailyPortfolio(input: {
       const costBps = EVENT_BACKTEST_ASSUMPTIONS.commissionBps +
         EVENT_BACKTEST_ASSUMPTIONS.baseSlippageBps +
         (conservativeExtra ? EVENT_BACKTEST_ASSUMPTIONS.highVolExtraSlippageBps : 0);
-      tradeCost = turnover * costBps / 10_000;
+      tradeCost = turnover * costBps / EVENT_BACKTEST_ASSUMPTIONS.basisPointsDenominator;
       navValue *= 1 - tradeCost;
       tradingCost += tradeCost;
     }
@@ -441,9 +452,12 @@ export function computePortfolioMetrics(rows: Array<Pick<EventNavRow, 'date' | '
   return {
     totalReturn: rows[rows.length - 1].nav - 1,
     averageBeta: rows.slice(0, -1).reduce((sum, row) => sum + row.exposure, 0) / (rows.length - 1),
-    annualizedVolatility: volatility == null ? null : volatility * Math.sqrt(252),
-    sharpe: volatility == null || volatility === 0 ? null : averageReturn / volatility * Math.sqrt(252),
-    sortino: downsideDeviation == null || downsideDeviation === 0 ? null : averageReturn / downsideDeviation * Math.sqrt(252),
+    annualizedVolatility: volatility == null ? null : volatility *
+      Math.sqrt(EVENT_BACKTEST_ASSUMPTIONS.annualizationSessions),
+    sharpe: volatility == null || volatility === 0 ? null : averageReturn / volatility *
+      Math.sqrt(EVENT_BACKTEST_ASSUMPTIONS.annualizationSessions),
+    sortino: downsideDeviation == null || downsideDeviation === 0 ? null : averageReturn / downsideDeviation *
+      Math.sqrt(EVENT_BACKTEST_ASSUMPTIONS.annualizationSessions),
     maxDrawdown,
     maxDrawdownDurationSessions: maxDuration,
   };
@@ -487,25 +501,31 @@ function portfolioAnalytics(
     };
   };
   const strategyEntry: PortfolioComparisonEntry = {
-    methodology: 'DASHBOARD_EXPOSURE_TIERS_V1', sessions: strategy.nav.length,
+    methodology: EVENT_BACKTEST_ASSUMPTIONS.strategyMethodology, sessions: strategy.nav.length,
     tradingCostRate: strategy.tradingCostRate, metrics: computePortfolioMetrics(strategy.nav),
   };
-  const betaMatchedStatic = run('STATIC_SPX_CASH_AVERAGE_BETA', targets.betaMatchedStatic);
+  const betaMatchedStatic = run(EVENT_BACKTEST_ASSUMPTIONS.betaMatchedBenchmarkMethodology, targets.betaMatchedStatic);
   const strategyReturn = strategyEntry.metrics.totalReturn;
   const betaReturn = betaMatchedStatic.metrics.totalReturn;
   return {
-    methodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
-    stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
-    timingComparisonMethodology: 'CUMULATIVE_RETURN_DIFFERENCE_VS_BETA_MATCHED_STATIC',
+    methodology: EVENT_BACKTEST_ASSUMPTIONS.strategyMethodology,
+    stressMethodology: EVENT_BACKTEST_ASSUMPTIONS.snapshotStressMethodology,
+    timingComparisonMethodology: EVENT_BACKTEST_ASSUMPTIONS.timingComparisonMethodology,
     cumulativeTimingReturnDifference: strategyReturn == null || betaReturn == null
       ? null
       : strategyReturn - betaReturn,
     strategy: strategyEntry,
     benchmarks: {
-      spxBuyHold: run('SPX_BUY_HOLD', targets.spxBuyHold),
+      spxBuyHold: run(EVENT_BACKTEST_ASSUMPTIONS.buyHoldBenchmarkMethodology, targets.spxBuyHold),
       betaMatchedStatic,
-      volatilityTarget: run('PRIOR_20_SESSION_10PCT_VOL_TARGET_CAP_100', targets.volatilityTarget),
-      movingAverage200: run('PRIOR_CLOSE_200DMA_RISK_CONTROL', targets.movingAverage200),
+      volatilityTarget: run(
+        EVENT_BACKTEST_ASSUMPTIONS.volatilityTargetBenchmarkMethodology,
+        targets.volatilityTarget,
+      ),
+      movingAverage200: run(
+        EVENT_BACKTEST_ASSUMPTIONS.movingAverageBenchmarkMethodology,
+        targets.movingAverage200,
+      ),
     },
   };
 }
@@ -541,8 +561,8 @@ function formalProvenanceIssue(inputs: EventBacktestInputs, provenance: InputPro
   for (const signal of inputs.signals) {
     if (!signal.recordedAt || !signal.dataRunId) return 'missing official signal provenance';
     if (signal.targetExposure == null || !signal.portfolioTier ||
-      signal.portfolioMethodology !== 'DASHBOARD_EXPOSURE_TIERS_V1' ||
-      signal.stressMethodology !== 'PIT_SNAPSHOT_VIX_PROXY') {
+      signal.portfolioMethodology !== EVENT_BACKTEST_ASSUMPTIONS.strategyMethodology ||
+      signal.stressMethodology !== EVENT_BACKTEST_ASSUMPTIONS.snapshotStressMethodology) {
       return 'missing explicit formal portfolio target';
     }
     if (isoTimestampMs(signal.recordedAt, 'signal recordedAt') >= cutoffMs) {

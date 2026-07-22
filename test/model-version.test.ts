@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 // @ts-ignore Vitest executes in Node.
 import { createHash } from 'node:crypto';
-import { CHAMPION_MODEL_CONFIG } from '../src/config';
+import { CHAMPION_MODEL_CONFIG, EVENT_BACKTEST_ASSUMPTIONS } from '../src/config';
 import {
   CHAMPION_MODEL_VERSION,
   canonicalChampionConfig,
@@ -29,7 +29,7 @@ describe('Champion model identity', () => {
     const canonical = canonicalChampionConfig();
     const nodeDigest = createHash('sha256').update(canonical).digest('hex');
     expect(championConfigDigest()).toBe(nodeDigest);
-    expect(championConfigDigest()).toBe('807a1098f767b6804d38735324c92f9452586aafef77b53667acdbfa6b1e6626');
+    expect(championConfigDigest()).toBe('17ad1ca8854b0fbd8e56d6255b7ee2f4fe8a85ae1a95a328ade46ffdff02a0cf');
     expect(Object.isFrozen(CHAMPION_MODEL_CONFIG)).toBe(true);
     expect(Object.isFrozen(CHAMPION_MODEL_CONFIG.scoring.credit)).toBe(true);
   });
@@ -38,6 +38,39 @@ describe('Champion model identity', () => {
     const clone = JSON.parse(canonicalChampionConfig());
     clone.scoring.credit.fragilityPenalty += 1;
     expect(hashChampionConfig(clone)).not.toBe(championConfigDigest());
+  });
+
+  it('hashes every event-backtest behavior constant and reporting convention', () => {
+    const governedNumbers = {
+      legacyCompatibilityBullishScoreExclusive: 55,
+      volatilityTargetLookbackSessions: 20,
+      volatilityTargetAnnual: 0.10,
+      volatilityTargetMaximumExposure: 1,
+      movingAverageLookbackSessions: 200,
+      annualizationSessions: 252,
+      cashRatePercentDenominator: 100,
+      cashDayCountDenominator: 360,
+      basisPointsDenominator: 10_000,
+    } as const;
+    expect(EVENT_BACKTEST_ASSUMPTIONS).toMatchObject({
+      ...governedNumbers,
+      metricReturnConvention: 'CLOSE_TO_CLOSE_NET_NAV',
+      volatilityEstimator: 'POPULATION_STANDARD_DEVIATION',
+      downsideDeviationConvention: 'NEGATIVE_RETURNS_RMS_OVER_ALL_SESSIONS',
+      riskAdjustedReturnConvention: 'ZERO_RISK_FREE_DAILY_MEAN',
+      strategyMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
+      snapshotStressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
+      timingComparisonMethodology: 'CUMULATIVE_RETURN_DIFFERENCE_VS_BETA_MATCHED_STATIC',
+      buyHoldBenchmarkMethodology: 'SPX_BUY_HOLD',
+      betaMatchedBenchmarkMethodology: 'STATIC_SPX_CASH_AVERAGE_BETA',
+      volatilityTargetBenchmarkMethodology: 'PRIOR_20_SESSION_10PCT_VOL_TARGET_CAP_100',
+      movingAverageBenchmarkMethodology: 'PRIOR_CLOSE_200DMA_RISK_CONTROL',
+    });
+    for (const [field, value] of Object.entries(governedNumbers)) {
+      const clone = JSON.parse(canonicalChampionConfig());
+      clone.eventBacktest[field] = value + 1;
+      expect(hashChampionConfig(clone), field).not.toBe(championConfigDigest());
+    }
   });
 
   it('never impersonates a commit when the deployment binding is absent or malformed', async () => {
