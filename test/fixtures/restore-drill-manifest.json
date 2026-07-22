@@ -1,0 +1,10 @@
+{
+  "schema": "macro-liquidity-restore-drill/v1",
+  "sqlSha256": "10ec6bdc379ce958818b4c0efe4e6645ae027d5eceeaa1c8ee430e6858f4a730",
+  "rowCounts": {
+    "observations": 1,
+    "ingest_runs": 1,
+    "model_snapshot_weekly": 1
+  },
+  "latestSnapshotDate": "2026-07-15"
+}
