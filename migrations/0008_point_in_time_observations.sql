@@ -149,3 +149,22 @@ ALTER TABLE nowcast_snapshot_daily ADD COLUMN tradable_at TEXT;
 ALTER TABLE nowcast_snapshot_daily ADD COLUMN release_resolution_at TEXT;
 ALTER TABLE nowcast_snapshot_daily ADD COLUMN pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT'
   CHECK (pit_status IN ('LEGACY_NON_PIT','PIT'));
+
+-- Once a PIT snapshot freezes a release-resolution universe, a newly inserted
+-- override must not claim it already existed at or before that cutoff. Without
+-- this guard, a later writer could backdate created_at and change old replay.
+-- This trigger must remain after both snapshot tables gain provenance columns.
+CREATE TRIGGER IF NOT EXISTS release_calendar_overrides_no_frozen_backdate
+BEFORE INSERT ON release_calendar_overrides
+WHEN EXISTS (
+  SELECT 1 FROM model_snapshot_weekly
+  WHERE pit_status = 'PIT' AND release_resolution_at IS NOT NULL
+    AND julianday(NEW.created_at) <= julianday(release_resolution_at)
+  UNION ALL
+  SELECT 1 FROM nowcast_snapshot_daily
+  WHERE pit_status = 'PIT' AND release_resolution_at IS NOT NULL
+    AND julianday(NEW.created_at) <= julianday(release_resolution_at)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'backdated release override would alter frozen PIT resolution');
+END;

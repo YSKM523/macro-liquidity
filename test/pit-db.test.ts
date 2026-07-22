@@ -80,6 +80,37 @@ describe('point-in-time schema', () => {
     ]));
     await mf.dispose();
   }, 30_000);
+
+  it.each([
+    ['weekly', '2024-01-10T00:00:00Z'],
+    ['daily', '2024-01-11T00:00:00Z'],
+  ] as const)('rejects backdated overrides after a frozen %s PIT cutoff', async (channel, cutoff) => {
+    const { mf, db } = await migratedDb();
+    const insertOverride = (vintageDate: string, createdAt: string) => db.prepare(`
+      INSERT INTO release_calendar_overrides
+        (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL',?,'2024-01-04T20:00:00Z','2024-01-05T14:30:00Z','verified',?)
+    `).bind(vintageDate, createdAt).run();
+
+    await expect(insertOverride('2024-01-01', '2000-01-01T00:00:00Z')).resolves.toBeDefined();
+    if (channel === 'weekly') {
+      await db.prepare(`INSERT INTO model_snapshot_weekly
+        (date,decision_week,pit_status,release_resolution_at)
+        VALUES ('2024-01-10','2024-01-08','PIT',?)`).bind(cutoff).run();
+    } else {
+      await db.prepare(`INSERT INTO nowcast_snapshot_daily
+        (date,pit_status,release_resolution_at)
+        VALUES ('2024-01-11','PIT',?)`).bind(cutoff).run();
+    }
+
+    await expect(insertOverride('2024-01-02', '2001-01-01T00:00:00Z'))
+      .rejects.toThrow(/frozen|resolution|backdated/i);
+    await expect(insertOverride('2024-01-03', cutoff))
+      .rejects.toThrow(/frozen|resolution|backdated/i);
+    const afterCutoff = new Date(Date.parse(cutoff) + 1).toISOString();
+    await expect(insertOverride('2024-01-04', afterCutoff)).resolves.toBeDefined();
+    await mf.dispose();
+  }, 30_000);
 });
 
 describe('PIT activation repository', () => {
