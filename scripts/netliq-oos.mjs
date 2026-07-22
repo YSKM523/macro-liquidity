@@ -27,6 +27,10 @@ function firstAtOrAfter(rows, date) {
   return rows.find(row => row.date >= date);
 }
 
+function calendarGapDays(start, end) {
+  return (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / DAY_MS;
+}
+
 export function alignForwardReturns(signals, spxRows, horizonWeeks = PREREGISTRATION.target.horizonWeeks) {
   validateRows(spxRows, 'SPX', 'value');
   let prior = '';
@@ -36,9 +40,10 @@ export function alignForwardReturns(signals, spxRows, horizonWeeks = PREREGISTRA
     prior = signal.availableDate;
     if (!Number.isFinite(signal.score)) continue;
     const start = firstAtOrAfter(spxRows, signal.availableDate);
-    if (!start) continue;
-    const end = firstAtOrAfter(spxRows, addDays(start.date, horizonWeeks * 7));
-    if (!end) continue;
+    if (!start || calendarGapDays(signal.availableDate, start.date) > 7) continue;
+    const targetEnd = addDays(start.date, horizonWeeks * 7);
+    const end = firstAtOrAfter(spxRows, targetEnd);
+    if (!end || calendarGapDays(targetEnd, end.date) > 7) continue;
     pairs.push({
       observationDate: signal.observationDate,
       availableDate: signal.availableDate,

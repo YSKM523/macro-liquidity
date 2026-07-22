@@ -4,6 +4,15 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-11 — Continuous net-liquidity challenger research
+
+- Preregistered a shadow-only Raw/Smooth continuous net-liquidity formula before fetching data: exact 0.45/0.35/0.20 weights, strict prior-only 156-week MAD normalization, 52-week minimum history, Friday availability, 13-week SPX target, seeded bootstrap, fixed calendar folds, and an immutable decision gate.
+- Added chronological pure builders that reject missing, stale-week substitution, unsorted, duplicate, and non-finite inputs; both tracks emit level/change/impulse/trend/gap/acceleration, normalized dimensions, latent score, direction, and agreement confidence.
+- Added overlapping and interval-non-overlapping Spearman IC, seeded 13-observation moving-block bootstrap, six fixed expanding-prefix evaluation folds, quintile diagnostics, and Raw/Smooth disagreement statistics.
+- Froze a normalized primary-FRED current-vintage snapshot and manifest for WALCL, WDTGAL, WTREGEN, RRPONTSYD, and SP500 with exact URLs, retrieval time, date ranges, per-series SHA-256, and snapshot SHA-256 `ffce5c984d606bac259adb8920f18b02e9a68d8e78bacaee521cf19178a36101`.
+- Generated the preregistered report once. Agreement-confirmed overlapping IC was 0.2637 (n=465), non-overlapping IC 0.2030 (n=39), bootstrap 95% CI [0.0666, 0.4224], and agreement rate 91.18%, but only 3 fixed folds were positive; two early folds were empty because FRED SP500 begins in 2016 and the evaluable part of the 2013–2016 fold was negative.
+- Recorded the frozen outcome as `INCONCLUSIVE` / `DROP_RESEARCH`. Evidence remains `RESEARCH_CURRENT_VINTAGE`, `replacementEligible=false`; no Champion score, weight, threshold, verdict, hysteresis, portfolio target, official snapshot, API, migration, deploy, or database was changed.
+
 ### PR-10 — Dashboard-aligned portfolio backtest
 
 - Added one pure `DASHBOARD_EXPOSURE_TIERS_V1` mapper shared by live guidance and formal PIT signals: strong tailwind 100%, ordinary tailwind 90%, neutral 75%, cautious 50%, headwind 25%, stress brake 25%, and unknown capped at 75%.

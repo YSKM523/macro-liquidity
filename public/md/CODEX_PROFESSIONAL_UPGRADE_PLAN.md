@@ -20,7 +20,8 @@
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
 | PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
 | PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
-| PR-11～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
+| PR-11 | 已完成（本地候选） | `276eeb5`–待复审 | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与冻结 FRED snapshot 已实现；当前版本证据结论 `INCONCLUSIVE` / `DROP_RESEARCH`，`RESEARCH_CURRENT_VINTAGE`、replacementEligible=false，Champion 不变 |
+| PR-12～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -1843,11 +1844,19 @@ research: continuous net liquidity challenger
 
 内容：
 
-- gap13
-- impulse4
-- impulse13
-- Raw/Smooth
-- OOS 研究报告
+- [x] gap13 / impulse4 / impulse13，严格 prior-only 156 周 MAD、至少 52 周历史
+- [x] Raw/Smooth 双轨、周三 observation / 周五 availability 与 HIGH/LOW/TRANSITION agreement
+- [x] overlapping/non-overlapping IC、seeded moving-block bootstrap、固定六个日历 fold、quintile 与 disagreement diagnostics
+- [x] 主 FRED CSV 当前版本 snapshot + manifest + exact URL/date range/SHA-256
+- [x] 抓取前预注册并一次性生成 OOS 研究报告
+- [x] 冻结结论 `INCONCLUSIVE`、决策 `DROP_RESEARCH`、`RESEARCH_CURRENT_VINTAGE`、replacementEligible=false
+- [x] Shadow only；未修改 Champion、正式 API/快照、仓位或数据库
+
+PR-11 实证摘要：Raw overlapping/non-overlapping IC 为 0.2389/0.0362（n=510/39），Smooth 为 0.2555/0.2526（n=510/39），agreement-confirmed 为 0.2637/0.2030（n=465/39），bootstrap 95% CI [0.0666, 0.4224]、p=0.0045，agreement rate 91.18%。固定六 fold 中两个因 FRED SP500 仅覆盖 2016-07 起而为空，2013–2016 可评估尾段为负，其余三个为正；空 fold 未动态重分，正 fold 数 3 未达到预注册的至少 4 个门槛。
+
+PR-11 已知限制：本地 artifact 是 2026-07-22 抓取的 FRED 当前版本，不是 ALFRED/PIT，无法证明历史时点可见值；SP500 是不含股息的价格指数且只有约 10 年；名义 Thursday-release/Friday-tradable lag 不能修复 revision bias；本研究只报告 IC/排序，不是可交易组合回测。
+
+PR-11 回滚：回退 base `f803705` 后的 PR-11 commits 即可；本 PR 无 migration、无生产/远程数据库写入，不需要删除或恢复任何数据库数据。
 
 ---
 
@@ -1929,7 +1938,7 @@ feat: model versioning, CI, staging, observability and backup
 - [x] 现金收益不为 0
 - [x] 成本纳入
 - [x] 与相同 Beta 基准比较（PR-10：仅按实际承担收益区间的 exposure 匹配）
-- [ ] overlapping 和 non-overlapping 分开
+- [x] overlapping 和 non-overlapping 分开（PR-11 shadow current-vintage research）
 - [ ] purged walk-forward
 - [ ] 分数桶大体单调
 - [ ] 极端事件压力测试

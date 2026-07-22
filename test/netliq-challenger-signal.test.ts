@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildContinuousChallenger,
-  classifyAgreement,
-  priorRollingMad,
-  scoreLatent,
-} from '../scripts/netliq-challenger.mjs';
+// @ts-ignore -- isolated Node research module
+import { buildContinuousChallenger, classifyAgreement, priorRollingMad, scoreLatent } from '../scripts/netliq-challenger.mjs';
 
 function weeklyPoints(count: number) {
   const start = Date.parse('2018-01-03T00:00:00Z');

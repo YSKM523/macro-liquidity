@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  alignForwardReturns,
-  decideNetLiquidityResearch,
-  evaluateNetLiquidityOos,
-  evaluateScorePairs,
-  movingBlockBootstrapIc,
-  nonOverlappingPairs,
-} from '../scripts/netliq-oos.mjs';
+// @ts-ignore -- isolated Node research module
+import { alignForwardReturns, decideNetLiquidityResearch, evaluateNetLiquidityOos, evaluateScorePairs, movingBlockBootstrapIc, nonOverlappingPairs } from '../scripts/netliq-oos.mjs';
 
 const pair = (index: number, score = index, forwardReturn = index / 100) => ({
   availableDate: new Date(Date.parse('2020-01-03T00:00:00Z') + index * 7 * 86_400_000).toISOString().slice(0, 10),
@@ -50,6 +44,15 @@ describe('continuous net-liquidity OOS evaluator', () => {
     ], [{ date: '2024-01-04', value: 100 }])).toEqual([]);
   });
 
+  it('does not bridge a long missing-price gap into a much later SPX history', () => {
+    expect(alignForwardReturns([
+      { observationDate: '2010-01-06', availableDate: '2010-01-08', score: 60 },
+    ], [
+      { date: '2016-07-22', value: 100 },
+      { date: '2016-10-24', value: 110 },
+    ])).toEqual([]);
+  });
+
   it('selects a chronological interval-non-overlapping subset', () => {
     const selected = nonOverlappingPairs(Array.from({ length: 40 }, (_, index) => pair(index)));
     expect(selected.length).toBeLessThan(40);
@@ -74,14 +77,14 @@ describe('continuous net-liquidity OOS evaluator', () => {
     expect(report.overlapping).toMatchObject({ n: 1_130, ic: 1 });
     expect(report.nonOverlapping.n).toBeLessThan(report.overlapping.n);
     expect(report.folds).toHaveLength(6);
-    expect(report.folds.map(fold => fold.evaluationStart)).toEqual([
+    expect(report.folds.map((fold: any) => fold.evaluationStart)).toEqual([
       '2005-01-01', '2009-01-01', '2013-01-01', '2017-01-01', '2021-01-01', '2024-01-01',
     ]);
-    expect(report.folds.map(fold => fold.trainN)).toEqual([...report.folds.map(fold => fold.trainN)].sort((a, b) => a - b));
+    expect(report.folds.map((fold: any) => fold.trainN)).toEqual([...report.folds.map((fold: any) => fold.trainN)].sort((a: number, b: number) => a - b));
     expect(report.positiveFoldCount).toBe(6);
     expect(report.signStability).toBe(1);
     expect(report.quintiles).toHaveLength(5);
-    expect(report.quintiles.reduce((sum, quintile) => sum + quintile.count, 0)).toBe(1_130);
+    expect(report.quintiles.reduce((sum: number, quintile: any) => sum + quintile.count, 0)).toBe(1_130);
     expect(report.quintiles[0]).toEqual(expect.objectContaining({
       count: 226,
       mean: expect.any(Number),

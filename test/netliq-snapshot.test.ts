@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildSnapshotManifest,
-  fredCsvUrl,
-  parseFredCsv,
-  sha256Hex,
-  verifySnapshotManifest,
-} from '../scripts/netliq-snapshot.mjs';
+// @ts-ignore -- isolated Node research module
+import { buildSnapshotManifest, fredCsvUrl, parseFredCsv, sha256Hex, verifySnapshotManifest } from '../scripts/netliq-snapshot.mjs';
 
 describe('net-liquidity current-vintage research snapshot', () => {
   it('uses only the primary FRED CSV endpoint with a frozen research start date', () => {

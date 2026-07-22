@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+// Research scripts run under Node/Vitest and intentionally remain isolated from the Worker TS build.
+// @ts-ignore
 import { buildWeeklyNetLiquidity } from '../scripts/netliq-challenger.mjs';
 
 const row = (date: string, value: number) => ({ date, value });

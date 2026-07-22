@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// @ts-ignore -- isolated Node research module
 import { PREREGISTRATION } from '../scripts/netliq-preregistration.mjs';
 
 describe('net-liquidity challenger preregistration', () => {
