@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "snapshotId": "reserve-current-vintage-2026-07-22-v2",
+  "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+  "source": "FRED_AND_NYFED_CURRENT_VINTAGE",
+  "retrievedAt": "2026-07-22T16:19:04.345Z",
+  "fredStartDate": "2002-01-01",
+  "nyFedStartDate": "2021-07-29",
+  "requestEndDate": "2026-07-22",
+  "snapshotSha256": "0a7f47c7599994dc4271c94bfc1faa5aa065472e1db2de790985c7788394da65",
+  "series": {
+    "WRESBAL": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=WRESBAL&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 1231,
+      "firstDate": "2002-12-18",
+      "lastDate": "2026-07-15",
+      "normalizedSha256": "7c08a8c1d98039c1c322a977f800b057dc71ae30a2572ea07fee260b32643ede",
+      "sourceResponseSha256": "3ab8000fc827df5689ddc12123e52371d88a363ce7f9801bcfa99c04b4990e04"
+    },
+    "GDP": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDP&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 97,
+      "firstDate": "2002-01-01",
+      "lastDate": "2026-01-01",
+      "normalizedSha256": "fc079f3b9e466269d179f31296095269a3bdaa5cef0c69f84e88b390318d6a9d",
+      "sourceResponseSha256": "d165bca5af058e878865b26d2af0f769316723e5c4b91b03368aa94fa3cc05ed"
+    },
+    "SOFR": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 2072,
+      "firstDate": "2018-04-03",
+      "lastDate": "2026-07-21",
+      "normalizedSha256": "08a8b71aed5e74210399113601e33e3676056ea1ca43fb5a4a3986d5e1f91903",
+      "sourceResponseSha256": "315f623c10d3ce24747b53c1ddd6527f18c221fd29685c4a0fae63c60e984794"
+    },
+    "IORB": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=IORB&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 1820,
+      "firstDate": "2021-07-29",
+      "lastDate": "2026-07-22",
+      "normalizedSha256": "53273ec44e250f12c25055b9ea27009456122fa80857f8b200013f8806a9c6b1",
+      "sourceResponseSha256": "1eaa3cbb2fd8b19fd47dc202bdaa87ecaf46fa4897aaee163cd5e8b21fcada48"
+    },
+    "EFFR": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=EFFR&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 6165,
+      "firstDate": "2002-01-02",
+      "lastDate": "2026-07-21",
+      "normalizedSha256": "a0f7e0fed5aae99f41d56528504b31d6fdafe4cc277ac910937573aa5c955f6f",
+      "sourceResponseSha256": "9059342455375e273238967c6c19915ca130eabff5dad35d777e139f9c83880f"
+    },
+    "TGCRRATE": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=TGCRRATE&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 2073,
+      "firstDate": "2018-04-02",
+      "lastDate": "2026-07-21",
+      "normalizedSha256": "5377c134064d71781214ef53135ced0410f34282664811d9f347a0a9c01bbe9c",
+      "sourceResponseSha256": "5a9fa79d3ac229bec643dd286e716446fff30ba2eea9f333ff26c1d2bc306241"
+    },
+    "SP500": {
+      "provider": "FRED",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2002-01-01&coed=2026-07-22",
+      "rowCount": 2512,
+      "firstDate": "2016-07-22",
+      "lastDate": "2026-07-21",
+      "normalizedSha256": "8f2900fba8d8d87cd447d3a17b6eb5da988bad4a4d88fcc843ffc6c5802580b1",
+      "sourceResponseSha256": "5cdf79f6d06348ffd502aeecf2e1db9d6d9e834f63bf817a2e7b3bec60da0fd2"
+    },
+    "NYFED_SRF_ACCEPTED": {
+      "provider": "NYFED_MARKETS_API",
+      "url": "https://markets.newyorkfed.org/api/rp/results/search.json?startDate=2021-07-29&endDate=2026-07-22&operationTypes=Repo",
+      "rowCount": 1242,
+      "firstDate": "2021-07-29",
+      "lastDate": "2026-07-22",
+      "normalizedSha256": "5be74c6464d80e5e32aae37a671259e324b2621d2f7864b2066a1253106a8945",
+      "sourceResponseSha256": "ac3ddf82a0f37313f6f6b36c8c3e48d55beb786baa4ef67278e1c23cf55bffec"
+    }
+  }
+}
