@@ -102,4 +102,27 @@ describe('purged folds and frozen holdout', () => {
     expect(result.folds).toEqual([]);
     expect(result.aggregateMetrics).toBeNull();
   });
+
+  it('computes retrospective metrics honestly across legacy PIT history', () => {
+    const legacy = rows.map(row => ({ ...row, provenanceStatus: 'LEGACY' }));
+    const result = runPurgedValidation(legacy, { initialTrain: 40, testN: 10 });
+    expect(result.status).toBe('PARTIAL_LEGACY');
+    expect(result.provenance).toEqual({ totalCount: 100, governedCount: 0, legacyCount: 100, completeness: 'PARTIAL_LEGACY' });
+    expect(result.folds.length).toBeGreaterThan(0);
+    expect(result.aggregateMetrics?.direction.n).toBeGreaterThan(0);
+    expect(result.aggregateMetrics?.tail.recall).toMatchObject({ value: null, status: 'PARTIAL_LEGACY_CALIBRATION' });
+  });
+
+  it('allows a governed/legacy PIT cohort but rejects malformed provenance', () => {
+    const mixed = rows.map((row, index) => ({ ...row, provenanceStatus: index < 50 ? 'LEGACY' : 'GOVERNED' }));
+    expect(runPurgedValidation(mixed, { initialTrain: 40, testN: 10 }).status).toBe('PARTIAL_LEGACY');
+    const invalid = [...rows];
+    invalid[5] = { ...invalid[5], provenanceStatus: 'INVALID' };
+    expect(runPurgedValidation(invalid, { initialTrain: 40, testN: 10 }).status).toBe('DATA_INCOMPLETE');
+  });
+
+  it('requires every post-registration holdout signal to be governed', () => {
+    const postLegacy = [...rows, snap('2026-07-23', 101, { provenanceStatus: 'LEGACY' })];
+    expect(runFrozenHoldout(postLegacy).status).toBe('DATA_INCOMPLETE');
+  });
 });
