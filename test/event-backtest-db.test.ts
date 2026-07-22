@@ -99,8 +99,12 @@ describe('event-time daily input storage', () => {
     const { mf, db } = await emptyDb();
     await apply(db);
     await db.prepare(`INSERT INTO model_snapshot_weekly
-      (date,decision_week,score,decision_status,pit_status,decision_at,tradable_at,data_run_id,recorded_at)
-      VALUES ('2024-01-04','2024-01-01',60,'OK','PIT','2024-01-05T12:00:00Z','2024-01-05T16:00:00Z','signal-run','2024-01-06T00:00:00Z')`).run();
+      (date,decision_week,score,decision_status,pit_status,decision_at,tradable_at,data_run_id,recorded_at,
+       data_cutoff,model_version,config_hash,code_commit_sha,created_at)
+      VALUES ('2024-01-04','2024-01-01',60,'OK','PIT','2024-01-05T12:00:00Z','2024-01-05T16:00:00Z',
+              'signal-run','2024-01-06T00:00:00Z','2024-01-04T23:59:59Z','champion-v1.0.0',?,?,
+              '2024-01-06T00:00:01Z')`)
+      .bind('a'.repeat(64), '0123456789abcdef0123456789abcdef01234567').run();
     for (const [run, activated, spx] of [
       ['run-a', '2024-01-06T01:00:00Z', 100],
       ['run-b', '2024-01-10T01:00:00Z', 110],
@@ -120,7 +124,12 @@ describe('event-time daily input storage', () => {
 
     const old = await loadEventBacktestInputs(db, '2024-01-08T00:00:00Z');
     expect(old.asOfCutoff).toBe('2024-01-08T00:00:00Z');
-    expect(old.signals).toEqual([expect.objectContaining({ dataRunId: 'signal-run', recordedAt: '2024-01-06T00:00:00Z' })]);
+    expect(old.signals).toEqual([expect.objectContaining({
+      dataRunId: 'signal-run', recordedAt: '2024-01-06T00:00:00Z',
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64),
+      codeCommitSha: '0123456789abcdef0123456789abcdef01234567',
+      dataCutoff: '2024-01-04T23:59:59Z', createdAt: '2024-01-06T00:00:01Z',
+    })]);
     expect(new Set([...old.prices, ...old.vix, ...old.cashRates].map(row => row.dataRunId))).toEqual(new Set(['run-a']));
     expect(old.prices.map(row => row.adjustedClose)).toEqual([100, 100]);
 

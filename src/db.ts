@@ -1154,7 +1154,8 @@ export async function loadEventBacktestInputs(
   const cutoff = clock.cutoff;
   const [signalRows, marketRows, cashRows] = await Promise.all([
     db.prepare(
-      `SELECT date AS signal_date,decision_at,tradable_at,score,verdict,netliq_dir,vix_eod,recorded_at,data_run_id
+      `SELECT date AS signal_date,decision_at,tradable_at,score,verdict,netliq_dir,vix_eod,recorded_at,data_run_id,
+              model_version,config_hash,code_commit_sha,data_cutoff,created_at
        FROM model_snapshot_weekly
        WHERE decision_status='OK' AND pit_status='PIT'
          AND decision_at IS NOT NULL AND tradable_at IS NOT NULL AND score IS NOT NULL
@@ -1164,6 +1165,8 @@ export async function loadEventBacktestInputs(
       signal_date: string; decision_at: string; tradable_at: string; score: number;
       verdict: string | null; netliq_dir: string | null; vix_eod: number | null;
       recorded_at: string; data_run_id: string | null;
+      model_version: string | null; config_hash: string | null; code_commit_sha: string | null;
+      data_cutoff: string | null; created_at: string | null;
     }>(),
     db.prepare(
       `WITH eligible AS (
@@ -1221,6 +1224,11 @@ export async function loadEventBacktestInputs(
         snapshotVixEod: row.vix_eod,
         recordedAt: row.recorded_at,
         dataRunId: row.data_run_id ?? undefined,
+        modelVersion: row.model_version,
+        configHash: row.config_hash,
+        codeCommitSha: row.code_commit_sha,
+        dataCutoff: row.data_cutoff,
+        createdAt: row.created_at,
       };
       if (fieldIssue || !isPortfolioVerdict(row.verdict) || !isPortfolioDirection(row.netliq_dir)) {
         return { ...baseSignal, policyIssue: fieldIssue ?? 'invalid official portfolio field' };

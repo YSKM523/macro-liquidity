@@ -348,7 +348,15 @@ export default {
       let normalizedRows: NormalizedSnapshotRow[] = [];
       if (v1) {
         try {
-          normalizedRows = rows.map(normalizeSnapshotProvenance);
+          normalizedRows = eventInputs.signals.map(signal => normalizeSnapshotProvenance({
+            model_version: signal.modelVersion,
+            config_hash: signal.configHash,
+            code_commit_sha: signal.codeCommitSha,
+            data_run_id: signal.dataRunId,
+            data_cutoff: signal.dataCutoff,
+            decision_at: signal.decisionAt,
+            created_at: signal.createdAt,
+          }));
           governedModels = governedSnapshotModels(normalizedRows);
         } catch (error) {
           structuredLog('request_failure', {

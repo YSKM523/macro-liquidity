@@ -18,6 +18,11 @@ export interface EventSignal {
   policyIssue?: string;
   recordedAt?: string;
   dataRunId?: string;
+  modelVersion?: string | null;
+  configHash?: string | null;
+  codeCommitSha?: string | null;
+  dataCutoff?: string | null;
+  createdAt?: string | null;
 }
 
 export interface DailyMarketPrice {

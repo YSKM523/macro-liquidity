@@ -30,7 +30,7 @@ const dbState = vi.hoisted(() => ({
   activeSnapshotState: 'FAILED' as 'PENDING' | 'SUCCEEDED' | 'FAILED',
   eventInputs: {
     asOfCutoff: '2024-01-10T01:00:00.001Z',
-    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliqDir: 'UP', snapshotVixEod: 20, targetExposure: 1, portfolioTier: 'STRONG_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliqDir: 'UP', snapshotVixEod: 20, targetExposure: 1, portfolioTier: 'STRONG_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a', modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataCutoff: '2024-01-04T23:59:59Z', createdAt: '2024-01-09T00:00:01Z' }],
     prices: [
       { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
       { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
@@ -110,7 +110,7 @@ beforeEach(() => {
   dbState.activeSnapshotState = 'FAILED';
   dbState.eventInputs = {
     asOfCutoff: '2024-01-10T01:00:00.001Z',
-    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliqDir: 'UP', snapshotVixEod: 20, targetExposure: 1, portfolioTier: 'STRONG_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliqDir: 'UP', snapshotVixEod: 20, targetExposure: 1, portfolioTier: 'STRONG_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a', modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataCutoff: '2024-01-04T23:59:59Z', createdAt: '2024-01-09T00:00:01Z' }],
     prices: [
       { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
       { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
@@ -204,6 +204,12 @@ describe('/api/v1 governance routes', () => {
       data_run_id: 'must-not-leak', data_cutoff: null, decision_at: null, created_at: null,
     };
     dbState.backtestRows = [legacy];
+    dbState.eventInputs.signals = [{
+      ...dbState.eventInputs.signals[0],
+      modelVersion: 'LEGACY_UNVERSIONED', configHash: 'LEGACY_UNVERSIONED',
+      codeCommitSha: 'LEGACY_UNVERSIONED', dataRunId: 'must-not-leak',
+      dataCutoff: undefined, decisionAt: '2024-01-05T12:00:00Z', createdAt: undefined,
+    }];
     dbState.exportRows = [legacy];
     const backtest = await worker.fetch(new Request('https://example.test/api/v1/backtest'), env);
     expect(backtest.status).toBe(200);
@@ -336,7 +342,7 @@ describe('/api/admin/refresh contention', () => {
 });
 
 describe('/api/backtest event-time performance', () => {
-  it('v1 returns the exact persisted model/data identities represented by snapshot rows', async () => {
+  it('v1 returns only the persisted model/data identities in the exact as-of replay cohort', async () => {
     dbState.backtestRows = [{
       date: '2026-07-15', score: 60, spx: 6000, verdict: 'BULLISH', factors_json: '{}',
       qe_qt_regime: 'FLAT', vix_eod: 20, model_version: 'champion-v1.0.0',
@@ -344,13 +350,26 @@ describe('/api/backtest event-time performance', () => {
       data_run_id: 'historical-run', data_cutoff: '2026-07-15T23:59:59Z',
       decision_at: '2026-07-16T00:00:00Z', created_at: '2026-07-16T00:00:01Z',
     }];
-    const response = await worker.fetch(new Request('https://example.test/api/v1/backtest'), env);
+    dbState.eventInputs.signals = [{
+      ...dbState.eventInputs.signals[0],
+      modelVersion: 'champion-v1.0.0', configHash: 'c'.repeat(64),
+      codeCommitSha: 'fedcba9876543210fedcba9876543210fedcba98', dataRunId: 'asof-signal-run',
+      dataCutoff: '2024-01-04T23:59:59Z', createdAt: '2024-01-09T00:00:01Z',
+    }];
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/backtest?as_of=2024-01-10T01%3A00%3A00.001Z',
+    ), env);
     const body = await response.json() as any;
     expect(response.status).toBe(200);
     expect(body.snapshot_models).toEqual([expect.objectContaining({
-      modelVersion: 'champion-v1.0.0', configHash: 'b'.repeat(64),
-      codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'historical-run',
+      modelVersion: 'champion-v1.0.0', configHash: 'c'.repeat(64),
+      codeCommitSha: 'fedcba9876543210fedcba9876543210fedcba98', dataRunId: 'asof-signal-run',
     })]);
+    expect(body.snapshot_models).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ dataRunId: 'historical-run' }),
+    ]));
+    expect(body.snapshot_provenance).toMatchObject({ totalCount: 1, governedCount: 1, legacyCount: 0 });
+    expect(vi.mocked(loadEventBacktestInputs)).toHaveBeenCalledWith(env.DB, '2024-01-10T01:00:00.001Z');
     expect(body.runtime_model).toBeDefined();
   });
 
