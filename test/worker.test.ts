@@ -144,6 +144,26 @@ describe('/api/snapshot explicit channels', () => {
 });
 
 describe('/api/v1 governance routes', () => {
+  it('returns strict joint legacy/governed provenance instead of permanently rejecting legacy history', async () => {
+    const legacy = {
+      date: '2020-01-01', score: 50, spx: 3200, verdict: 'NEUTRAL', factors_json: '{}',
+      qe_qt_regime: 'FLAT', vix_eod: 15, model_version: 'LEGACY_UNVERSIONED',
+      config_hash: 'LEGACY_UNVERSIONED', code_commit_sha: 'LEGACY_UNVERSIONED',
+      data_run_id: 'must-not-leak', data_cutoff: null, decision_at: null, created_at: null,
+    };
+    dbState.backtestRows = [legacy];
+    dbState.exportRows = [legacy];
+    const backtest = await worker.fetch(new Request('https://example.test/api/v1/backtest'), env);
+    expect(backtest.status).toBe(200);
+    await expect(backtest.json()).resolves.toMatchObject({ snapshot_provenance: {
+      totalCount: 1, governedCount: 0, legacyCount: 1, completeness: 'PARTIAL_LEGACY',
+    } });
+    const exported = await worker.fetch(new Request('https://example.test/api/v1/snapshots/export'), env);
+    const body = await exported.json() as any;
+    expect(exported.status).toBe(200);
+    expect(body.provenance).toMatchObject({ governedCount: 0, legacyCount: 1 });
+    expect(body.rows[0]).toMatchObject({ provenance_status: 'LEGACY', data_run_id: null, config_hash: null });
+  });
   it('returns schema-validated version metadata without changing the legacy route', async () => {
     const response = await worker.fetch(new Request('https://example.test/api/v1/snapshot'), env);
     const body = await response.json() as any;

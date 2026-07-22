@@ -26,7 +26,14 @@ import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
-import { assertSnapshotVersionMetadata, parseDateRange, snapshotsToCsv } from './api-schema';
+import {
+  assertSnapshotVersionMetadata,
+  normalizeSnapshotProvenance,
+  parseDateRange,
+  snapshotsToCsv,
+  summarizeSnapshotProvenance,
+} from './api-schema';
+import type { NormalizedSnapshotRow } from './api-schema';
 import { presentModelDescriptor, resolveModelIdentity } from './model-version';
 import {
   LiveDataCache,
@@ -86,9 +93,10 @@ function parseJsonObject(value: unknown): Record<string, unknown> {
   }
 }
 
-function snapshotModels(rows: unknown[]): ReturnType<typeof assertSnapshotVersionMetadata>[] {
+function governedSnapshotModels(rows: NormalizedSnapshotRow[]): ReturnType<typeof assertSnapshotVersionMetadata>[] {
   const unique = new Map<string, ReturnType<typeof assertSnapshotVersionMetadata>>();
   for (const row of rows) {
+    if (row.provenance_status === 'LEGACY') continue;
     const metadata = assertSnapshotVersionMetadata(row);
     const key = [metadata.modelVersion, metadata.configHash, metadata.codeCommitSha,
       metadata.dataRunId, metadata.dataCutoff, metadata.decisionAt, metadata.createdAt].join('|');
@@ -299,9 +307,11 @@ export default {
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
       const legacy = runBacktest(snaps);
       let governedModels: ReturnType<typeof assertSnapshotVersionMetadata>[] = [];
+      let normalizedRows: NormalizedSnapshotRow[] = [];
       if (v1) {
         try {
-          governedModels = snapshotModels(rows);
+          normalizedRows = rows.map(normalizeSnapshotProvenance);
+          governedModels = governedSnapshotModels(normalizedRows);
         } catch (error) {
           return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
         }
@@ -310,6 +320,7 @@ export default {
         ...(v1 ? {
           api_version: 'v1', runtime_model: presentModelDescriptor(await resolveModelIdentity(env)),
           snapshot_models: governedModels,
+          snapshot_provenance: summarizeSnapshotProvenance(normalizedRows),
         } : {}),
         ...legacy,
         strategy_long_flat: { ...legacy.strategy_long_flat, methodology: 'LEGACY_WEEKLY' },
@@ -335,9 +346,11 @@ export default {
       const result = runRobustness(snaps);
       if (!v1) return json(result);
       try {
+        const normalizedRows = rows.map(normalizeSnapshotProvenance);
         return json({
           api_version: 'v1', runtime_model: presentModelDescriptor(await resolveModelIdentity(env)),
-          snapshot_models: snapshotModels(rows), result,
+          snapshot_models: governedSnapshotModels(normalizedRows),
+          snapshot_provenance: summarizeSnapshotProvenance(normalizedRows), result,
         });
       } catch (error) {
         return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
@@ -358,20 +371,21 @@ export default {
         return json({ api_version: 'v1', error: 'invalid_query', message: 'format must be json or csv' }, 400);
       }
       const rows = await exportOfficialSnapshots(env.DB, range.from, range.to);
+      let normalizedRows: NormalizedSnapshotRow[];
       try {
-        for (const row of rows) assertSnapshotVersionMetadata(row);
+        normalizedRows = rows.map(normalizeSnapshotProvenance);
       } catch (error) {
         return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
       }
       if (format === 'csv') {
-        return new Response(snapshotsToCsv(rows), {
+        return new Response(snapshotsToCsv(normalizedRows), {
           headers: {
             'content-type': 'text/csv; charset=utf-8',
             'content-disposition': 'attachment; filename="official-snapshots.csv"',
           },
         });
       }
-      return json({ api_version: 'v1', range, rows });
+      return json({ api_version: 'v1', range, provenance: summarizeSnapshotProvenance(normalizedRows), rows: normalizedRows });
     }
     if (p === '/api/global-liquidity') {
       const m = await loadSeriesMap(env.DB);

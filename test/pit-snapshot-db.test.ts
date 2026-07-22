@@ -47,7 +47,7 @@ function manifest(): SnapshotInput[] {
 }
 
 describe('official PIT snapshot persistence', () => {
-  it('freezes a PIT row against a legacy no-provenance write and preserves its as-of replay', async () => {
+  it('rejects a legacy no-provenance write before it can alter a frozen PIT row', async () => {
     const { mf, db } = await migratedDb();
     const provenance = {
       dataRunId: 'run-1', dataCutoff: '2024-01-04T23:59:59Z',
@@ -65,12 +65,12 @@ describe('official PIT snapshot persistence', () => {
     const beforeRow = await db.prepare(`SELECT date,decision_week,score,pit_status,data_run_id,recorded_at
       FROM model_snapshot_weekly WHERE decision_week='2024-01-01'`).first();
 
-    const outcome = await upsertOfficialSnapshot(db, 'run-1', { ...snapshot, score: 1 }, 1);
+    await expect((upsertOfficialSnapshot as any)(db, 'run-1', { ...snapshot, score: 1 }, 1))
+      .rejects.toThrow(/provenance/i);
 
     expect(await db.prepare(`SELECT date,decision_week,score,pit_status,data_run_id,recorded_at
       FROM model_snapshot_weekly WHERE decision_week='2024-01-01'`).first()).toEqual(beforeRow);
     expect(await loadEventBacktestInputs(db, cutoff)).toEqual(beforeReplay);
-    expect(outcome).toBe('FROZEN');
     await mf.dispose();
   }, 15000);
 

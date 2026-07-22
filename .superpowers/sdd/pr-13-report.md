@@ -43,6 +43,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 
 ## Final verification
 
+### Review remediation 1 — joint legacy/governed provenance and write invariants
+
+- RED: focused API/worker/DB tests failed because legacy v1 history returned 503, provenance normalization did not exist, and snapshot writers accepted omitted provenance far enough to touch D1.
+- GREEN: `env -u NODE_OPTIONS npx vitest run test/api-schema.test.ts test/db.test.ts test/worker.test.ts test/pit-snapshot-db.test.ts` — 4 files, 54 tests passed; `npm run typecheck`, `npm run lint`, and `git diff --check` passed.
+- V1 backtest, robustness, and export now report joint governed/legacy completeness without inventing legacy identity. Official/nowcast writers require explicit provenance and the ungoverned write fallback was removed. CSV formula defense is string-only, preserving numeric negatives.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

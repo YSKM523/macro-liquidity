@@ -938,22 +938,22 @@ export async function upsertOfficialSnapshot(
   runId: string,
   s: Snapshot,
   spx: number | null,
-  provenance?: SnapshotProvenance,
+  provenance: SnapshotProvenance,
   suppliedIdentity?: ModelIdentity,
 ): Promise<'INSERTED' | 'UPGRADED_LEGACY' | 'FROZEN' | void> {
+  if (provenance == null) throw new Error('official snapshot provenance is required');
   const identity = suppliedIdentity ?? await resolveModelIdentity({});
-  if (provenance) {
-    if (provenance.dataRunId !== runId) throw new Error('official snapshot provenance run mismatch');
-    requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
-    validateSnapshotInputs(provenance.inputs, provenance.decisionAt, s.date, provenance.tradableAt);
-    const week = decisionWeek(s.date);
-    const existing = await db.prepare(
+  if (provenance.dataRunId !== runId) throw new Error('official snapshot provenance run mismatch');
+  requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
+  validateSnapshotInputs(provenance.inputs, provenance.decisionAt, s.date, provenance.tradableAt);
+  const week = decisionWeek(s.date);
+  const existing = await db.prepare(
       'SELECT pit_status,data_run_id FROM model_snapshot_weekly WHERE decision_week=?',
-    ).bind(week).first<{ pit_status: string; data_run_id: string | null }>();
-    if (existing?.pit_status === 'PIT') return 'FROZEN';
+  ).bind(week).first<{ pit_status: string; data_run_id: string | null }>();
+  if (existing?.pit_status === 'PIT') return 'FROZEN';
 
-    const placeholders = Array.from({ length: 37 }, () => '?').join(',');
-    const statements: D1PreparedStatement[] = [db.prepare(
+  const placeholders = Array.from({ length: 37 }, () => '?').join(',');
+  const statements: D1PreparedStatement[] = [db.prepare(
       `INSERT INTO model_snapshot_weekly
        (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,
         model_version,config_hash,code_commit_sha,created_at,recorded_at)
@@ -972,8 +972,8 @@ export async function upsertOfficialSnapshot(
       s.date, week, ...snapshotValues(s, spx), provenance.dataRunId, provenance.dataCutoff,
       provenance.decisionAt, provenance.tradableAt, provenance.releaseResolutionAt, 'PIT',
       identity.modelVersion, identity.configHash, identity.codeCommitSha, runId,
-    )];
-    for (const input of provenance.inputs) {
+  )];
+  for (const input of provenance.inputs) {
       const available = input.inputStatus === 'AVAILABLE';
       statements.push(db.prepare(
         `INSERT INTO snapshot_inputs
@@ -991,8 +991,8 @@ export async function upsertOfficialSnapshot(
         available ? input.value : null, available ? input.source : null,
         available ? input.checksum : null, runId, week, provenance.dataRunId,
       ));
-    }
-    statements.push(db.prepare(
+  }
+  statements.push(db.prepare(
       `SELECT CASE WHEN
        EXISTS (SELECT 1 FROM model_snapshot_weekly snapshot
            WHERE snapshot.decision_week=? AND snapshot.pit_status='PIT' AND snapshot.data_run_id=?
@@ -1005,36 +1005,11 @@ export async function upsertOfficialSnapshot(
     ).bind(
       week, provenance.dataRunId, provenance.releaseResolutionAt,
       week, SERIES_IDS.length, runId,
-    ));
-    await db.batch(statements).catch(error => {
-      throw new Error(`official PIT snapshot atomic write rejected: ${String((error as any)?.message ?? error)}`);
-    });
-    return existing ? 'UPGRADED_LEGACY' : 'INSERTED';
-  }
-  const week = decisionWeek(s.date);
-  const placeholders = Array.from({ length: 31 }, () => '?').join(',');
-  const result = await db.prepare(
-    `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS},
-       model_version,config_hash,code_commit_sha,created_at,recorded_at)
-     SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE EXISTS (
-       SELECT 1 FROM ingest_lock lease
-       WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
-         AND unixepoch(lease.expires_at) > unixepoch('now')
-     )
-     ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,
-       ${SNAPSHOT_UPDATE},model_version=excluded.model_version,config_hash=excluded.config_hash,
-       code_commit_sha=excluded.code_commit_sha,created_at=excluded.created_at,recorded_at=excluded.recorded_at
-     WHERE model_snapshot_weekly.pit_status<>'PIT'`
-  ).bind(s.date, week, ...snapshotValues(s, spx),
-    identity.modelVersion, identity.configHash, identity.codeCommitSha, runId).run();
-  if (Number((result.meta as any)?.changes ?? 0) !== 1) {
-    const frozen = await db.prepare(
-      "SELECT 1 AS frozen FROM model_snapshot_weekly WHERE decision_week=? AND pit_status='PIT'",
-    ).bind(week).first();
-    if (frozen) return 'FROZEN';
-    throw new Error(`ingest lease fence rejected official snapshot write for run ${runId}`);
-  }
+  ));
+  await db.batch(statements).catch(error => {
+    throw new Error(`official PIT snapshot atomic write rejected: ${String((error as any)?.message ?? error)}`);
+  });
+  return existing ? 'UPGRADED_LEGACY' : 'INSERTED';
 }
 
 export async function upsertNowcastSnapshot(
@@ -1042,15 +1017,15 @@ export async function upsertNowcastSnapshot(
   runId: string,
   s: Snapshot,
   spx: number | null,
-  provenance?: Omit<SnapshotProvenance, 'inputs'>,
+  provenance: Omit<SnapshotProvenance, 'inputs'>,
   suppliedIdentity?: ModelIdentity,
 ): Promise<void> {
+  if (provenance == null) throw new Error('nowcast snapshot provenance is required');
   const identity = suppliedIdentity ?? await resolveModelIdentity({});
-  if (provenance) {
-    if (provenance.dataRunId !== runId) throw new Error('nowcast snapshot provenance run mismatch');
-    requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
-    const placeholders = Array.from({ length: 37 }, () => '?').join(',');
-    const result = await db.prepare(
+  if (provenance.dataRunId !== runId) throw new Error('nowcast snapshot provenance run mismatch');
+  requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
+  const placeholders = Array.from({ length: 37 }, () => '?').join(',');
+  const result = await db.prepare(
       `INSERT INTO nowcast_snapshot_daily
        (date,channel_status,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,
         model_version,config_hash,code_commit_sha,created_at)
@@ -1068,30 +1043,11 @@ export async function upsertNowcastSnapshot(
       provenance.dataCutoff, provenance.decisionAt, provenance.tradableAt,
       provenance.releaseResolutionAt, 'PIT', identity.modelVersion, identity.configHash,
       identity.codeCommitSha, runId,
-    ).run();
-    if (Number((result.meta as any)?.changes ?? 0) !== 1) {
-      throw new Error(`ingest lease fence rejected PIT nowcast snapshot write for run ${runId}`);
-    }
-    return;
-  }
-  const placeholders = Array.from({ length: 31 }, () => '?').join(',');
-  const result = await db.prepare(
-    `INSERT INTO nowcast_snapshot_daily (date, channel_status, ${SNAPSHOT_COLUMNS},
-       model_version,config_hash,code_commit_sha,created_at)
-     SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE EXISTS (
-       SELECT 1 FROM ingest_lock lease
-       WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
-         AND unixepoch(lease.expires_at) > unixepoch('now')
-     )
-     ON CONFLICT(date) DO UPDATE SET channel_status='PROVISIONAL',
-       ${SNAPSHOT_UPDATE},model_version=excluded.model_version,config_hash=excluded.config_hash,
-       code_commit_sha=excluded.code_commit_sha,created_at=excluded.created_at`
-  ).bind(s.date, 'PROVISIONAL', ...snapshotValues(s, spx),
-    identity.modelVersion, identity.configHash, identity.codeCommitSha, runId).run();
+  ).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
-    throw new Error(`ingest lease fence rejected nowcast snapshot write for run ${runId}`);
+    throw new Error(`ingest lease fence rejected PIT nowcast snapshot write for run ${runId}`);
   }
+  return;
 }
 
 export async function latestOfficialSnapshot(db: D1Database) {

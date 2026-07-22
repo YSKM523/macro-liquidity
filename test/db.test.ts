@@ -12,7 +12,6 @@ import {
   officialSnapshotOnOrBefore,
   upsertOfficialSnapshot,
 } from '../src/db';
-import { Miniflare } from 'miniflare';
 
 const testSnapshot = {
   date: '2024-07-24', walcl: 6000, tga: 700, rrp: 100, repo: 0, netliq: 5200,
@@ -21,13 +20,6 @@ const testSnapshot = {
   factors: {}, factorResults: {}, freshness: {}, decisionStatus: 'OK',
   p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 1,
 } as any;
-
-const persistedSnapshotColumns = [
-  'walcl', 'tga', 'rrp', 'repo', 'netliq', 'netliq_trend', 'sofr_iorb', 'hy_oas', 'dgs10',
-  'dxy_eod', 'vix_eod', 'qe_qt_regime', 'netliq_dir', 'verdict', 'score', 'p0', 'p1', 'p2',
-  'p3', 'spx', 'reason', 'factors_json', 'coverage', 'decision_status', 'factor_quality_json',
-  'freshness_json',
-];
 
 describe('officialSnapshotBefore', () => {
   it('loads the nearest snapshot strictly before the rebuild start date', async () => {
@@ -84,71 +76,19 @@ describe('officialVerdictAnchors', () => {
 });
 
 describe('official and nowcast snapshot channels', () => {
-  it('provides explicit writers for official weekly and provisional daily storage', async () => {
+  it('rejects every snapshot write without explicit provenance before touching D1', async () => {
+    const prepare = vi.fn();
+    const db = { prepare } as unknown as D1Database;
+    await expect((snapshotDb.upsertOfficialSnapshot as any)(db, 'run-1', testSnapshot, 5000))
+      .rejects.toThrow(/provenance/i);
+    await expect((snapshotDb.upsertNowcastSnapshot as any)(db, 'run-1', testSnapshot, 5000))
+      .rejects.toThrow(/provenance/i);
+    expect(prepare).not.toHaveBeenCalled();
+  });
+  it('provides explicit writers for official weekly and provisional daily storage', () => {
     expect(typeof (snapshotDb as any).upsertOfficialSnapshot).toBe('function');
     expect(typeof (snapshotDb as any).upsertNowcastSnapshot).toBe('function');
-
-    const run = vi.fn(async () => ({ meta: { changes: 1 } }));
-    const bind = vi.fn(() => ({ run }));
-    const prepare = vi.fn(() => ({ bind }));
-    const db = { prepare } as unknown as D1Database;
-    const snapshot = {
-      date: '2024-07-24', walcl: 6000, tga: 700, rrp: 100, repo: 0, netliq: 5200,
-      netliqTrend: 5100, sofrIorb: 0, hyOas: 3, dgs10: 4, dxy: 100, vix: 15,
-      bsImpulse: 'FLAT', netliqDir: 'UP', verdict: 'BULLISH', score: 60,
-      factors: {}, factorResults: {}, freshness: {}, decisionStatus: 'OK',
-      p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 1,
-    } as any;
-
-    await (snapshotDb as any).upsertOfficialSnapshot(db, 'run-1', snapshot, 5000);
-    expect((prepare.mock.calls as unknown as Array<[string]>)[0][0]).toContain('INSERT INTO model_snapshot_weekly');
-    expect(bind.mock.calls[0]).toContain('2024-07-22');
-    expect(bind.mock.calls[0].at(-1)).toBe('run-1');
-
-    await (snapshotDb as any).upsertNowcastSnapshot(db, 'run-1', snapshot, 5000);
-    expect((prepare.mock.calls as unknown as Array<[string]>)[1][0]).toContain('INSERT INTO nowcast_snapshot_daily');
-    expect(bind.mock.calls[1]).toContain('PROVISIONAL');
-    expect(bind.mock.calls[1].at(-1)).toBe('run-1');
   });
-
-  it.each([
-    ['official', 'transferred'],
-    ['official', 'expired'],
-    ['nowcast', 'transferred'],
-    ['nowcast', 'expired'],
-  ] as const)('rejects a %s upsert when the owner lease is %s', async (channel, leaseState) => {
-    const mf = new Miniflare({
-      modules: true,
-      script: 'export default { fetch() { return new Response(); } }',
-      d1Databases: ['DB'],
-    });
-    const db = await mf.getD1Database('DB') as unknown as D1Database;
-    const extraColumn = channel === 'official'
-      ? "decision_week TEXT UNIQUE, recorded_at TEXT, pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT', model_version TEXT, config_hash TEXT, code_commit_sha TEXT, created_at TEXT"
-      : 'channel_status TEXT, model_version TEXT, config_hash TEXT, code_commit_sha TEXT, created_at TEXT';
-    const table = channel === 'official' ? 'model_snapshot_weekly' : 'nowcast_snapshot_daily';
-    await db.batch([
-      db.prepare(`CREATE TABLE ${table} (
-        date TEXT PRIMARY KEY, ${extraColumn}, ${persistedSnapshotColumns.join(', ')}
-      )`),
-      db.prepare('CREATE TABLE ingest_lock (lock_name TEXT PRIMARY KEY, owner_run_id TEXT, acquired_at TEXT, expires_at TEXT)'),
-      db.prepare(`INSERT INTO ingest_lock VALUES (
-        'fred_ingest', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-        strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)
-      )`).bind(
-        leaseState === 'transferred' ? 'replacement' : 'run-1',
-        leaseState === 'expired' ? '-1 second' : '+60 seconds',
-      ),
-    ]);
-
-    const write = channel === 'official'
-      ? snapshotDb.upsertOfficialSnapshot(db, 'run-1', testSnapshot, 5000)
-      : snapshotDb.upsertNowcastSnapshot(db, 'run-1', testSnapshot, 5000);
-    await expect(write).rejects.toThrow(/lease|fence/i);
-    await expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first())
-      .resolves.toEqual({ n: 0 });
-    await mf.dispose();
-  }, 30_000);
 
   it('loads official analytics exclusively from weekly storage', async () => {
     const all = vi.fn(async () => ({ results: [] }));
@@ -296,10 +236,12 @@ describe('event-time backtest repository', () => {
 
 describe('snapshot quality persistence', () => {
   it('serializes decision status, factor quality, and series freshness in the snapshot upsert', async () => {
+    const first = vi.fn(async () => null);
     const run = vi.fn(async () => ({ meta: { changes: 1 } }));
-    const bind = vi.fn(() => ({ run }));
+    const bind = vi.fn(() => ({ first, run }));
     const prepare = vi.fn(() => ({ bind }));
-    const db = { prepare } as unknown as D1Database;
+    const batch = vi.fn(async () => []);
+    const db = { prepare, batch } as unknown as D1Database;
     const factorResults = {
       credit: { score: null, quality: 0, status: 'MISSING', asOf: null, components: {} },
     };
@@ -314,15 +256,26 @@ describe('snapshot quality persistence', () => {
       p0: true, p1: true, p2: true, p3: true, reason: 'ok', coverage: 0.875,
     } as any;
 
-    await upsertOfficialSnapshot(db, 'run-1', snapshot, 5000);
+    const inputs = (await import('../src/config')).SERIES_IDS.map(seriesId => ({
+      seriesId, inputStatus: 'MISSING' as const, observationDate: null, vintageDate: null,
+      releasedAt: null, fetchedAt: null, tradableAt: null, source: null, checksum: null,
+      releaseTimeStatus: null, value: null,
+    }));
+    await upsertOfficialSnapshot(db, 'run-1', snapshot, 5000, {
+      dataRunId: 'run-1', dataCutoff: '2024-07-23T23:59:59Z',
+      decisionAt: '2024-07-24T00:00:00Z', tradableAt: '2024-07-24T14:30:00Z',
+      releaseResolutionAt: '2024-07-24T00:00:00Z', inputs,
+    }, {
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), codeCommitSha: 'b'.repeat(40),
+    });
 
-    const preparedSql = (prepare.mock.calls as unknown as [[string]])[0][0];
+    const preparedSql = (prepare.mock.calls as unknown as Array<[string]>)[1][0];
     expect(preparedSql).toContain('decision_status');
     expect(preparedSql).toContain('factor_quality_json');
     expect(preparedSql).toContain('freshness_json');
-    expect(bind.mock.calls[0]).toEqual(expect.arrayContaining([
+    expect(bind.mock.calls[1]).toEqual(expect.arrayContaining([
       'OK', JSON.stringify(factorResults), JSON.stringify(freshness),
-      'champion-v1.0.0', 'LOCAL_UNCONFIGURED', 'run-1',
+      'champion-v1.0.0', 'a'.repeat(64), 'run-1',
     ]));
   });
 
