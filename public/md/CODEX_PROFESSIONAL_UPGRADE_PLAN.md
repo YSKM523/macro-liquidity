@@ -17,7 +17,7 @@
 | PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
-| PR-08 | 已完成（本地） | `07f7c81`–`128bd55` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
+| PR-08 | 已完成（本地） | `07f7c81`–`bb5c2ff` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
 | PR-09～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1774,9 +1774,10 @@ feat: point-in-time observation storage
 - [x] release calendar 按 vintage 唯一选取版本，缺失/重叠 fail closed；override append-only 版本化并按 post-fetch 固定 resolution cutoff 解析
 - [x] raw universe 同时冻结 `fetched_at <= release_resolution_at`；正式 event 排除 cutoff 后的 resolved release
 - [x] weekly/daily PIT cutoff 冻结后，DB trigger 拒绝 backdated 或 equal-cutoff override；无冻结快照时仍允许历史 override
+- [x] weekly/daily PIT cutoff 冻结后，DB trigger 拒绝 backdated 或 equal-cutoff 的新 raw vintage；初始历史装载与同主键幂等 replay 保持可用，违规 activation 原子回滚且不切换 ACTIVE
 - [x] strict canonical ISO/epoch 比较与 SQL `julianday` cutoff/排序，覆盖混合毫秒精度及不存在日期
 - [x] legacy 一次升级；任何既有 PIT 正式快照均冻结，包括异常 `data_run_id IS NULL` 行；迟滞锚点按完整 decision week 读取
-- [x] 本地 fresh migration 首次应用与二次幂等检查、474 tests 与 TypeScript strict 验证（实现 commits `07f7c81..128bd55`）
+- [x] 本地 fresh migration 首次应用与二次幂等检查、477 tests 与 TypeScript strict 验证（实现 commits `07f7c81..bb5c2ff`）
 
 PR-08 已知限制：ALFRED 历史只提供 vintage 日期时仍使用保守日末发布时间；默认 next-weekday 规则尚未覆盖美股假日。resolver 不再保留全部 frame，但当前服务仍一次加载并排序 cutoff-visible PIT 行；stored timing 异常检查只返回至多一条坏行，不再额外物化全表。`snapshot_inputs` 仅是 endpoint audit index，不应被解释为全部评分行 manifest。这些限制留给 PR-09 的交易日历/执行引擎或独立的流式数据库读取改造，不在 PR-08 扩展模型公式、权重或阈值。
 

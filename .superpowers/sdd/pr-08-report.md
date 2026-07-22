@@ -2,7 +2,7 @@
 
 ## Status
 
-PASS — PR-08 point-in-time observation storage is implemented and validated locally on `codex/pr-08-pit-storage` from base `e415f5d`; implementation and final-review commits are `07f7c81..128bd55`.
+PASS — PR-08 point-in-time observation storage is implemented and validated locally on `codex/pr-08-pit-storage` from base `e415f5d`; implementation and final-review commits are `07f7c81..bb5c2ff`.
 
 No deploy, push, remote D1 access, production mutation, Champion formula/weight/threshold/hysteresis change, official/nowcast policy change, or PR-09 return/cost/holiday-calendar work was performed.
 
@@ -15,6 +15,7 @@ No deploy, push, remote D1 access, production mutation, Champion formula/weight/
 - Versions release overrides append-only by `(series_id, vintage_date, created_at)` and resolves the newest version created by the run-fixed `release_resolution_at`. Both snapshot channels persist that cutoff; raw observations plus `decision_at` and `release_resolution_at` reproduce the resolved history.
 - Captures `release_resolution_at` once after all successful HTTP fetches and activation, using an injectable clock. Replay excludes raw rows fetched after that instant, so a later backfill with an old `released_at` cannot enter an older frozen universe; official event generation also excludes resolved releases after the cutoff.
 - Prevents write-time provenance forgery: after any weekly or daily PIT snapshot has a non-null resolution cutoff, a D1 trigger rejects a new override whose declared `created_at` is at or before any frozen cutoff. Historical override entry remains allowed before the first frozen PIT snapshot, and inserts strictly after every cutoff remain allowed.
+- Applies the same frozen-cutoff invariant to genuinely new raw vintages: a D1 trigger rejects `fetched_at` at or before any weekly/daily PIT resolution cutoff. Initial historical population without a frozen snapshot, idempotent existing-key replay, and new rows strictly after all cutoffs remain valid; a violating ingest activation rolls back the entire batch and leaves the prior ACTIVE run unchanged.
 - Validates canonical ISO timestamps, including real calendar round-trip, and compares epochs rather than timestamp text. D1 cutoff and ordering use `julianday`; equal real override instants expressed with different precision fail closed as ambiguous.
 - Writes immutable official provenance and one `AVAILABLE`/`MISSING` endpoint audit-index row for every configured series. Legacy official rows may upgrade once; every existing PIT row freezes even if its `data_run_id` is abnormally null. Nowcasts save provenance without a formal endpoint index.
 
@@ -46,15 +47,16 @@ No deploy, push, remote D1 access, production mutation, Champion formula/weight/
 - Review RED/GREEN: frame tradability initially remained `2024-01-10` despite a used row tradable on `2024-01-12`; `dataCutoff` ignored a late revision of an older scoring row; the eager resolver had no lazy iterator; later overrides changed old rebuilds; release rules used only the database-current version; and an abnormal PIT row with null run provenance could be overwritten. Focused tests now cover each failure, including strict rule/override timestamps, frozen resolution cutoffs, and official endpoint-index tradability rejection.
 - Final specification RED/GREEN covers late-backfill exclusion by raw `fetched_at`, resolved official events after the cutoff, a single post-fetch injected resolution instant across row/event/snapshot reads, canonical invalid-calendar rejection, mixed `SSZ`/`SS.sssZ` override/release/decision/tradability/prefix ordering, ambiguous equal-instant override versions, and frozen decision-week anchors in both date directions.
 - Backdated-override RED/GREEN uses real D1 for both weekly and daily PIT channels, covering no-snapshot historical insertion, earlier/equal cutoff rejection, and strictly-after-cutoff acceptance. The trigger is intentionally created only after both snapshot provenance schemas exist.
-- Scale coverage constructs 12 daily series × 2,500 rows and 500 decision events, verifies lazy first-frame iteration and all 500 outputs, and stays within the explicit performance budget. In the final full run, `test/pit.test.ts` completed in about 294 ms.
+- Backdated-raw RED/GREEN uses real D1 for both weekly and daily PIT channels. Three tests first demonstrated that earlier/equal-cutoff rows and a violating activation were incorrectly accepted, then proved no-snapshot initial population, earlier/equal rejection, strictly-after acceptance, idempotent replay, and atomic activation rollback without an ACTIVE switch.
+- Scale coverage constructs 12 daily series × 2,500 rows and 500 decision events, verifies lazy first-frame iteration and all 500 outputs, and stays within the explicit performance budget. In the final full run, the scale case completed in about 2.94 seconds under concurrent D1 integration load.
 
 ## 5. Verification results
 
 - Controller fresh `env -u NODE_OPTIONS npm test` initially exposed real Miniflare timeout failures under parallel D1 load. A later final run reproduced one remaining five-second timeout in `test/db.test.ts`; isolated execution completed in about 0.6 seconds, confirming parallel resource contention. The parameterized real-D1 lease test now uses the same explicit 30-second budget as the other integration suites; no production runtime or global Vitest timeout changed.
-- Final controller-fresh `env -u NODE_OPTIONS npm test`: PASS, exit 0, 27/27 files and 474/474 tests. No truncated reporter output is treated as proof.
+- Final controller-fresh `env -u NODE_OPTIONS npm test`: PASS, exit 0, 27/27 files and 477/477 tests. No truncated reporter output is treated as proof.
 - `env -u NODE_OPTIONS npx tsc --noEmit`: PASS, exit 0, no diagnostics.
 - `git diff --check`: PASS, exit 0.
-- Fresh local migration directory `/tmp/pr08-backdate-migration.3Oje5z`: first run applied `0001` through `0008` successfully.
+- Fresh local migration directory `/tmp/pr08-raw-guard-migration-final-20260722-1`: first run applied `0001` through `0008` successfully.
 - The second migration run against the same directory returned `No migrations to apply!`.
 
 ## 6. Known limitations
@@ -68,7 +70,7 @@ No deploy, push, remote D1 access, production mutation, Champion formula/weight/
 
 ## 7. Migration impact
 
-Migration `0008` is additive: new PIT staging/raw/calendar/versioned-override/endpoint-index tables, indexes, append-only triggers, a revision view, seeded configured-series calendar rows, and five nullable provenance columns—including `release_resolution_at`—plus `pit_status` on each snapshot channel. After those provenance columns are added, it creates the frozen-cutoff backdate guard. Existing snapshot rows default to `LEGACY_NON_PIT`; no table is dropped and existing `observations` readers continue to work.
+Migration `0008` is additive: new PIT staging/raw/calendar/versioned-override/endpoint-index tables, indexes, append-only triggers, a revision view, seeded configured-series calendar rows, and five nullable provenance columns—including `release_resolution_at`—plus `pit_status` on each snapshot channel. After those provenance columns are added, it creates frozen-cutoff backdate guards for both override metadata and genuinely new raw observations. Existing snapshot rows default to `LEGACY_NON_PIT`; no table is dropped and existing `observations` readers continue to work.
 
 ## 8. Rollback
 

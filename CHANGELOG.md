@@ -19,8 +19,9 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Replaced PIT timestamp text comparisons with canonical strict ISO epoch comparisons and D1 `julianday` cutoff/order semantics, including fail-closed equal-instant override ambiguity.
 - Validated staged raw timings before write and changed stored-data corruption checks to a SQL `LIMIT 1` guard, avoiding a second full raw-table result set during rebuild.
 - Added a post-provenance migration trigger that rejects override inserts backdated at or before any frozen weekly/daily PIT resolution cutoff, while preserving historical override entry before the first frozen snapshot.
+- Added a companion raw-observation trigger that rejects genuinely new vintages whose `fetched_at` is at or before any frozen weekly/daily PIT resolution cutoff. Initial historical population and idempotent existing-key replay remain valid; a violating ingest activation rolls back atomically without replacing the ACTIVE run.
 - Reloaded frozen hysteresis anchors across the complete decision week when the rebuilt snapshot date differs from the stored date.
-- Expanded the final local verification to 27 files / 474 tests, TypeScript strict, diff checks, and fresh local migration first/second-run validation.
+- Expanded the final local verification to 27 files / 477 tests, TypeScript strict, diff checks, and fresh local migration first/second-run validation.
 - Added local-only migration `0008_point_in_time_observations.sql`; no deployment, remote D1 access, model formula, weight, threshold, hysteresis, or channel-policy change was made.
 
 ### PR-07 — Source timestamps and provider fallback
