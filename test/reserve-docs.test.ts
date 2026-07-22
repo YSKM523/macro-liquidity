@@ -1,9 +1,10 @@
+// @ts-ignore -- project tsconfig intentionally loads Workers rather than Node types
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('PR-12 research documentation contract', () => {
   it('publishes identical algorithm docs and records the frozen shadow result everywhere', () => {
-    const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+    const read = (path: string) => readFileSync(path, 'utf8');
     const algorithm = read('docs/ALGORITHM.md');
     expect(read('public/algorithm.md')).toBe(algorithm);
     for (const path of ['README.md', 'CHANGELOG.md', 'docs/ALGORITHM.md', 'public/algorithm.md', 'public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md']) {

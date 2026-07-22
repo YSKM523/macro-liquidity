@@ -1,8 +1,11 @@
 # Dynamic Reserve Adequacy Challenger — Preregistration
 
-Status: `AMENDED_AFTER_REVIEW_BEFORE_CORRECTED_FETCH`  
-Methodology: `PR12_RESEARCH_V2_SRF_BOUNDARY`  
-Evidence: `RESEARCH_CURRENT_VINTAGE`  
+Status: `AMENDED_AFTER_REVIEW_BEFORE_CORRECTED_FETCH`
+
+Methodology: `PR12_RESEARCH_V2_SRF_BOUNDARY`
+
+Evidence: `RESEARCH_CURRENT_VINTAGE`
+
 Production eligibility: `replacementEligible=false`
 
 This document freezes PR-12 before any canonical data fetch. The package is shadow research only and cannot change the Champion, production API, snapshots, database schema, score, weights, thresholds, hysteresis, or portfolio policy.

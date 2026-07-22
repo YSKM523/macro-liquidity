@@ -1,7 +1,9 @@
 # PR-12 Delivery Report
 
-Base: `ba74a6c`  
-Branch: `codex/pr-12-reserve-adequacy`  
+Base: `ba74a6c`
+
+Branch: `codex/pr-12-reserve-adequacy`
+
 Candidate range: `7f64d10..HEAD`
 
 ## 1. 修改摘要
