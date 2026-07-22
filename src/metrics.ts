@@ -344,7 +344,7 @@ export interface Guidance {
 export function buildGuidance(input: GuidanceInput): Guidance {
   const { score, verdict, netliqDir, qeQtRegime, stressStatus } = input;
   const stressed = stressStatus === 'STRESSED';
-  const stressApplied = input.stressApplied ?? stressed;
+  const stressApplied = input.stressApplied ?? (stressed && score < STRESS_SCORE_CEILING);
 
   // Tier logic (ordered: stress first, then score bands)
   let tone: Guidance['tone'];

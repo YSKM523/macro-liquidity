@@ -41,4 +41,12 @@ describe('dashboard portfolio exposure policy', () => {
       score: 60, verdict: 'BULLISH', netliqDir: 'DOWN', stressStatus: 'NORMAL',
     }));
   });
+
+  it('keeps direct live guidance and its numeric policy on the score-65 stress exemption', () => {
+    const guidance = buildGuidance({
+      score: 65, verdict: 'BULLISH', netliqDir: 'UP', qeQtRegime: 'FLAT', stressStatus: 'STRESSED',
+    });
+    expect(guidance.tone).toBe('bull');
+    expect(guidance.portfolioPolicy).toMatchObject({ targetExposure: 1, stressApplied: false });
+  });
 });

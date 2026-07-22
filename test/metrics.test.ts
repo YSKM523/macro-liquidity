@@ -457,8 +457,8 @@ describe('buildGuidance', () => {
   const base = { verdict: 'NEUTRAL', netliqDir: 'FLAT', qeQtRegime: 'FLAT', stressStatus: 'NORMAL' } as const;
 
   // ── stress-override branch ──────────────────────────────────────────────
-  it('stressed=true → tone brake regardless of score', () => {
-    const g = buildGuidance({ score: 70, ...base, stressStatus: 'STRESSED' });
+  it('stressed=true below the score-65 exemption → tone brake', () => {
+    const g = buildGuidance({ score: 60, ...base, stressStatus: 'STRESSED' });
     expect(g.tone).toBe('brake');
     expect(g.tierLabel).toBe('RISK-OFF · 刹车');
     expect(g.exposure).toContain('立刻停止加仓');
@@ -466,7 +466,7 @@ describe('buildGuidance', () => {
   });
 
   it('stressed=true → trigger[1] armed=true', () => {
-    const g = buildGuidance({ score: 70, ...base, stressStatus: 'STRESSED' });
+    const g = buildGuidance({ score: 60, ...base, stressStatus: 'STRESSED' });
     expect(g.triggers[1].armed).toBe(true);
     expect(g.triggers[1].detail).toContain('已触发');
   });

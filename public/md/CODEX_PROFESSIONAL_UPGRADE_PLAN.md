@@ -19,7 +19,8 @@
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
 | PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
-| PR-10～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
+| PR-10 | 待复审（本地候选） | `52b551a`–`88dd3b7` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；等待 fresh full verification 与独立 review |
+| PR-11～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -1803,8 +1804,8 @@ refactor: event-time backtest engine
 - [x] 当前候选 head 的 29 files / 518 tests、TypeScript strict 与 diff-check
 - [x] fresh local 0001–0009 migration 首次全部成功，紧接二次返回 `No migrations to apply!`
 - [x] 固定 `37fd6c4..02f9e38` 的 review package 与 final rereview：Ready，0 Critical / 0 Important
-- [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）
-- [ ] BT-05：公平基准与尾部指标（PR-10）
+- [x] BT-03：dashboard exposure tiers 仓位状态机（PR-10 本地候选）
+- [x] BT-05：公平基准与尾部指标（PR-10 本地候选）
 
 PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。全年统一 `17:00Z` 只是不会晚于任何正常/early-close session 的保守 eligibility lower bound，并非真实交易所收盘时间。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，NAV 为空且全部绩效 totals 为 null。Synthetic migration backfill 与 legacy/no-PIT rows 仅供审计，formal gate 会保持 `DATA_INCOMPLETE`，直到对应日期取得真实 PIT provenance；append-only correction 可通过相同 `as_of` cutoff 重放旧结果。
 
@@ -1820,9 +1821,16 @@ feat: portfolio backtest aligned with dashboard exposure tiers
 
 内容：
 
-- 实际仓位状态机
-- Beta 匹配基准
-- 尾部指标
+- [x] live guidance 与正式 PIT 回测共用单一数值仓位策略：100/90/75/50/25%，stress 25%，unknown 上限 75%，保留 score 65 豁免
+- [x] 历史 stress 只读冻结 snapshot `vix_eod`（`PIT_SNAPSHOT_VIX_PROXY`），缺字段正式绩效 fail closed
+- [x] 同一窗口比较 100% SPX、平均 Beta 静态组合、prior-only 20-session vol target、prior-close 200DMA
+- [x] 全部组合共用 SOFR prior-date、费用、VIX 滑点与 incomplete gate
+- [x] 报告总收益、timing alpha、平均 Beta、波动、Sharpe、Sortino、最大回撤与持续期；不足样本返回 null
+- [ ] fresh full tests / TypeScript / migrations twice / independent review（完成后更新状态行）
+
+PR-10 已知限制：SPX 是不含股息的 FRED 指数收盘；历史 stress 仅用冻结周快照 VIX 水平 proxy，不复建完整实时四资产 stress overlay。20-session 波动目标和 200DMA 在前置历史不足时持有现金，因此若正式策略 evaluation window 从较晚首个执行日开始，基准不会借用窗口外价格历史。Sharpe/Sortino 使用日频已含现金与成本的组合收益，不另减无风险利率；无负收益或零波动时相应比率返回 null。没有独立交易所 calendar，仍由 SPX 实际行定义 session。
+
+PR-10 回滚：对 PR-10 base `f04d4b2` 之后的本 PR commit range 做专用 revert；本 PR 无 migration、无远程数据库变更，回滚不需要删表或改数据。PR-09 append-only 日频存储和 event-time API 基础保持不动。
 
 ---
 

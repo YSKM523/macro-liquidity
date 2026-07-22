@@ -4,6 +4,17 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-10 — Dashboard-aligned portfolio backtest
+
+- Added one pure `DASHBOARD_EXPOSURE_TIERS_V1` mapper shared by live guidance and formal PIT signals: strong tailwind 100%, ordinary tailwind 90%, neutral 75%, cautious 50%, headwind 25%, stress brake 25%, and unknown capped at 75%.
+- Preserved the existing score-65 stress exemption and derived historical stress only from each immutable weekly snapshot's frozen `vix_eod` (`PIT_SNAPSHOT_VIX_PROXY`); missing VIX is unknown and VIX at/above 28 is stressed.
+- Replaced the formal event-time strategy's compatibility long/flat target with explicit snapshot-derived targets. Formal runs fail closed when the target, tier, or methodology is missing; the score>55 fallback remains only in the isolated execution scheduler compatibility path.
+- Added a reusable daily long/cash simulator and four same-window benchmarks: 100% SPX, static SPX/cash at strategy average beta, prior-only 20-session 10%-volatility target capped at 100%, and prior-close 200DMA risk control.
+- Applied the same SOFR prior-date availability, commission, slippage, VIX stress cost, and incomplete-data behavior to strategy and benchmarks.
+- Added total return, timing alpha versus beta-matched static, average beta, annualized volatility, Sharpe, Sortino, maximum drawdown, and maximum drawdown duration; insufficient histories return null metrics.
+- Published the named methodologies, benchmark table, assumptions, and limitations in `/api/backtest`, the dashboard, and algorithm documentation without changing Champion scoring, weights, bands, hysteresis, PIT visibility, or execution timing.
+- Added no migration and performed no deploy, push, remote D1 access, or production database change.
+
 ### PR-09 — Event-time daily backtest
 
 - Added append-only revisioned `market_prices_daily` and `cash_rates_daily` with strict source/fetch/run/activation provenance, update/delete guards, an explicitly synthetic auditable local backfill, and correction-aware materialization from the latest matching PIT vintage inside the ingest activation fence. Activation touches only the current staging scope; unchanged inclusive replays do not duplicate history.
