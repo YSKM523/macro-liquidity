@@ -1,8 +1,40 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Vitest executes in Node.
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// @ts-ignore Vitest executes in Node.
+import { execFileSync, spawnSync } from 'node:child_process';
+// @ts-ignore Vitest executes in Node.
+import { tmpdir } from 'node:os';
+// @ts-ignore Vitest executes in Node.
+import { join, resolve } from 'node:path';
+declare const process: { execPath: string; env: Record<string, string | undefined> };
 
 const read = (path: string) => readFileSync(path, 'utf8');
+
+function deployFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'deploy-git-gate-'));
+  writeFileSync(join(root, 'tracked.txt'), 'clean\n');
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const fakeNpx = join(root, 'npx');
+  writeFileSync(fakeNpx, '#!/bin/sh\necho unexpected-npx >&2\nexit 99\n', { mode: 0o700 });
+  chmodSync(fakeNpx, 0o700);
+  const run = (sha: string) => spawnSync(process.execPath, [
+    resolve('scripts/deploy-production.mjs'), '--execute',
+    '--confirm-production=DEPLOY_PRODUCTION', '--schema-confirmed=0010',
+  ], {
+    cwd: root, encoding: 'utf8',
+    env: {
+      ...process.env, PATH: `${root}:${process.env.PATH}`, CODE_COMMIT_SHA: sha,
+      CLOUDFLARE_API_TOKEN: 'fake', CLOUDFLARE_ACCOUNT_ID: 'fake',
+    },
+  });
+  return { root, head, run };
+}
 
 describe('production governance configuration', () => {
   it('defines reproducible local engineering gates', () => {
@@ -47,6 +79,32 @@ describe('production governance configuration', () => {
     expect(guard).toContain('--confirm-production=DEPLOY_PRODUCTION');
     expect(guard).toContain('--schema-confirmed=0010');
     expect(guard).toContain('CODE_COMMIT_SHA');
+  });
+
+  it('refuses a valid-looking deployment SHA that is not the checked-out HEAD', () => {
+    const fixture = deployFixture();
+    try {
+      const mismatch = fixture.head === 'a'.repeat(40) ? 'b'.repeat(40) : 'a'.repeat(40);
+      const result = fixture.run(mismatch);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/CODE_COMMIT_SHA.*HEAD/i);
+      expect(result.stderr).not.toContain('unexpected-npx');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses deployment from a dirty tracked worktree', () => {
+    const fixture = deployFixture();
+    try {
+      writeFileSync(join(fixture.root, 'tracked.txt'), 'dirty\n');
+      const result = fixture.run(fixture.head);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/tracked worktree.*clean/i);
+      expect(result.stderr).not.toContain('unexpected-npx');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it('publishes model governance and operations documentation', () => {

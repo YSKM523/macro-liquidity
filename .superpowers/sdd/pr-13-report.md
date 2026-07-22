@@ -105,6 +105,12 @@ Snapshot writer hardening was completed in remediation 1: every official/nowcast
 - GREEN: backup/restore tests passed 5/5; typecheck, lint, and diff check passed.
 - Table rows are canonically ordered for export. After restore, the second D1 is re-exported and its complete schema/all-table-data SHA-256 must exactly equal the source export. The negative corruption drill exits nonzero with `restored export content hash mismatch`.
 
+### Re-review remediation 3 — checked-out production deployment identity
+
+- RED: production-governance tests showed that a different valid 40-hex SHA or dirty tracked source progressed to the fake migration command.
+- GREEN: governance tests passed 6/6; typecheck, lint, and diff check passed.
+- Before any Wrangler command, the wrapper now requires `CODE_COMMIT_SHA === git rev-parse HEAD` and an empty tracked-only Git status. Mismatch/dirty tests use a temporary Git repository and fake `npx`, proving no migration/deploy command is reached.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

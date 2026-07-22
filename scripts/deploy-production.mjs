@@ -24,25 +24,40 @@ if (!execute || !confirmed || !schemaConfirmed || !immutableCommit || !credentia
   }));
   process.exitCode = 1;
 } else {
-  const run = (commandArgs) => spawnSync('npx', commandArgs, {
-    stdio: 'inherit',
-    env: process.env,
-  });
-
-  const migration = run([
-    'wrangler', 'd1', 'migrations', 'apply', 'macro_liquidity',
-    '--remote', '--env', 'production',
-  ]);
-  if (migration.status !== 0) {
-    console.error(JSON.stringify({ outcome: 'MIGRATION_FAILED', status: migration.status }));
-    process.exitCode = migration.status ?? 1;
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const trackedStatus = spawnSync(
+    'git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' },
+  );
+  if (head.status !== 0 || trackedStatus.status !== 0) {
+    console.error('production deploy requires a readable Git worktree');
+    process.exitCode = 1;
+  } else if (head.stdout.trim().toLowerCase() !== commitSha) {
+    console.error('CODE_COMMIT_SHA must equal checked-out HEAD');
+    process.exitCode = 1;
+  } else if (trackedStatus.stdout.trim() !== '') {
+    console.error('production deploy requires the tracked worktree to be clean');
+    process.exitCode = 1;
   } else {
-    const deploy = run([
-      'wrangler', 'deploy', '--env', 'production', '--var', `CODE_COMMIT_SHA:${commitSha}`,
+    const run = (commandArgs) => spawnSync('npx', commandArgs, {
+      stdio: 'inherit',
+      env: process.env,
+    });
+
+    const migration = run([
+      'wrangler', 'd1', 'migrations', 'apply', 'macro_liquidity',
+      '--remote', '--env', 'production',
     ]);
-    if (deploy.status !== 0) {
-      console.error(JSON.stringify({ outcome: 'DEPLOY_FAILED', status: deploy.status }));
-      process.exitCode = deploy.status ?? 1;
+    if (migration.status !== 0) {
+      console.error(JSON.stringify({ outcome: 'MIGRATION_FAILED', status: migration.status }));
+      process.exitCode = migration.status ?? 1;
+    } else {
+      const deploy = run([
+        'wrangler', 'deploy', '--env', 'production', '--var', `CODE_COMMIT_SHA:${commitSha}`,
+      ]);
+      if (deploy.status !== 0) {
+        console.error(JSON.stringify({ outcome: 'DEPLOY_FAILED', status: deploy.status }));
+        process.exitCode = deploy.status ?? 1;
+      }
     }
   }
 }
