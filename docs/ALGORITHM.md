@@ -170,6 +170,14 @@ score = 100/(1+exp(-latent))
 
 Agreement-confirmed moving-block bootstrap 95% CI 为 [0.1019, 0.4455]、p=0.0015，Raw/Smooth agreement rate 为 91.36%。但是固定的六个日历 fold 中，2005–2008 与 2009–2012 因 FRED SP500 覆盖不足为空，2013–2016 可评估尾段为负；未改变的 gate 要求 positive fold 至少 4 个，空 fold 不得动态重分。因此结论是 `INCONCLUSIVE`，决策是 `DROP_RESEARCH`，不能替换或接入 Champion。完整的原始预注册、修订账本、JSON 和 corrected 报告见 `docs/research/`。
 
+### 6.4 PR-12 动态准备金充裕度 Challenger（shadow research）
+
+PR-12 在 Champion 之外冻结了四组件动态分数：相对准备金 30%、13 周准备金变化 25%、SOFR−IORB 周中位数/p95 逆分位 25%、EFFR−IORB/TGCR−IORB 周中位数与 SRF 周最大用量逆分位 20%。所有分位严格只读至少 52 个 prior complete weeks；组件分别记录 as-of、age、pair count 和 freshness，缺失或陈旧即 `DATA_INCOMPLETE`。状态为 ABUNDANT/AMPLE/TRANSITION/SCARCE/STRESSED；该研究不修改生产 `reserveAdequacy` 因子。
+
+证据版本 `PR12_RESEARCH_V2_SRF_BOUNDARY` 使用 FRED `WRESBAL/GDP/SOFR/IORB/EFFR/TGCRRATE/SP500` 与 NY Fed Repo results。A-001 记录不存在的 FRED ID 修正；A-002 将 NY Fed canonical start 严格固定为 SRF 上线日 `2021-07-29`，v1 因混入此前临时 Repo 而标为 `INVALIDATED_BY_REVIEW`。小额 exercises 因 API 无明确标志而保留，是已知限制。数据均为 `RESEARCH_CURRENT_VINTAGE`，不是 ALFRED/PIT，`replacementEligible=false`。
+
+冻结 v2 报告有 196 个 scored weeks、194 个可对齐 13 周结果；overlapping IC 0.2363，但 interval-non-overlapping IC −0.0071（n=15），仅 3 个固定 fold 为正，最高 quintile 的 10% tail 也差于最低 quintile。未改变的 gate 因此给出 `DROP_RESEARCH`。Champion、正式 API/快照、数据库和仓位全部不变。完整预注册、修订账本、artifact manifest 与报告见 `docs/research/`。
+
 ## 7. 数据流水线 + 可信度
 
 - `cron`(每 3 小时)→ 用 D1 当前时间获取数据库租约 → 建立序列 attempt → 以 ALFRED `output_type=3` 和 inclusive `realtime_start` 抓取 vintage → 双 staging → 完整性校验 → 单个 D1 事务更新兼容 `observations`、append-only `observations_pit`、SPX/VIX 日收盘与 SOFR 现金表并切换唯一 ACTIVE run → 按逐日 event-time cutoff 重算近 14 天 nowcast。日频表从相同 observation 的最新匹配 PIT vintage 继承真实 `source/fetched_at/data_run_id`；0009 对旧 compatibility rows 的 backfill 明确使用 synthetic migration provenance，后续同值 activation 仅在存在真实 PIT 行时升级。checksum 冲突、租约转移或任一语句失败都会让整批回滚。

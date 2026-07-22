@@ -21,7 +21,8 @@
 | PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
 | PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
 | PR-11 | 已完成（本地） | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
-| PR-12～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
+| PR-12 | 已完成（本地） | `7f64d10`–待最终复审 | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
+| PR-13 | 待执行 | — | 按第 11 节顺序实施；独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -1871,10 +1872,20 @@ research: dynamic reserve adequacy challenger
 
 内容：
 
-- 相对准备金
-- 利差分位
-- 状态分类
-- OOS 研究报告
+- [x] 相对准备金与 13 周变化，严格 prior-only expanding percentile、至少 52 个完整 prior weeks
+- [x] SOFR−IORB median/p95 与 EFFR/TGCR/SRF 辅助压力，同日配对、独立 freshness、缺失/陈旧 fail closed
+- [x] ABUNDANT / AMPLE / TRANSITION / SCARCE / STRESSED 状态及高准备金但利差恶化降分、季度末 spike 不延续测试
+- [x] next-Monday 13 周目标、overlap/non-overlap IC、seeded bootstrap、固定六 folds、quintile tail/monotonic gate
+- [x] A-001 exact source 修正；A-002 将 NY Fed 边界冻结为 SRF 上线日 2021-07-29，v1 `INVALIDATED_BY_REVIEW`
+- [x] schema-v2 FRED + NY Fed current-vintage snapshot/manifest，精确 URL/schema/row range/response+normalized+snapshot SHA-256 校验
+- [x] corrected report 一次性生成：IC 0.2363/−0.0071（n=194/15），3 个正 fold，top tail gate 失败，决策 `DROP_RESEARCH`
+- [x] `RESEARCH_CURRENT_VINTAGE`、replacementEligible=false；Shadow only，未改 Champion、API、快照、migration 或数据库
+
+PR-12 corrected methodology 为 `PR12_RESEARCH_V2_SRF_BOUNDARY`。v1 在 fetch 后、正式发布前被审查发现包含 2021-07-29 之前的临时 Repo，已保留为无效审计件；v2 严格拒绝 launch 前行。NY Fed 小额 exercises 因没有无歧义字段而保留，可能夸大市场驱动的 SRF 使用，是明确限制。公式、权重、状态阈值、freshness、folds、bootstrap、OOS gate 与资格均未调参。
+
+PR-12 实证摘要：1231 个 Friday anchors 中 248 个完整、196 个在 52 prior weeks 后可评分；194 个成熟目标 overlapping IC 为 0.2363，15 个 interval-non-overlap IC 为 −0.0071；bootstrap 95% CI [−0.0492, 0.4805]、p=0.0515。六个固定 fold 中前两个为空，剩余四个只有三个为正；Q5 mean 高于 Q1，但 Q5 10% tail 更差，因此冻结 gate 给出 `DROP_RESEARCH`。
+
+PR-12 回滚：回退 base `ba74a6c` 后的 PR-12 commits。没有 migration 或生产/远程数据写入，无需数据库回滚。
 
 ---
 

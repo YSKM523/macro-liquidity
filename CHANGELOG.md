@@ -4,6 +4,16 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-12 — Dynamic reserve adequacy challenger research
+
+- Preregistered a shadow-only 30/25/25/20 composite of relative reserves, 13-week reserve change, SOFR−IORB median/p95, and auxiliary EFFR/TGCR/SRF stress; all percentiles are strictly prior-only with 52 complete weeks and independent component freshness.
+- Added ABUNDANT/AMPLE/TRANSITION/SCARCE/STRESSED states, fail-closed `DATA_INCOMPLETE`, next-Monday 13-week SP500 alignment, overlapping/non-overlapping Spearman IC, seeded moving-block bootstrap, six fixed folds, quintile tails, and monotonicity diagnostics.
+- Recorded A-001 after nonexistent FRED `TGCR`/`SRFONTSYD` returned 404, using exact FRED `TGCRRATE` and official NY Fed Repo results without changing formula or gates.
+- Recorded A-002 after review found v1 mixed temporary Repo history with SRF: v1 is `INVALIDATED_BY_REVIEW`; schema-v2 starts the NY Fed request exactly at the official `2021-07-29` launch and rejects earlier rows. Small-value exercises remain included and disclosed because the API has no unambiguous flag.
+- Froze current-vintage snapshot SHA-256 `0a7f47c7599994dc4271c94bfc1faa5aa065472e1db2de790985c7788394da65`. This is `RESEARCH_CURRENT_VINTAGE`, not ALFRED/PIT.
+- Generated the corrected report once: overlapping/non-overlapping IC 0.2363/−0.0071 (n=194/15), bootstrap p=0.0515, three positive fixed folds, and a worse top-quintile 10% tail. The frozen gate selected `DROP_RESEARCH`.
+- Kept `replacementEligible=false`; Champion score, weights, thresholds, verdict, hysteresis, portfolio policy, production API/snapshots, migrations, deployment, and databases are unchanged.
+
 ### PR-11 — Continuous net-liquidity challenger research
 
 - Preregistered a shadow-only Raw/Smooth continuous net-liquidity formula before fetching data: exact 0.45/0.35/0.20 weights, strict prior-only 156-week MAD normalization, 52-week minimum history, original Friday availability, 13-week SPX target, seeded bootstrap, fixed calendar folds, and an immutable decision gate.
