@@ -61,6 +61,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - GREEN: governance tests passed 4/4; typecheck, lint, and diff check passed. An unconfirmed `npm run deploy` returned `REFUSED` with nonzero status and invoked neither migration nor deployment.
 - The protected workflow applies production migrations before deployment, passes `${{ github.sha }}`, and calls a guarded wrapper. The wrapper validates explicit production/schema confirmation, a 40-character commit SHA, credentials, and also reapplies migrations before Wrangler deploy so direct invocation cannot skip schema.
 
+### Review remediation 4 — realistic exact-semantics restore drill
+
+- RED: backup/restore test failed because the old fixture-only drill did not report complete migrations, schema objects, application checks, or the whitespace regression.
+- GREEN: `npx vitest run test/backup-restore.test.ts` passed 3/3; standalone restore returned `PASS`; typecheck, lint, and diff check passed.
+- The drill now applies migrations 0001–0010 to a source D1, seeds representative data, generates a schema/data SQL export, restores into a second D1, and compares all tables, indexes, triggers, table counts, migration metadata, governed metadata, and application queries. Its quote/comment-aware splitter never folds SQL whitespace; `alpha␠␠beta\n␠gamma` round-trips exactly.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

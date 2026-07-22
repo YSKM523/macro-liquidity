@@ -40,7 +40,7 @@ For an ingest incident: check `/api/health`, ACTIVE `snapshot_state`, latest fai
 
 ## Restore
 
-`npm run restore:drill` imports the committed SQL fixture into ephemeral local D1, verifies its SHA-256, required tables, row counts, and latest governed snapshot, then destroys only the temporary runtime. Before restoring a real backup, verify checksum and provenance, restore to an isolated non-production database, run the same invariants plus domain-specific counts, obtain approval, and only then plan a cutover. Never overwrite production in place.
+`npm run restore:drill` applies migrations 0001–0010 to an ephemeral source D1, seeds representative governed data, produces a full schema/data SQL export, and restores it into a second ephemeral D1. It compares tables, indexes, triggers, every table row count, migration metadata, governed snapshot fields, application queries, and an exact repeated-space/newline value. The SQL splitter preserves quoted data and comments; it never folds whitespace globally. Both runtimes are then destroyed. Before restoring a real backup, verify checksum and provenance, restore to an isolated non-production database, run the same invariants plus domain-specific counts, obtain approval, and only then plan a cutover. Never overwrite production in place.
 
 ## Rollback
 

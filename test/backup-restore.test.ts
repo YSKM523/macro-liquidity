@@ -23,11 +23,24 @@ describe('backup and restore tooling', () => {
     expect(production.stderr).toMatch(/BACKUP_PRODUCTION/);
   });
 
-  it('restores the committed fixture into an ephemeral local D1 and verifies it', () => {
+  it('restores a full-schema export into a second ephemeral D1 without rewriting SQL data', () => {
     const output = execFileSync(process.execPath, ['scripts/restore-drill.mjs'], { encoding: 'utf8' });
     const result = JSON.parse(output);
     expect(result).toMatchObject({ status: 'PASS', remoteAccess: false });
-    expect(result.tables).toEqual(expect.arrayContaining(['model_snapshot_weekly', 'observations', 'ingest_runs']));
+    expect(result.migrations).toEqual({ first: 10, restored: 10 });
+    expect(result.tables).toEqual(expect.arrayContaining([
+      'model_snapshot_weekly', 'nowcast_snapshot_daily', 'snapshot_inputs',
+      'observations', 'ingest_runs', 'market_prices_daily', 'cash_rates_daily',
+    ]));
+    expect(result.indexes).toEqual(expect.arrayContaining([
+      'ingest_runs_started_at', 'idx_market_prices_daily_asof',
+    ]));
+    expect(result.triggers).toEqual(expect.arrayContaining([
+      'market_prices_daily_no_update', 'cash_rates_daily_no_delete',
+    ]));
+    expect(result.rowCounts.model_snapshot_weekly).toBeGreaterThan(0);
     expect(result.latestSnapshot).toMatchObject({ model_version: 'champion-v1.0.0' });
+    expect(result.applicationQueries).toEqual({ latestSnapshot: true, backtestRows: true });
+    expect(result.whitespaceValue).toBe('alpha  beta\n gamma');
   });
 });
