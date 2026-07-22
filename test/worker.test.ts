@@ -141,6 +141,15 @@ describe('/api/snapshot explicit channels', () => {
     expect(body.ingest.runs.active).toMatchObject({ snapshot_state: 'FAILED', snapshot_count: 2 });
     expect(body.ingest.runs.latestFailed).toMatchObject({ run_id: 'failed-1', failed_series: 'SOFR' });
   });
+
+  it('keeps v1 and live-cache metadata in an empty snapshot response', async () => {
+    dbState.row = null;
+    dbState.nowcast = null;
+    const response = await worker.fetch(new Request('https://example.test/api/v1/snapshot'), env);
+    const body = await response.json() as any;
+    expect(body).toMatchObject({ api_version: 'v1', error: 'no_data', official: null, nowcast: null });
+    expect(body.live_cache).toMatchObject({ prices: expect.any(String), stress: expect.any(String) });
+  });
 });
 
 describe('public error contract', () => {

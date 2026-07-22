@@ -123,6 +123,30 @@ export class LiveDataCache<T> {
       this.pending = undefined;
     }
   }
+
+  async getSWR(
+    loader: () => Promise<T>,
+    waitUntil: (promise: Promise<unknown>) => void,
+    now = Date.now(),
+  ): Promise<CacheResult<T>> {
+    if (now < this.lastAttemptAt) {
+      this.failures = 0;
+      this.openUntil = 0;
+      this.lastError = undefined;
+    }
+    this.lastAttemptAt = now;
+    const hasValue = this.value !== undefined;
+    const age = hasValue ? now - this.loadedAt : Number.POSITIVE_INFINITY;
+    if (hasValue && age >= 0 && age <= this.policy.freshMs) {
+      return { value: this.value!, status: 'FRESH', ageMs: age };
+    }
+    if (hasValue && age >= 0 && age <= this.policy.staleMs && now >= this.openUntil) {
+      const refresh = this.get(loader, now).then(() => undefined).catch(() => undefined);
+      waitUntil(refresh);
+      return { value: this.value!, status: 'STALE', ageMs: age };
+    }
+    return this.get(loader, now);
+  }
 }
 
 export interface AlertConfig { apiKey?: string; from?: string; to?: string }

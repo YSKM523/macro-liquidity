@@ -69,6 +69,21 @@ describe('production operations controls', () => {
     await expect(cache.get(async () => { throw new Error('upstream'); }, 400)).rejects.toThrow(/upstream|circuit/i);
   });
 
+  it('returns stale immediately while a waitUntil refresh updates the cache in the background', async () => {
+    const cache = new LiveDataCache<number>({ freshMs: 100, staleMs: 300, failureThreshold: 2, openMs: 100 });
+    await cache.get(async () => 7, 0);
+    let release!: (value: number) => void;
+    const loader = vi.fn(() => new Promise<number>(resolve => { release = resolve; }));
+    const background: Promise<unknown>[] = [];
+    const stale = await cache.getSWR(loader, promise => background.push(promise), 150);
+    expect(stale).toMatchObject({ value: 7, status: 'STALE', ageMs: 150 });
+    expect(loader).toHaveBeenCalledOnce();
+    expect(background).toHaveLength(1);
+    release(8);
+    await background[0];
+    await expect(cache.get(async () => 9, 160)).resolves.toMatchObject({ value: 8, status: 'FRESH' });
+  });
+
   it('makes alert delivery injectable and returns auditable outcomes without throwing', async () => {
     await expect(deliverAlert({}, { subject: 'x', text: 'y' }, vi.fn()))
       .resolves.toMatchObject({ outcome: 'SKIPPED' });

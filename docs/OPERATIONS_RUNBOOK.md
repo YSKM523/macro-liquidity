@@ -36,6 +36,8 @@ Search JSON logs by `event`, `run_id`, `request_id`, and stable `error_code`. Ke
 
 For an ingest incident: check `/api/health`, ACTIVE `snapshot_state`, latest failed run, per-series event, then alert outcome. `SKIPPED` means provider configuration is absent; `FAILED` means delivery was attempted but not accepted. Correct configuration through the secret manager; never place credentials in logs or Git.
 
+Live price/stress reads use short stale-while-revalidate service: a bounded stale value returns immediately while `waitUntil` refreshes in the background. Stale or failed stress is always presented as `UNKNOWN`, never actionable `NORMAL`; after the stale bound or open circuit, the endpoint remains fail-closed. Empty v1 snapshot responses still carry `api_version`, `live_cache`, stable error metadata, and `request_id`.
+
 ## Backup
 
 `npm run backup:dry` is non-mutating. Execute mode requires `--execute`, exact `--env`, `BACKUP_R2_BUCKET`, and for production `--confirm-production=BACKUP_PRODUCTION`. Daily critical export contains governed snapshot fields; weekly full export is uploaded to R2. D1 commands explicitly use `--remote`; Wrangler R2 object commands do not support or receive that flag. The protected `production-backup` environment owns authorization and retention policy.

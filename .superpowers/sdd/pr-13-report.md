@@ -85,6 +85,14 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - GREEN: backup/restore tests passed 4/4, including actual child-process command capture; typecheck, lint, and diff check passed.
 - D1 export/execute retains `--remote`; R2 object upload no longer receives it. The test uses a temporary executable `npx`, performs the critical backup path, captures both command arrays, verifies the D1/R2 distinction, and performs no network or remote write.
 
+### Review remediation 8 — stale-while-revalidate and no-data metadata
+
+- RED: operations/worker tests failed because no background-refresh API existed and empty v1 snapshots omitted version/cache metadata.
+- GREEN: focused operations/worker tests passed 2 files / 43 tests; typecheck, lint, and diff check passed.
+- Worker requests now return bounded stale live values immediately while `ExecutionContext.waitUntil` refreshes the deduplicated cache in the background; cache failures still count toward the circuit and stale stress remains `UNKNOWN`. Empty v1 snapshot responses preserve `api_version`, `live_cache`, stable error code, and `request_id`.
+
+Snapshot writer hardening was completed in remediation 1: every official/nowcast write requires provenance and the legacy fallback write path was deleted.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

@@ -54,9 +54,12 @@ import type { LivePrices, LiveStress } from './prices';
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 
-async function loadLive(env: Env) {
-  const pricesPromise = livePricesCache
-    .get(() => fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY })
+async function loadLive(env: Env, ctx?: ExecutionContext) {
+  const cached = <T>(cache: LiveDataCache<T>, loader: () => Promise<T>) => ctx
+    ? cache.getSWR(loader, promise => ctx.waitUntil(promise))
+    : cache.get(loader);
+  const pricesPromise = cached(livePricesCache, () =>
+    fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY })
       .then(assertCacheableLivePrices))
     .catch(error => {
       if (error instanceof TypedLiveDataFailure) {
@@ -64,8 +67,8 @@ async function loadLive(env: Env) {
       }
       throw error;
     });
-  const stressPromise = liveStressCache
-    .get(() => fetchStressSeries({ fredApiKey: env.FRED_API_KEY })
+  const stressPromise = cached(liveStressCache, () =>
+    fetchStressSeries({ fredApiKey: env.FRED_API_KEY })
       .then(evaluateLiveStress).then(assertCacheableStress))
     .catch(error => {
       if (error instanceof TypedLiveDataFailure) {
@@ -148,7 +151,7 @@ function presentSnapshot(row: unknown, stress: ReturnType<typeof evaluateLiveStr
 const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#F6F8FA"/><path d="M14 43h36" stroke="#1A1F36" stroke-width="4" stroke-linecap="round"/><path d="M16 39c7-14 15-20 24-20 5 0 9 2 12 5" fill="none" stroke="#635BFF" stroke-width="5" stroke-linecap="round"/><path d="M37 20l12 1-5 11" fill="none" stroke="#1A7F4B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const requestId = requestIdFor(req);
     try {
     const url = new URL(req.url);
@@ -214,7 +217,7 @@ export default {
       const [officialRow, nowcastRow, liveData, meta, ingestRuns] = await Promise.all([
         latestOfficialSnapshot(env.DB),
         latestNowcastSnapshot(env.DB),
-        loadLive(env),
+        loadLive(env, ctx),
         getAllMeta(env.DB),
         ingestRunSummary(env.DB),
       ]);
@@ -241,7 +244,11 @@ export default {
           return errorJson(requestId, 'schema_validation_failed', 'SNAPSHOT_SCHEMA_INVALID', 503);
         }
       }
-      if (!official && !nowcast) return json({ official: null, nowcast: null, live, ingest, error: 'no_data' });
+      if (!official && !nowcast) return json({
+        ...(v1 ? { api_version: 'v1' } : {}),
+        official: null, nowcast: null, live, live_cache: cache, ingest,
+        error: 'no_data', error_code: 'SNAPSHOT_NO_DATA', request_id: requestId,
+      });
       return json({ ...(v1 ? { api_version: 'v1' } : {}), official, nowcast, live, live_cache: cache, ingest });
     }
     if (p === '/api/explain') {
@@ -298,7 +305,7 @@ export default {
       return json({ rows: await officialSnapshotHistory(env.DB, from, to) });
     }
     if (p === '/api/prices') {
-      const liveData = await loadLive(env);
+      const liveData = await loadLive(env, ctx);
       return json({ ...liveData.live, cache_status: liveData.cache.prices });
     }
     if (p === '/api/backtest' || p === '/api/v1/backtest') {
