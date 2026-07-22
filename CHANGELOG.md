@@ -6,11 +6,12 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ### PR-14 — Residual correctness and bounded provider retries
 
-- Added one shared bounded full-jitter exponential-backoff policy with injectable sleep/random, a three-attempt default, five-attempt hard ceiling, and 30-second hard delay ceiling.
+- Added one GET/HEAD-only bounded full-jitter exponential-backoff policy with injectable timers/sleep/random, a three-attempt default, 250 ms production base, five-attempt hard ceiling, and independent 10-second attempt timeout.
 - Retried only transport failures, HTTP 429, and HTTP 5xx across FRED/ALFRED plus Yahoo, Stooq, and live FRED provider requests; other 4xx and successful-HTTP parse/validation failures still fail immediately.
-- Preserved per-attempt provider timeouts, fallback order and metadata, terminal status/reason behavior, ingest atomicity, and all Champion scoring behavior.
-- Standardized current documentation and UI language on eight macro scoring factors plus one independent live-risk overlay; volatility remains outside the 0–100 macro score.
-- Added deterministic zero-wait tests for delay/attempt caps, transient recovery, exhaustion, 4xx handling, invalid payloads, provider wiring, and prohibited legacy factor language.
+- Shared an atomic 32-request ceiling across concurrent cold-cache price/stress loading; exhaustion fails closed with explicit provider provenance.
+- Gave every attempt its own controller/timeout, preserved caller-abort provenance without retry, and best-effort canceled all discarded retry and terminal error bodies.
+- Classified eight macro scoring factors, compatible zero-weight `vol` diagnostics, and the independent VIX/SPX/10Y/DXY live-risk overlay; preserved existing `LEGACY_9_SIGNAL_DIAGNOSTIC` research values.
+- Added deterministic zero-wait tests for timeout/abort provenance, delay/attempt caps, shared budget, response lifecycle, method guard, provider wiring, and model-language classification.
 - Added no migration and changed no formula, weight, freshness rule, verdict/stress threshold, hysteresis, or portfolio policy. No deployment, remote D1/R2 mutation, secret, or real alert action was performed.
 
 ### PR-13 — Model versioning, production governance, and recovery controls
