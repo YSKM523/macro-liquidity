@@ -17,3 +17,10 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - RED: `env -u NODE_OPTIONS npx vitest run test/api-schema.test.ts` — 1 suite failed before collection because `src/api-schema.ts` did not exist.
 - GREEN: `env -u NODE_OPTIONS npx vitest run test/api-schema.test.ts test/worker.test.ts test/db.test.ts` — 3 files, 43 tests passed; `env -u NODE_OPTIONS npx tsc --noEmit` passed.
 - Covered strict date ranges, version metadata fail-closed behavior, CSV injection/escaping, `/api/v1/snapshot`, `/api/v1/backtest`, `/api/v1/robustness`, `/api/v1/model`, export, and unchanged legacy routes.
+
+### Stage 3 — observability, admin safety, alerts, and live cache
+
+- RED: `env -u NODE_OPTIONS npx vitest run test/operations.test.ts` — 1 suite failed before collection because `src/operations.ts` did not exist.
+- Intermediate regression evidence: the first integrated run exposed 3 compatibility failures (legacy warning assertion, uncleared admin mock, cache clock reversal). Structured warning content, test isolation, and negative-age invalidation were corrected.
+- GREEN: `env -u NODE_OPTIONS npx vitest run --silent test/operations.test.ts test/worker.test.ts test/service.test.ts test/service-channels.test.ts test/service-freshness.test.ts test/atomic-ingest.test.ts` — 6 files, 65 tests passed; `env -u NODE_OPTIONS npx tsc --noEmit` passed.
+- Covered secret redaction/error bounds, structured lifecycle logs, SLO fields, Access service-token and legacy bearer auth, mandatory full-rebuild confirmation, admin audit, injectable alert outcomes/audit, short live cache, bounded stale service, and circuit fail-closed behavior.

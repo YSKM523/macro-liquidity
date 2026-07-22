@@ -63,6 +63,7 @@ vi.mock('../src/db', async importOriginal => {
   return {
     ...actual,
     getAllMeta: vi.fn(async () => ({})),
+    recordAlertDelivery: vi.fn(async () => undefined),
     setIngestMeta: vi.fn(async (_db: unknown, _runId: string, key: string) => {
       state.events.push(`meta:${key}`);
       if (key === state.metaFailureKey) throw new Error(`meta failed: ${key}`);

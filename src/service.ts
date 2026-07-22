@@ -33,6 +33,7 @@ import {
   stagePitObservations,
   loadPitObservations,
   officialPitDecisionEvents,
+  recordAlertDelivery,
 } from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
@@ -40,17 +41,22 @@ import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
 import { spliceSeries, fetchDxyDaily } from './prices';
 import { compareIsoTimestamps, isoTimestampMs, iteratePitFrames } from './pit';
 import { resolveModelIdentity } from './model-version';
+import { deliverAlert, structuredLog } from './operations';
+import type { AlertConfig, AlertMessage, AlertOutcome } from './operations';
 
 export interface Env {
   DB: D1Database; ASSETS: Fetcher;
   FRED_API_KEY: string; ADMIN_TOKEN: string; START_DATE: string;
   RESEND_API_KEY?: string; EMAIL_FROM?: string; ALERT_EMAIL_TO?: string;
   CODE_COMMIT_SHA?: string;
+  ACCESS_CLIENT_ID?: string; ACCESS_CLIENT_SECRET?: string;
 }
 
 export type IngestResult =
   | { status: 'active'; runId: string; updated: number; snapshots: number }
   | { status: 'conflict'; runId: string; updated: 0; snapshots: 0 };
+
+export type AlertDelivery = (config: AlertConfig, message: AlertMessage) => Promise<AlertOutcome>;
 
 function eachDay(from: string, to: string): string[] {
   const out: string[] = []; const d = new Date(from + 'T00:00:00Z'); const end = new Date(to + 'T00:00:00Z');
@@ -89,11 +95,16 @@ export async function runIngest(
   rebuildAll = false,
   now = new Date(),
   clock: () => string = () => new Date().toISOString(),
+  alertDelivery: AlertDelivery = deliverAlert,
 ): Promise<IngestResult> {
   const runId = newRunId(now);
   const nowIso = now.toISOString();
   const acquired = await acquireIngestLock(env.DB, runId, INGEST_LOCK_LEASE_SECONDS);
-  if (!acquired) return { status: 'conflict', runId, updated: 0, snapshots: 0 };
+  if (!acquired) {
+    structuredLog('ingest_lock_contention', { run_id: runId, mode: rebuildAll ? 'FULL' : 'INCREMENTAL' });
+    return { status: 'conflict', runId, updated: 0, snapshots: 0 };
+  }
+  structuredLog('ingest_start', { run_id: runId, mode: rebuildAll ? 'FULL' : 'INCREMENTAL' });
 
   let prevMeta: Record<string, string> = {};
   let runCreated = false;
@@ -151,6 +162,9 @@ export async function runIngest(
         failedStep = 'staging';
         await stagePitObservations(env.DB, runId, fetched.vintages);
         await stageSeriesAttempt(env.DB, runId, id, fetched.latestRows);
+        structuredLog('ingest_series_attempt', {
+          run_id: runId, series_id: id, status: 'SUCCEEDED', rows: fetched.latestRows.length,
+        });
         updated += fetched.latestRows.length;
       } catch (error) {
         const originalMessage = String((error as any)?.message ?? error);
@@ -159,6 +173,9 @@ export async function runIngest(
         } catch {
           // Attempt auditing is best-effort here; never replace the operation failure.
         }
+        structuredLog('ingest_series_attempt', {
+          run_id: runId, series_id: id, status: 'FAILED', error: originalMessage,
+        });
         throw error;
       }
     }
@@ -278,6 +295,10 @@ export async function runIngest(
           }, modelIdentity);
         }
         if (snap.verdict != null) prev = snap.verdict;
+        structuredLog('snapshot_publication', {
+          run_id: runId, channel: rebuildAll ? 'OFFICIAL' : 'PROVISIONAL', date,
+          decision_status: snap.decisionStatus,
+        });
         snapshots++;
       }
     }
@@ -293,6 +314,7 @@ export async function runIngest(
     await renewOwnedLease(env.DB, runId);
     failedStep = 'snapshot-finalization';
     await completeIngestSuccess(env.DB, runId, snapshots, successAt, successMeta);
+    structuredLog('ingest_complete', { run_id: runId, status: 'SUCCEEDED', updated, snapshots });
     return { status: 'active', runId, updated, snapshots };
   } catch (e) {
     const errMsg = String((e as any)?.message ?? e);
@@ -335,18 +357,33 @@ export async function runIngest(
           now: nowIso,
           minIntervalHours: ALERT_MIN_INTERVAL_HOURS,
         })) {
-          const sent = await sendAlertEmail(env, buildAlertEmail({
+          const alert = await alertDelivery({
+            apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM, to: env.ALERT_EMAIL_TO,
+          }, buildAlertEmail({
             error: errMsg, lastIngestAt: prevMeta.last_ingest_at ?? null, now: nowIso,
           }));
-          if (sent) {
+          const alertAt = new Date().toISOString();
+          await recordAlertDelivery(env.DB, {
+            alertId: `${runId}-critical-snapshot`, attemptedAt: alertAt, runId,
+            alertType: 'CRITICAL_SNAPSHOT_FAILURE', outcome: alert.outcome,
+            providerStatus: alert.status, error: alert.error,
+          });
+          structuredLog('alert_delivery', {
+            run_id: runId, alert_type: 'CRITICAL_SNAPSHOT_FAILURE', outcome: alert.outcome,
+            provider_status: alert.status, error: alert.error,
+          });
+          if (alert.outcome === 'SENT') {
             await renewOwnedLease(env.DB, runId);
-            await setIngestMeta(env.DB, runId, 'last_alert_at', new Date().toISOString());
+            await setIngestMeta(env.DB, runId, 'last_alert_at', alertAt);
           }
         }
       } catch {
         // Preserve the original ingest failure if health metadata or alert auditing fails.
       }
     }
+    structuredLog('ingest_complete', {
+      run_id: runId, status: 'FAILED', step: failedStep, series_id: failedSeries, error: errMsg,
+    });
     throw e;
   } finally {
     try {
@@ -355,19 +392,6 @@ export async function runIngest(
       // Release failures must not mask ingest results; the lease expires automatically.
     }
   }
-}
-
-// Alerting must never mask the ingest error — swallow every failure here.
-async function sendAlertEmail(env: Env, m: { subject: string; text: string }): Promise<boolean> {
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.ALERT_EMAIL_TO) return false;
-  try {
-    const r = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: env.EMAIL_FROM, to: [env.ALERT_EMAIL_TO], subject: m.subject, text: m.text }),
-    });
-    return r.ok;
-  } catch { return false; }
 }
 
 /** Cron entry: the main cron always ingests; the retry cron only when unhealthy/stale. */
@@ -388,7 +412,7 @@ export async function scheduledIngest(
   }
   const result = await runIngest(env, false, now);
   if (result.status === 'conflict') {
-    console.warn(`[ingest] lease contention; skipped scheduled run ${result.runId}`);
+    structuredLog('scheduled_ingest_skipped', { run_id: result.runId, reason: 'lease contention' }, console.warn);
   }
   return result;
 }

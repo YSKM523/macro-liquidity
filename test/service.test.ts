@@ -61,6 +61,7 @@ vi.mock('../src/db', () => ({
   }),
   setIngestMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
+  recordAlertDelivery: vi.fn(async () => undefined),
   officialSnapshotBefore: vi.fn(async (_db: unknown, date: string) => {
     state.officialBeforeCalls++;
     const priorDate = [...state.snapshots.keys()]

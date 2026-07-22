@@ -55,6 +55,7 @@ vi.mock('../src/db', () => ({
   loadBacktestRows: vi.fn(async () => []),
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
+  recordAdminAudit: vi.fn(async () => undefined),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
   ingestRunSummary: vi.fn(async () => ({
@@ -82,6 +83,7 @@ const env = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   dbState.row = {
     date: '2026-07-15', score: 60, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
     reason: 'macro remains bullish', coverage: 1, decision_status: 'OK',
@@ -216,6 +218,25 @@ describe('/api/admin/refresh contention', () => {
 
     expect(response.status).toBe(409);
     expect(body).toEqual({ status: 'conflict', runId: 'run-2' });
+  });
+
+  it('requires a second exact confirmation for full rebuild', async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/admin/refresh?all=1', {
+      method: 'POST', headers: { authorization: 'Bearer test' },
+    }), env);
+    expect(response.status).toBe(428);
+    expect(runIngest).not.toHaveBeenCalled();
+  });
+
+  it('accepts a full rebuild only with both authentication and confirmation', async () => {
+    vi.mocked(runIngest).mockResolvedValueOnce({ status: 'active', runId: 'full-1', updated: 1, snapshots: 1 } as any);
+    const response = await worker.fetch(new Request('https://example.test/api/admin/refresh?all=1', {
+      method: 'POST', headers: {
+        authorization: 'Bearer test', 'x-confirm-full-rebuild': 'FULL_REBUILD',
+      },
+    }), env);
+    expect(response.status).toBe(200);
+    expect(runIngest).toHaveBeenCalledWith(env, true);
   });
 });
 

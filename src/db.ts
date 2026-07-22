@@ -817,6 +817,34 @@ export async function ingestRunSummary(db: D1Database): Promise<{
   return { active: active ?? null, latestFailed: latestFailed ?? null };
 }
 
+export async function recordAdminAudit(db: D1Database, entry: {
+  auditId: string; attemptedAt: string; action: string; authMethod: string;
+  authorized: boolean; confirmed: boolean; outcome: string; requestId: string;
+}): Promise<void> {
+  await db.prepare(
+    `INSERT INTO admin_audit_log
+       (audit_id,attempted_at,action,auth_method,authorized,confirmed,outcome,request_id)
+     VALUES (?,?,?,?,?,?,?,?)`,
+  ).bind(
+    entry.auditId, entry.attemptedAt, entry.action, entry.authMethod,
+    entry.authorized ? 1 : 0, entry.confirmed ? 1 : 0, entry.outcome, entry.requestId,
+  ).run();
+}
+
+export async function recordAlertDelivery(db: D1Database, entry: {
+  alertId: string; attemptedAt: string; runId: string; alertType: string;
+  outcome: 'SENT' | 'FAILED' | 'SKIPPED'; providerStatus?: number; error?: string;
+}): Promise<void> {
+  await db.prepare(
+    `INSERT INTO alert_delivery_log
+       (alert_id,attempted_at,run_id,alert_type,outcome,provider_status,error)
+     VALUES (?,?,?,?,?,?,?)`,
+  ).bind(
+    entry.alertId, entry.attemptedAt, entry.runId, entry.alertType,
+    entry.outcome, entry.providerStatus ?? null, entry.error?.slice(0, 512) ?? null,
+  ).run();
+}
+
 export async function loadSeriesMap(db: D1Database, from = '1900-01-01'): Promise<SeriesMap> {
   const rs = await db.prepare(
     'SELECT series_id, date, value FROM observations WHERE date >= ? ORDER BY series_id, date'

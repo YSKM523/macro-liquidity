@@ -68,6 +68,7 @@ vi.mock('../src/db', () => ({
   }),
   setIngestMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
+  recordAlertDelivery: vi.fn(async () => undefined),
   officialSnapshotBefore: vi.fn(async () => ({ verdict: state.priorVerdict })),
   officialVerdictAnchors: vi.fn(async (_db: unknown, from: string, to: string) => [...state.frozenAnchors]
     .filter(([date]) => date >= from && date <= to).map(([date, verdict]) => ({ date, verdict }))),

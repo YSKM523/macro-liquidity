@@ -12,6 +12,7 @@ import {
   ingestRunSummary,
   loadEventBacktestInputs,
   exportOfficialSnapshots,
+  recordAdminAudit,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -26,6 +27,28 @@ import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
 import { assertSnapshotVersionMetadata, parseDateRange, snapshotsToCsv } from './api-schema';
 import { presentModelDescriptor, resolveModelIdentity } from './model-version';
+import {
+  LiveDataCache,
+  SLO_TARGETS,
+  authenticateAdmin,
+  fullRebuildConfirmed,
+  structuredLog,
+} from './operations';
+
+const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
+const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
+
+async function loadLive(env: Env) {
+  const [prices, stress] = await Promise.all([
+    livePricesCache.get(() => fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY })),
+    liveStressCache.get(() => fetchStressSeries({ fredApiKey: env.FRED_API_KEY }).then(evaluateLiveStress)),
+  ]);
+  return {
+    live: prices.value,
+    stress: stress.value,
+    cache: { prices: prices.status, stress: stress.status, prices_age_ms: prices.ageMs, stress_age_ms: stress.ageMs },
+  };
+}
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -117,21 +140,30 @@ export default {
         const health = activeSnapshotUnhealthy
           ? { ...h, ok: false, stale: true, error: snapshotError }
           : h;
-        return json({ ...health, ingest_runs: ingestRuns }, health.ok ? 200 : 503);
+        return json({
+          ...health,
+          ingest_runs: ingestRuns,
+          slo: {
+            targets: SLO_TARGETS,
+            page_status: health.ok ? 'HEALTHY' : 'UNHEALTHY',
+            ingest_status: meta.last_status === 'ok' ? 'HEALTHY' : 'UNHEALTHY',
+            critical_snapshot_alerting: SLO_TARGETS.criticalSnapshotAlerting,
+          },
+        }, health.ok ? 200 : 503);
       } catch (e) {
         return json({ ok: false, stale: true, error: 'db_unreachable', message: String((e as any)?.message ?? e) }, 503);
       }
     }
     if (p === '/api/snapshot' || p === '/api/v1/snapshot') {
       const v1 = p === '/api/v1/snapshot';
-      const [officialRow, nowcastRow, live, stress, meta, ingestRuns] = await Promise.all([
+      const [officialRow, nowcastRow, liveData, meta, ingestRuns] = await Promise.all([
         latestOfficialSnapshot(env.DB),
         latestNowcastSnapshot(env.DB),
-        fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }),
-        fetchStressSeries({ fredApiKey: env.FRED_API_KEY }).then(s => evaluateLiveStress(s)),
+        loadLive(env),
         getAllMeta(env.DB),
         ingestRunSummary(env.DB),
       ]);
+      const { live, stress, cache } = liveData;
       const ingest = {
         ingest_at: meta.last_ingest_at ?? null,
         last_attempt_at: meta.last_attempt_at ?? null,
@@ -152,7 +184,7 @@ export default {
         }
       }
       if (!official && !nowcast) return json({ official: null, nowcast: null, live, ingest, error: 'no_data' });
-      return json({ ...(v1 ? { api_version: 'v1' } : {}), official, nowcast, live, ingest });
+      return json({ ...(v1 ? { api_version: 'v1' } : {}), official, nowcast, live, live_cache: cache, ingest });
     }
     if (p === '/api/explain') {
       const wparam = url.searchParams.get('window');
@@ -208,7 +240,8 @@ export default {
       return json({ rows: await officialSnapshotHistory(env.DB, from, to) });
     }
     if (p === '/api/prices') {
-      return json(await fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }));
+      const liveData = await loadLive(env);
+      return json({ ...liveData.live, cache_status: liveData.cache.prices });
     }
     if (p === '/api/backtest' || p === '/api/v1/backtest') {
       const v1 = p === '/api/v1/backtest';
@@ -298,15 +331,44 @@ export default {
       return json({ latest, series, note: 'display-only · 不进打分 · 弱信号(IC≈0.08 不显著)' });
     }
     if (p === '/api/admin/refresh' && req.method === 'POST') {
-      const auth = req.headers.get('authorization') ?? '';
-      if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return json({ error: 'unauthorized' }, 401);
+      const attemptedAt = new Date().toISOString();
+      const requestId = (req.headers.get('cf-ray') ?? req.headers.get('x-request-id')
+        ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0, 128);
+      const authMethod = authenticateAdmin(req, env);
       const rebuildAll = url.searchParams.get('all') === '1';
-      const result = await runIngest(env, rebuildAll);
-      return json(result, result.status === 'conflict' ? 409 : 200);
+      const confirmed = !rebuildAll || fullRebuildConfirmed(req);
+      const audit = async (outcome: string) => recordAdminAudit(env.DB, {
+        auditId: `${requestId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        attemptedAt, action: rebuildAll ? 'FULL_REBUILD' : 'INCREMENTAL_REFRESH',
+        authMethod: authMethod ?? 'NONE', authorized: authMethod != null, confirmed,
+        outcome, requestId,
+      });
+      if (!authMethod) {
+        await audit('UNAUTHORIZED');
+        structuredLog('admin_refresh', { request_id: requestId, authorized: false, rebuild_all: rebuildAll, outcome: 'UNAUTHORIZED' });
+        return json({ error: 'unauthorized' }, 401);
+      }
+      if (!confirmed) {
+        await audit('CONFIRMATION_REQUIRED');
+        structuredLog('admin_refresh', { request_id: requestId, auth_method: authMethod, rebuild_all: true, outcome: 'CONFIRMATION_REQUIRED' });
+        return json({ error: 'confirmation_required', required_header: 'x-confirm-full-rebuild: FULL_REBUILD' }, 428);
+      }
+      try {
+        const result = await runIngest(env, rebuildAll);
+        await audit(result.status === 'conflict' ? 'CONFLICT' : 'ACCEPTED');
+        structuredLog('admin_refresh', {
+          request_id: requestId, auth_method: authMethod, rebuild_all: rebuildAll, outcome: result.status,
+        });
+        return json(result, result.status === 'conflict' ? 409 : 200);
+      } catch (error) {
+        await audit('FAILED');
+        throw error;
+      }
     }
     // not an API route → static assets
     return env.ASSETS.fetch(req);
     } catch (e) {
+      structuredLog('request_failure', { error: String((e as Error).message) }, console.error);
       return json({ error: 'internal', message: String((e as any)?.message ?? e) }, 500);
     }
   },

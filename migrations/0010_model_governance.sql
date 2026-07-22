@@ -35,3 +35,16 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_admin_audit_attempted_at
   ON admin_audit_log(attempted_at DESC);
+
+CREATE TABLE IF NOT EXISTS alert_delivery_log (
+  alert_id TEXT PRIMARY KEY,
+  attempted_at TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  alert_type TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('SENT','FAILED','SKIPPED')),
+  provider_status INTEGER,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_delivery_attempted_at
+  ON alert_delivery_log(attempted_at DESC);

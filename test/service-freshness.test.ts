@@ -47,6 +47,7 @@ vi.mock('../src/db', () => ({
   }),
   setIngestMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
+  recordAlertDelivery: vi.fn(async () => undefined),
   officialSnapshotBefore: vi.fn(async () => null),
   officialVerdictAnchors: vi.fn(async () => []),
 }));
