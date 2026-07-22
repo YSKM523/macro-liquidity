@@ -95,6 +95,31 @@ function stooqHistory(rows: Array<[string, number]>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('provider fallback and provenance', () => {
+  it('retries a transient provider response before returning failure for fallback selection', async () => {
+    const fetchedAt = '2026-07-17T22:00:00.000Z';
+    const friday = Date.parse('2026-07-17T20:00:00.000Z') / 1000;
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(Response.json(yahooChart(5000, friday)));
+    const provider = new YahooMarketDataProvider(fetchFn as any, { sleep: async () => undefined });
+
+    const result = await provider.fetchQuote({ symbol: '^GSPC', fetchedAt });
+
+    expect(result).toMatchObject({ status: 'OK', sourceName: 'Yahoo Finance', fallbackUsed: false });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a successful HTTP response with an invalid provider payload', async () => {
+    const fetchFn = vi.fn(async () => Response.json({ chart: { result: null } }));
+    const provider = new YahooMarketDataProvider(fetchFn as any, { sleep: async () => undefined });
+
+    const result = await provider.fetchQuote({
+      symbol: '^GSPC', fetchedAt: '2026-07-17T22:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({ status: 'FAILED', reasonCode: 'INVALID_TIMESTAMP' });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
   it('uses the timestamp paired with the last valid Yahoo history close', async () => {
     const fetchFn = vi.fn(async () => Response.json({ chart: { result: [{
       timestamp: [1784232000, 1784318400],

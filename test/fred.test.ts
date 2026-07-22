@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 // @ts-ignore Node test runtime Web Crypto shim.
 import { webcrypto } from 'node:crypto';
-import { fetchFredSeriesPit, parseFredJson, parseFredPitJson } from '../src/fred';
+import { fetchFredSeries, fetchFredSeriesPit, parseFredJson, parseFredPitJson } from '../src/fred';
 
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
 
@@ -33,7 +33,67 @@ describe('parseFredJson', () => {
   });
 });
 
+describe('FRED bounded retries', () => {
+  it('recovers from a transient FRED response before parsing', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ observations: [{ date: '2024-01-03', value: '5800000' }] }));
+    const sleep = vi.fn(async () => undefined);
+
+    const rows = await fetchFredSeries('WALCL', '2024-01-01', 'key', { fetchFn: fetchFn as any, sleep });
+
+    expect(rows).toEqual([{ date: '2024-01-03', value: 5800 }]);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces the terminal FRED status after bounded exhaustion', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 503 }));
+
+    await expect(fetchFredSeries('WALCL', '2024-01-01', 'key', {
+      fetchFn: fetchFn as any, sleep: async () => undefined,
+    })).rejects.toThrow('FRED WALCL 503');
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry a non-transient FRED 4xx', async () => {
+    const fetchFn = vi.fn(async () => new Response('', { status: 404 }));
+
+    await expect(fetchFredSeries('WALCL', '2024-01-01', 'key', {
+      fetchFn: fetchFn as any, sleep: async () => undefined,
+    })).rejects.toThrow('FRED WALCL 404');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('ALFRED vintages', () => {
+  it('recovers from a transient ALFRED page response', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 429 }))
+      .mockResolvedValueOnce(Response.json({
+        count: 1, limit: 100000, offset: 0,
+        observations: [{ date: '2024-01-03', realtime_start: '2024-01-04', value: '5800000' }],
+      }));
+    const result = await fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-04', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, sleep: async () => undefined },
+    );
+
+    expect(result.latestRows).toEqual([{ date: '2024-01-03', value: 5800 }]);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry ALFRED parse failures after a successful HTTP response', async () => {
+    const fetchFn = vi.fn(async () => new Response('{not-json', { status: 200 }));
+
+    await expect(fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-04', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, sleep: async () => undefined },
+    )).rejects.toThrow();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
   it('parses revisions, preserves units, and skips missing values', async () => {
     const result = await parseFredPitJson('WALCL', {
       observations: [
