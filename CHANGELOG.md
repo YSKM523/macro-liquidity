@@ -18,8 +18,9 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Moved the fixed release-resolution instant after successful fetch/activation, made its clock injectable, excluded later-fetched backfills and later resolved official events from older universes, and persisted the same cutoff on snapshots.
 - Replaced PIT timestamp text comparisons with canonical strict ISO epoch comparisons and D1 `julianday` cutoff/order semantics, including fail-closed equal-instant override ambiguity.
 - Validated staged raw timings before write and changed stored-data corruption checks to a SQL `LIMIT 1` guard, avoiding a second full raw-table result set during rebuild.
+- Added a post-provenance migration trigger that rejects override inserts backdated at or before any frozen weekly/daily PIT resolution cutoff, while preserving historical override entry before the first frozen snapshot.
 - Reloaded frozen hysteresis anchors across the complete decision week when the rebuilt snapshot date differs from the stored date.
-- Expanded the final local verification to 27 files / 472 tests, TypeScript strict, diff checks, and fresh local migration first/second-run validation.
+- Expanded the final local verification to 27 files / 474 tests, TypeScript strict, diff checks, and fresh local migration first/second-run validation.
 - Added local-only migration `0008_point_in_time_observations.sql`; no deployment, remote D1 access, model formula, weight, threshold, hysteresis, or channel-policy change was made.
 
 ### PR-07 — Source timestamps and provider fallback
