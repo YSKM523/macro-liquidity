@@ -4,7 +4,7 @@ Base: `37fd6c4`
 
 Branch: `codex/pr-09-event-time-backtest`
 
-Implementation commits: `0764210..HEAD` (whole-branch review candidate diff: `37fd6c4..HEAD`)
+Implementation commits: `0764210..02f9e38` (whole-branch review diff: `37fd6c4..02f9e38`)
 
 ## Outcome
 
@@ -48,7 +48,7 @@ Implementation commits: `0764210..HEAD` (whole-branch review candidate diff: `37
 - Fresh local `npm exec wrangler -- d1 migrations apply macro_liquidity --local --persist-to /tmp/pr09-repro-migrations.Sos167`: migrations **0001–0009 applied successfully**; immediate second invocation returned **No migrations to apply!**. Wrangler 3.114.17's update warning did not affect either exit code.
 - Review-package evidence is generated after the candidate commit; older 504-test/migration outputs are intentionally not claimed for this head.
 
-Review conclusion: the Important frozen-PIT reproducibility defect is fixed locally with RED→GREEN evidence. The candidate is green and ready for a new whole-branch review; it is not marked final-reviewed or production-approved here.
+Review conclusion: the Important frozen-PIT reproducibility defect is fixed locally with RED→GREEN evidence. Independent whole-branch rereview of `37fd6c4..02f9e38` returned **Ready**, with 0 Critical and 0 Important findings. This is a local reviewed candidate, not production approval.
 
 ## Historical and production impact
 
