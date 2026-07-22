@@ -168,3 +168,27 @@ WHEN EXISTS (
 BEGIN
   SELECT RAISE(ABORT, 'backdated release override would alter frozen PIT resolution');
 END;
+
+-- Existing immutable primary keys may be replayed idempotently by activation's
+-- conflict handling. A genuinely new raw vintage, however, cannot claim it was
+-- fetched inside a universe already frozen by either snapshot channel.
+CREATE TRIGGER IF NOT EXISTS observations_pit_no_frozen_backdate
+BEFORE INSERT ON observations_pit
+WHEN NOT EXISTS (
+  SELECT 1 FROM observations_pit existing
+  WHERE existing.series_id = NEW.series_id
+    AND existing.observation_date = NEW.observation_date
+    AND existing.vintage_date = NEW.vintage_date
+)
+AND EXISTS (
+  SELECT 1 FROM model_snapshot_weekly
+  WHERE pit_status = 'PIT' AND release_resolution_at IS NOT NULL
+    AND julianday(NEW.fetched_at) <= julianday(release_resolution_at)
+  UNION ALL
+  SELECT 1 FROM nowcast_snapshot_daily
+  WHERE pit_status = 'PIT' AND release_resolution_at IS NOT NULL
+    AND julianday(NEW.fetched_at) <= julianday(release_resolution_at)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'backdated raw observation would alter frozen PIT resolution');
+END;

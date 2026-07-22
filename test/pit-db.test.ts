@@ -111,6 +111,44 @@ describe('point-in-time schema', () => {
     await expect(insertOverride('2024-01-04', afterCutoff)).resolves.toBeDefined();
     await mf.dispose();
   }, 30_000);
+
+  it.each([
+    ['weekly', '2024-01-10T00:00:00Z'],
+    ['daily', '2024-01-11T00:00:00Z'],
+  ] as const)('rejects backdated raw inserts after a frozen %s PIT cutoff', async (channel, cutoff) => {
+    const { mf, db } = await migratedDb();
+    await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('raw-writer','ACTIVE','FULL','2024-01-01T00:00:00Z')").run();
+    const insertRaw = (observationDate: string, vintageDate: string, fetchedAt: string) => db.prepare(`
+      INSERT INTO observations_pit
+        (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,
+         checksum,data_run_id,release_time_status,value)
+      VALUES ('WALCL',?,?,'2024-01-04T20:00:00Z',?,'2024-01-05T14:30:00Z',
+       'ALFRED',?,'raw-writer','CONSERVATIVE_DATE_END',5800)
+    `).bind(observationDate, vintageDate, fetchedAt, `${observationDate}-${vintageDate}`).run();
+
+    await expect(insertRaw('2023-12-27', '2024-01-04', '2000-01-01T00:00:00Z'))
+      .resolves.toBeDefined();
+    if (channel === 'weekly') {
+      await db.prepare(`INSERT INTO model_snapshot_weekly
+        (date,decision_week,pit_status,release_resolution_at)
+        VALUES ('2024-01-10','2024-01-08','PIT',?)`).bind(cutoff).run();
+    } else {
+      await db.prepare(`INSERT INTO nowcast_snapshot_daily
+        (date,pit_status,release_resolution_at)
+        VALUES ('2024-01-11','PIT',?)`).bind(cutoff).run();
+    }
+
+    await expect(insertRaw('2024-01-03', '2024-01-05', '2001-01-01T00:00:00Z'))
+      .rejects.toThrow(/frozen|resolution|backdated/i);
+    await expect(insertRaw('2024-01-10', '2024-01-10', cutoff))
+      .rejects.toThrow(/frozen|resolution|backdated/i);
+    const afterCutoff = new Date(Date.parse(cutoff) + 1).toISOString();
+    await expect(insertRaw('2024-01-11', '2024-01-11', afterCutoff)).resolves.toBeDefined();
+    await expect(db.prepare(`INSERT OR IGNORE INTO observations_pit
+      SELECT * FROM observations_pit
+      WHERE series_id='WALCL' AND observation_date='2023-12-27'`).run()).resolves.toBeDefined();
+    await mf.dispose();
+  }, 30_000);
 });
 
 describe('PIT activation repository', () => {
@@ -181,6 +219,33 @@ describe('PIT activation repository', () => {
       modelDate: '2024-01-03', decisionAt: '2024-01-10T00:00:00.500Z',
       tradableAt: '2024-01-10T14:30:00Z',
     }]);
+    await mf.dispose();
+  }, 30_000);
+
+  it('rolls back activation and preserves ACTIVE when a new raw row backdates a frozen universe', async () => {
+    const { mf, db } = await migratedDb();
+    await db.batch([
+      db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('prior','ACTIVE','FULL','2024-01-01T00:00:00Z')"),
+      db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('target','RUNNING','INCREMENTAL','2024-01-10T00:00:00Z')"),
+      db.prepare("INSERT INTO ingest_series_attempts (run_id,series_id,status,started_at,row_count) VALUES ('target','WALCL','SUCCEEDED','2024-01-10T00:00:00Z',1)"),
+      db.prepare("INSERT INTO staging_observations VALUES ('target','WALCL','2024-01-03',5800)"),
+      db.prepare("INSERT INTO ingest_lock VALUES ('fred_ingest','target',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds'))"),
+      db.prepare("INSERT INTO model_snapshot_weekly (date,decision_week,pit_status,release_resolution_at) VALUES ('2024-01-10','2024-01-08','PIT','2024-01-10T12:00:00Z')"),
+    ]);
+    await stagePitObservations(db, 'target', [{
+      seriesId: 'WALCL', observationDate: '2024-01-03', vintageDate: '2024-01-04',
+      releasedAt: '2024-01-04T23:59:59Z', fetchedAt: '2024-01-09T12:00:00Z',
+      tradableAt: '2024-01-05T14:30:00Z', source: 'ALFRED', checksum: 'backdated',
+      releaseTimeStatus: 'CONSERVATIVE_DATE_END', value: 5800,
+    }]);
+
+    await expect(activateIngestRun(db, 'target', '2024-01-10T12:01:00Z'))
+      .rejects.toThrow(/frozen|resolution|backdated|activation/i);
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM observations_pit').first()).toEqual({ n: 0 });
+    expect(await db.prepare("SELECT run_id FROM ingest_runs WHERE state='ACTIVE'").first())
+      .toEqual({ run_id: 'prior' });
+    expect(await db.prepare("SELECT state FROM ingest_runs WHERE run_id='target'").first())
+      .toEqual({ state: 'RUNNING' });
     await mf.dispose();
   }, 30_000);
 
