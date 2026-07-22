@@ -16,6 +16,7 @@ export interface EventSignal {
   portfolioMethodology?: 'DASHBOARD_EXPOSURE_TIERS_V1';
   stressMethodology?: 'PIT_SNAPSHOT_VIX_PROXY';
   policyIssue?: string;
+  validationIssue?: string;
   recordedAt?: string;
   dataRunId?: string;
   modelVersion?: string | null;

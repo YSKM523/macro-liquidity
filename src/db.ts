@@ -1154,7 +1154,7 @@ export async function loadEventBacktestInputs(
   const cutoff = clock.cutoff;
   const [signalRows, marketRows, cashRows] = await Promise.all([
     db.prepare(
-      `SELECT date AS signal_date,decision_at,tradable_at,score,verdict,netliq_dir,vix_eod,recorded_at,data_run_id,
+      `SELECT date AS signal_date,decision_at,tradable_at,score,verdict,netliq_dir,vix_eod,factors_json,recorded_at,data_run_id,
               model_version,config_hash,code_commit_sha,data_cutoff,created_at
        FROM model_snapshot_weekly
        WHERE decision_status='OK' AND pit_status='PIT'
@@ -1164,6 +1164,7 @@ export async function loadEventBacktestInputs(
     ).bind(cutoff).all<{
       signal_date: string; decision_at: string; tradable_at: string; score: number;
       verdict: string | null; netliq_dir: string | null; vix_eod: number | null;
+      factors_json: string | null;
       recorded_at: string; data_run_id: string | null;
       model_version: string | null; config_hash: string | null; code_commit_sha: string | null;
       data_cutoff: string | null; created_at: string | null;
@@ -1211,6 +1212,15 @@ export async function loadEventBacktestInputs(
   return {
     asOfCutoff: cutoff,
     signals: (signalRows.results ?? []).map(row => {
+      let factors: Record<string, number> | undefined;
+      try {
+        const parsed: unknown = JSON.parse(row.factors_json ?? '');
+        if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)
+          || Object.values(parsed).some(value => typeof value !== 'number' || !Number.isFinite(value))) {
+          throw new Error('invalid factors');
+        }
+        factors = parsed as Record<string, number>;
+      } catch { /* retained below as a typed validation issue */ }
       const fieldIssue = officialPortfolioFieldIssue({
         score: row.score, verdict: row.verdict, netliqDir: row.netliq_dir, snapshotVixEod: row.vix_eod,
       });
@@ -1229,6 +1239,8 @@ export async function loadEventBacktestInputs(
         codeCommitSha: row.code_commit_sha,
         dataCutoff: row.data_cutoff,
         createdAt: row.created_at,
+        factors,
+        ...(factors == null ? { validationIssue: 'invalid official factors' } : {}),
       };
       if (fieldIssue || !isPortfolioVerdict(row.verdict) || !isPortfolioDirection(row.netliq_dir)) {
         return { ...baseSignal, policyIssue: fieldIssue ?? 'invalid official portfolio field' };
