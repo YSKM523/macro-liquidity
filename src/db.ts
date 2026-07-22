@@ -831,6 +831,19 @@ export async function recordAdminAudit(db: D1Database, entry: {
   ).run();
 }
 
+export async function adminRateLimitAllowed(
+  db: D1Database,
+  now: string,
+  limit = 5,
+): Promise<boolean> {
+  requireIsoTimestamp(now, 'admin rate-limit clock');
+  const row = await db.prepare(
+    `SELECT COUNT(*) AS n FROM admin_audit_log
+     WHERE authorized=1 AND julianday(attempted_at)>julianday(?,'-60 seconds')`,
+  ).bind(now).first<{ n: number }>();
+  return (row?.n ?? 0) < limit;
+}
+
 export async function recordAlertDelivery(db: D1Database, entry: {
   alertId: string; attemptedAt: string; runId: string; alertType: string;
   outcome: 'SENT' | 'FAILED' | 'SKIPPED'; providerStatus?: number; error?: string;

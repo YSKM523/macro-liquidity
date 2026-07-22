@@ -13,6 +13,7 @@ import {
   loadEventBacktestInputs,
   exportOfficialSnapshots,
   recordAdminAudit,
+  adminRateLimitAllowed,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -347,6 +348,13 @@ export default {
         await audit('UNAUTHORIZED');
         structuredLog('admin_refresh', { request_id: requestId, authorized: false, rebuild_all: rebuildAll, outcome: 'UNAUTHORIZED' });
         return json({ error: 'unauthorized' }, 401);
+      }
+      if (!await adminRateLimitAllowed(env.DB, attemptedAt)) {
+        await audit('RATE_LIMITED');
+        structuredLog('admin_refresh', {
+          request_id: requestId, auth_method: authMethod, rebuild_all: rebuildAll, outcome: 'RATE_LIMITED',
+        });
+        return json({ error: 'rate_limited', retry_after_seconds: 60 }, 429);
       }
       if (!confirmed) {
         await audit('CONFIRMATION_REQUIRED');

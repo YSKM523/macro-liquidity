@@ -4,6 +4,16 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-13 — Model versioning, production governance, and recovery controls
+
+- Added deterministic `champion-v1.0.0` canonical configuration hashing and validated deployment commit identity to every new official/nowcast snapshot; additive migration 0010 labels historical rows `LEGACY_UNVERSIONED` without changing scores.
+- Added schema-validated `/api/v1/snapshot`, `/api/v1/backtest`, `/api/v1/robustness`, `/api/v1/model`, and JSON/CSV official export with strict query validation and spreadsheet-injection-safe CSV escaping; legacy routes remain compatible.
+- Added secret-redacted structured logs, SLO health fields, auditable alert outcomes, Access service-token support, full-rebuild second confirmation, admin audit, short live cache, bounded stale service, and a circuit breaker.
+- Added dry-run-default critical/full backup tooling, explicit production confirmation, protected backup workflow, and an ephemeral local D1 restore drill with table/count/model metadata/content-hash verification.
+- Added dev/staging/production Wrangler environments, reproducible npm gates, CI, manual protected production deployment, Model Card, Champion–Challenger registry, and operations runbook.
+- Kept the staging D1 identifier as an unmistakable placeholder. No push, deploy, remote database/R2 access, secret creation, or real alert delivery was performed; staging deployment remains unverified.
+- Champion formulas, weights, 45/55 thresholds, hysteresis, portfolio tiers, and PR-11/PR-12 research results are unchanged.
+
 ### PR-12 — Dynamic reserve adequacy challenger research
 
 - Preregistered a shadow-only 30/25/25/20 composite of relative reserves, 13-week reserve change, SOFR−IORB median/p95, and auxiliary EFFR/TGCR/SRF stress; all percentiles are strictly prior-only with 52 complete weeks and independent component freshness.

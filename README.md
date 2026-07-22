@@ -183,7 +183,12 @@ migrations/       D1 schema（ingest/staging + latest observations + append-only
 | `GET /api/prices` | 兼容数字字段 + 每个行情的 `sourceTimestamp` / `fetchedAt` / provider / market state / delay / fallback / quality status；`asof` 明确只代表 `FETCH_TIME`。FRED 官方 fallback 显式标记 `OFFICIAL`/延迟：SP500、VIXCLS、DGS10 最长 4 个工作日，DTWEXBGS 最长 7 个工作日 |
 | `GET /api/backtest[?as_of=<ISO>]` | append-only `APPEND_ONLY_AS_OF` event-time 正式日频绩效（或 typed `DATA_INCOMPLETE`）+ 不变的 IC / 逐因子诊断 + `LEGACY_WEEKLY` 旧策略块；页面披露 strict cutoff、执行、SOFR、费用、滑点与融资假设 |
 | `GET /api/walkforward` | 样本外三臂裁决 |
-| `POST /api/admin/refresh` | 回填(Bearer `ADMIN_TOKEN`;`?all=1` 全量)；已有有效 ingest 租约时返回 `409` |
+| `GET /api/v1/snapshot` | schema 校验的版本化正式/nowcast 响应；快照含 model/config/commit/data cutoff 身份 |
+| `GET /api/v1/backtest[?as_of=<ISO>]` | 版本化 event-time 回放与模型身份 |
+| `GET /api/v1/robustness` | 版本化稳健性报告 |
+| `GET /api/v1/model` | 冻结 Champion descriptor、`configHash` 与部署 commit |
+| `GET /api/v1/snapshots/export?format=json\|csv` | 正式快照导出；严格日期范围与安全 CSV 转义 |
+| `POST /api/admin/refresh` | Bearer 或 Access service token；`?all=1` 还必须提供 `x-confirm-full-rebuild: FULL_REBUILD`；所有尝试均审计 |
 
 ---
 
@@ -194,10 +199,15 @@ npm install
 # 准备密钥(已 gitignore,切勿提交)
 printf 'FRED_API_KEY=你的key\nADMIN_TOKEN=随便一个长随机串\n' > .dev.vars
 npm test            # Vitest
+npm run typecheck
+npm run lint
+npm run migrate:verify   # 临时本地 D1：0010 前向应用 + 第二次 no-op
+npm run restore:drill    # 完全本地临时恢复演练
+npm run deploy:dry       # staging bundle dry-run；不是 staging 已部署证明
 npx wrangler dev    # 本地起 Worker
 ```
 
-部署:`npx wrangler deploy`(D1 需先 `wrangler d1 migrations apply`,密钥用 `wrangler secret put`)。
+生产部署只通过受保护的手动 GitHub workflow；staging D1 仍是明确 placeholder，替换前禁止部署。备份默认 dry-run。详见 [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md) 与 [`docs/MODEL_CARD.md`](docs/MODEL_CARD.md)。
 
 ---
 

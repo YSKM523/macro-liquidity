@@ -5,7 +5,15 @@
 > 部署：`wrangler deploy`（**改前端记得 bump `?v=` 版本号**，否则缓存不更新）
 > API：`/api/health | /api/explain | /api/robustness | /api/global-liquidity`
 
-_最后更新：2026-07-17（三项优化已部署上线：ingest 重试+告警、DXY 拼接、stress 实时读数）_
+_最后更新：2026-07-22（PR-13 生产治理仅本地实现；未推送、未部署、未访问远程数据库）_
+
+## PR-13 本地状态
+
+- 新快照具备 model/config/commit/data-run/cutoff/decision/created 身份；历史行由 additive 0010 标记为 `LEGACY_UNVERSIONED`。
+- v1 API、结构化日志、SLO、管理员双认证/全量二次确认/审计、告警审计、短缓存/熔断已实现。
+- CI、dev/staging/production 配置、受保护人工生产部署、dry-run 备份与本地恢复演练已配置。
+- staging D1 仍是 `REPLACE_WITH_STAGING_D1`，因此 staging/production 均未验证或部署；没有创建或更改 secret。
+- Champion 算法、权重、阈值、迟滞和仓位策略未改变。
 
 ## 当前状态
 - **2026-07-17 三项优化已部署**（版本 ID `9979e093-4492-4ee1-bad4-89b71f68e20b`，`?v=0717a`；未 commit）。线上验证：readouts 行渲染真实数值、桌面 1280+移动 390 无横向溢出、0 console error；DXY 拼接生效（dxy_eod 07-15=119.94，dollar factor 17.4→42.4，score 59.1→63.6）；两条 cron 均注册。**Resend 三 secret 未配（RESEND_API_KEY/EMAIL_FROM/ALERT_EMAIL_TO），邮件告警静默停用，重试 cron 已生效**：

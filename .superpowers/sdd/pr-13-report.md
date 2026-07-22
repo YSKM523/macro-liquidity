@@ -31,3 +31,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - Intermediate regression evidence: the first local restore run failed because raw multiline SQL was not accepted by the Miniflare D1 executor; comments/whitespace are normalized before import without changing the verified source hash.
 - GREEN: `env -u NODE_OPTIONS npx vitest run test/backup-restore.test.ts` — 1 file, 3 tests passed; `env -u NODE_OPTIONS node scripts/restore-drill.mjs` returned `PASS`, verified 3 required tables, expected row counts, governed latest snapshot, and SHA-256 `10ec6bdc379ce958818b4c0efe4e6645ae027d5eceeaa1c8ee430e6858f4a730`.
 - Backup remained dry-run only. No `--execute`, remote D1, or R2 path was invoked.
+
+### Stage 5 — CI, environments, workflows, and governance docs
+
+- RED: `env -u NODE_OPTIONS npx vitest run test/production-governance.test.ts` — 4/4 tests failed for absent scripts, environments, workflows, and governance documents.
+- GREEN: `env -u NODE_OPTIONS npx vitest run test/production-governance.test.ts test/worker.test.ts` — 2 files, 30 tests passed; `npm run typecheck` and `npm run lint` passed.
+- `npm run migrate:verify` returned `PASS`: migrations 0001–0010 applied to a fresh temporary local D1, and the second run reported `No migrations to apply`.
+- `npm run deploy:dry` bundled successfully for staging and exited at `--dry-run`; output retained the explicit `REPLACE_WITH_STAGING_D1` placeholder. This is not a staging deployment.
+- `npm run restore:drill` returned `PASS`; `npm run backup:dry` returned `DRY_RUN` with `remoteWrites:false`.
+- Production workflow is manual-only and references the protected `production` environment. No workflow was pushed or executed.

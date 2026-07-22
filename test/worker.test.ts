@@ -39,6 +39,7 @@ const dbState = vi.hoisted(() => ({
     cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
   } as any,
   exportRows: [] as any[],
+  adminRateAllowed: true,
 }));
 
 vi.mock('../src/service', () => ({
@@ -56,6 +57,7 @@ vi.mock('../src/db', () => ({
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
   recordAdminAudit: vi.fn(async () => undefined),
+  adminRateLimitAllowed: vi.fn(async () => dbState.adminRateAllowed),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
   ingestRunSummary: vi.fn(async () => ({
@@ -116,6 +118,7 @@ beforeEach(() => {
     cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
   };
   dbState.exportRows = [];
+  dbState.adminRateAllowed = true;
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -225,6 +228,15 @@ describe('/api/admin/refresh contention', () => {
       method: 'POST', headers: { authorization: 'Bearer test' },
     }), env);
     expect(response.status).toBe(428);
+    expect(runIngest).not.toHaveBeenCalled();
+  });
+
+  it('rate limits authenticated admin attempts before starting ingest', async () => {
+    dbState.adminRateAllowed = false;
+    const response = await worker.fetch(new Request('https://example.test/api/admin/refresh', {
+      method: 'POST', headers: { authorization: 'Bearer test' },
+    }), env);
+    expect(response.status).toBe(429);
     expect(runIngest).not.toHaveBeenCalled();
   });
 

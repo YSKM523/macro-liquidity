@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Vitest executes in Node.
 import { execFileSync, spawnSync } from 'node:child_process';
+declare const process: { execPath: string };
 
 describe('backup and restore tooling', () => {
   it('is dry-run by default and prints no secret-bearing command', () => {

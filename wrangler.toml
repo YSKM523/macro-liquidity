@@ -8,8 +8,8 @@ binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "macro_liquidity"
-database_id = "5ee92b9b-eb8e-4c34-9479-b0838fa113fb"
+database_name = "macro_liquidity_dev"
+database_id = "11111111-1111-1111-1111-111111111111"
 migrations_dir = "migrations"
 
 [triggers]
@@ -17,3 +17,46 @@ crons = ["0 */3 * * *", "30 * * * *"]  # 主 cron 3h + hourly 重试(仅不健�
 
 [vars]
 START_DATE = "2016-01-01"
+CODE_COMMIT_SHA = "LOCAL_UNCONFIGURED"
+
+[env.dev]
+name = "macro-liquidity-dashboard-dev"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "macro_liquidity_dev"
+database_id = "11111111-1111-1111-1111-111111111111"
+migrations_dir = "migrations"
+
+[env.dev.vars]
+START_DATE = "2016-01-01"
+CODE_COMMIT_SHA = "LOCAL_UNCONFIGURED"
+
+[env.staging]
+name = "macro-liquidity-dashboard-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "REPLACE_WITH_STAGING_D1"
+database_id = "00000000-0000-0000-0000-000000000000" # required placeholder; replace before staging deploy
+migrations_dir = "migrations"
+
+[env.staging.vars]
+START_DATE = "2016-01-01"
+CODE_COMMIT_SHA = "LOCAL_UNCONFIGURED"
+
+[env.production]
+name = "macro-liquidity-dashboard"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "macro_liquidity"
+database_id = "5ee92b9b-eb8e-4c34-9479-b0838fa113fb"
+migrations_dir = "migrations"
+
+[env.production.triggers]
+crons = ["0 */3 * * *", "30 * * * *"]
+
+[env.production.vars]
+START_DATE = "2016-01-01"
+CODE_COMMIT_SHA = "LOCAL_UNCONFIGURED"
