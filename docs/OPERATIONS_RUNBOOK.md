@@ -38,7 +38,7 @@ For an ingest incident: check `/api/health`, ACTIVE `snapshot_state`, latest fai
 
 ## Backup
 
-`npm run backup:dry` is non-mutating. Execute mode requires `--execute`, exact `--env`, `BACKUP_R2_BUCKET`, and for production `--confirm-production=BACKUP_PRODUCTION`. Daily critical export contains governed snapshot fields; weekly full export is uploaded to R2. The protected `production-backup` environment owns authorization and retention policy.
+`npm run backup:dry` is non-mutating. Execute mode requires `--execute`, exact `--env`, `BACKUP_R2_BUCKET`, and for production `--confirm-production=BACKUP_PRODUCTION`. Daily critical export contains governed snapshot fields; weekly full export is uploaded to R2. D1 commands explicitly use `--remote`; Wrangler R2 object commands do not support or receive that flag. The protected `production-backup` environment owns authorization and retention policy.
 
 ## Restore
 

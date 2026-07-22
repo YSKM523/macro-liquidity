@@ -53,6 +53,6 @@ if (scope === 'full') {
 if (result.status !== 0) fail(`D1 backup failed with status ${result.status ?? 'unknown'}`);
 const objectKey = `${environment}/${scope}/${output.split('/').at(-1)}`;
 const upload = spawnSync('npx', ['wrangler', 'r2', 'object', 'put', `${bucket}/${objectKey}`,
-  '--file', output, '--remote'], { stdio: 'inherit' });
+  '--file', output], { stdio: 'inherit' });
 if (upload.status !== 0) fail(`R2 upload failed with status ${upload.status ?? 'unknown'}`);
 process.stdout.write(JSON.stringify({ mode: 'EXECUTED', environment, scope, output, objectKey }) + '\n');

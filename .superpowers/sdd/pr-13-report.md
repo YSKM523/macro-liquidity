@@ -79,6 +79,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - GREEN: focused tests passed 3 files / 56 tests, including 20 concurrent reservations admitting exactly 5. Typecheck, lint, migrations 0001–0010 plus second no-op, restore drill, and diff check passed.
 - Migration 0010 now creates `admin_rate_limit_buckets`; one UPSERT/RETURNING statement atomically reserves capacity before authentication and audit work. All attempts share the limit, and bucket keys are SHA-256 digests of the transport source only. The runbook now defines the Access hostname/path/method boundary, exact service-token semantics, and separation from deploy/backup roles.
 
+### Review remediation 7 — executable backup command coverage
+
+- RED: fake-`npx` execute-path test failed because the R2 object command received unsupported `--remote`.
+- GREEN: backup/restore tests passed 4/4, including actual child-process command capture; typecheck, lint, and diff check passed.
+- D1 export/execute retains `--remote`; R2 object upload no longer receives it. The test uses a temporary executable `npx`, performs the critical backup path, captures both command arrays, verifies the D1/R2 distinction, and performs no network or remote write.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.
