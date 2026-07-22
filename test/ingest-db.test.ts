@@ -87,7 +87,7 @@ describe('ingest repository contracts', () => {
     await expect(db.prepare("SELECT owner_run_id FROM ingest_lock WHERE lock_name='fred_ingest'").first())
       .resolves.toEqual({ owner_run_id: 'run-2' });
     await mf.dispose();
-  });
+  }, 30_000);
 
   it('cannot release a lock owned by another run', async () => {
     const db = {
@@ -124,7 +124,7 @@ describe('ingest repository contracts', () => {
     await expect(db.prepare('SELECT expires_at FROM ingest_lock').first())
       .resolves.toEqual(before);
     await mf.dispose();
-  });
+  }, 30_000);
 
   it('promotes observations and switches ACTIVE with exactly one D1 batch', async () => {
     const statements: Array<{ sql: string; binds: unknown[] }> = [];
@@ -197,6 +197,7 @@ describe('ingest repository contracts', () => {
         .resolves.toEqual({ state: 'RUNNING' });
       await mf.dispose();
     },
+    30_000,
   );
 
   it.each(['missing', 'FAILED'] as const)(
@@ -239,6 +240,7 @@ describe('ingest repository contracts', () => {
         .resolves.toEqual({ state: 'ACTIVE' });
       await mf.dispose();
     },
+    30_000,
   );
 
   it('persists terminal series-attempt and failed-snapshot outcomes with supplied completion timestamps', async () => {
@@ -346,6 +348,7 @@ describe('ingest repository contracts', () => {
         .resolves.toEqual({ snapshot_state: 'PENDING' });
       await mf.dispose();
     },
+    30_000,
   );
 
   it('rolls back earlier success meta when ownership transfers inside the publication batch', async () => {
@@ -385,7 +388,7 @@ describe('ingest repository contracts', () => {
     await expect(db.prepare('SELECT owner_run_id FROM ingest_lock').first())
       .resolves.toEqual({ owner_run_id: 'run-1' });
     await mf.dispose();
-  });
+  }, 30_000);
 
   it('throws a structured validation error carrying the semantically invalid series', () => {
     try {

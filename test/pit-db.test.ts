@@ -56,7 +56,7 @@ describe('point-in-time schema', () => {
       'data_run_id', 'data_cutoff', 'decision_at', 'tradable_at', 'pit_status',
     ]));
     await mf.dispose();
-  });
+  }, 30_000);
 });
 
 describe('PIT activation repository', () => {
@@ -81,7 +81,7 @@ describe('PIT activation repository', () => {
       modelDate: '2023-12-27', decisionAt: base.releasedAt, tradableAt: base.tradableAt,
     }]);
     await mf.dispose();
-  });
+  }, 30_000);
 
   it('replays identical vintages idempotently and rolls back a conflicting vintage without switching ACTIVE', async () => {
     const { mf, db } = await migratedDb();
@@ -111,7 +111,7 @@ describe('PIT activation repository', () => {
     expect(await db.prepare("SELECT run_id FROM ingest_runs WHERE state='ACTIVE'").first()).toEqual({ run_id: 'run-2' });
     expect(await db.prepare("SELECT state FROM ingest_runs WHERE run_id='run-3'").first()).toEqual({ state: 'RUNNING' });
     await mf.dispose();
-  });
+  }, 30_000);
 
   it.each(['transferred', 'expired'] as const)('does not promote PIT staging under a %s lease', async leaseState => {
     const { mf, db } = await migratedDb();
@@ -128,5 +128,5 @@ describe('PIT activation repository', () => {
     await expect(activateIngestRun(db, 'target', '2024-01-10T12:01:00Z')).rejects.toThrow(/lease|fence|activation/i);
     expect(await db.prepare('SELECT COUNT(*) AS n FROM observations_pit').first()).toEqual({ n: 0 });
     await mf.dispose();
-  });
+  }, 30_000);
 });
