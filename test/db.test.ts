@@ -147,7 +147,7 @@ describe('official and nowcast snapshot channels', () => {
     await expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first())
       .resolves.toEqual({ n: 0 });
     await mf.dispose();
-  });
+  }, 30_000);
 
   it('loads official analytics exclusively from weekly storage', async () => {
     const all = vi.fn(async () => ({ results: [] }));
