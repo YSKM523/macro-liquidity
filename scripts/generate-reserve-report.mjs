@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { renderReserveReport } from './reserve-report.mjs';
+import { runReserveResearch } from './run-reserve-research.mjs';
+
+const snapshotId = 'reserve-current-vintage-2026-07-22-v1';
+const snapshotPath = resolve(`scripts/data/${snapshotId}.json`);
+const manifestPath = resolve(`scripts/data/${snapshotId}.manifest.json`);
+const snapshotText = await readFile(snapshotPath, 'utf8');
+const snapshot = JSON.parse(snapshotText);
+const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+const report = await runReserveResearch(snapshot, snapshotText, manifest);
+const jsonPath = resolve('docs/research/RESERVE_ADEQUACY_OOS_REPORT.json');
+const markdownPath = resolve('docs/research/RESERVE_ADEQUACY_OOS_REPORT.md');
+await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+await writeFile(markdownPath, `${renderReserveReport(report)}\n`, { encoding: 'utf8', flag: 'wx' });
+console.log(JSON.stringify({ jsonPath, markdownPath, sample: report.sample, oos: report.oos, decision: report.decision }, null, 2));
