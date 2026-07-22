@@ -1,0 +1,23 @@
+const boundaries = Object.freeze([
+  '2018-01-01', '2020-01-01', '2022-01-01', '2023-01-01',
+  '2024-01-01', '2025-01-01', '2100-01-01',
+]);
+
+export const PREREGISTRATION = Object.freeze({
+  status: 'PREREGISTERED_BEFORE_FETCH',
+  methodologyVersion: 'PR12_RESEARCH_V1',
+  evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
+  source: 'FRED_CURRENT_VINTAGE',
+  series: Object.freeze(['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCR', 'SRFONTSYD', 'SP500']),
+  units: Object.freeze({ WRESBAL: 'USD_MILLIONS_DIVIDE_1000_TO_BILLIONS', GDP: 'USD_BILLIONS_ANNUALIZED', rates: 'PERCENTAGE_POINTS', SRFONTSYD: 'USD_BILLIONS' }),
+  weights: Object.freeze({ relativeReserves: 0.30, reserveChange13: 0.25, sofrIorb: 0.25, auxiliaryFunding: 0.20 }),
+  minimumPriorWeeks: 52,
+  states: Object.freeze({ abundant: 80, ample: 60, transition: 40, scarce: 20 }),
+  freshness: Object.freeze({ WRESBAL: 14, GDP: 120, pairedRateMinimum: 3, pairedRateMaximumAge: 4, SRFMinimum: 1, SRFMaximumAge: 4, lookbackCalendarDays: 7 }),
+  target: Object.freeze({ series: 'SP500', direction: 'POSITIVE', horizonCalendarDays: 91, entry: 'FIRST_CLOSE_ON_OR_AFTER_NEXT_MONDAY', maximumMatchGapDays: 7 }),
+  bootstrap: Object.freeze({ method: 'SEEDED_MOVING_BLOCK', seed: 12_012, blockLength: 13, iterations: 2_000 }),
+  folds: Object.freeze({ boundaries, emptyFoldPolicy: 'REPORT_EMPTY_NEVER_REDISTRIBUTE' }),
+  decisionRule: 'KEEP_SHADOW iff non-overlap IC > 0, at least four fixed folds positive, bootstrap p <= 0.10, non-overlap n >= 10, and top score quintile has no worse mean return or 10% tail than bottom; otherwise DROP_RESEARCH.',
+  allowedDecisions: Object.freeze(['KEEP_SHADOW', 'DROP_RESEARCH']),
+  replacementEligible: false,
+});
