@@ -6,6 +6,8 @@
  * This research module is intentionally isolated from the production model.
  */
 
+import { PREREGISTRATION } from './netliq-preregistration.mjs';
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function epochDay(date) {
@@ -64,7 +66,7 @@ export function buildWeeklyNetLiquidity(input) {
     if (new Date(`${walcl.date}T00:00:00Z`).getUTCDay() !== 3) {
       throw new Error(`WALCL anchor must be Wednesday: ${walcl.date}`);
     }
-    const wdtgal = latestAtOrBefore(input.WDTGAL, walcl.date);
+    const wdtgal = input.WDTGAL.find(item => item.date === walcl.date);
     const rawRrp = latestAtOrBefore(input.RRPONTSYD, walcl.date);
     const tgaWeek = observationsInWeek(input.WTREGEN, walcl.date);
     const rrpFive = latestNAtOrBefore(input.RRPONTSYD, walcl.date, 5);
@@ -95,7 +97,12 @@ function median(values) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-export function priorRollingMad(values, index, cap = 156, minimum = 52) {
+export function priorRollingMad(
+  values,
+  index,
+  cap = PREREGISTRATION.normalization.capWeeks,
+  minimum = PREREGISTRATION.normalization.minimumPriorWeeks,
+) {
   if (!Array.isArray(values) || !Number.isInteger(index) || index < 0) return null;
   const window = values
     .slice(Math.max(0, index - cap), index)
@@ -110,7 +117,8 @@ export function scoreLatent({ gap13, impulse4, impulse13 }) {
   if (![gap13, impulse4, impulse13].every(Number.isFinite)) {
     return { latent: null, score: null };
   }
-  const latent = 0.45 * gap13 + 0.35 * impulse4 + 0.20 * impulse13;
+  const weights = PREREGISTRATION.weights;
+  const latent = weights.gap13 * gap13 + weights.impulse4 * impulse4 + weights.impulse13 * impulse13;
   return { latent, score: 100 / (1 + Math.exp(-latent)) };
 }
 

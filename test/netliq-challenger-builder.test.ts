@@ -42,6 +42,18 @@ describe('continuous net-liquidity research builder', () => {
     expect(buildWeeklyNetLiquidity({ ...base, WDTGAL: [] })).toEqual([]);
   });
 
+  it('does not forward-fill a prior-week WDTGAL level into the WALCL Wednesday', () => {
+    expect(buildWeeklyNetLiquidity({
+      WALCL: [row('2024-01-10', 8_100_000)],
+      WDTGAL: [row('2024-01-03', 710_000)],
+      WTREGEN: [row('2024-01-10', 660_000)],
+      RRPONTSYD: [
+        row('2024-01-04', 490), row('2024-01-05', 480), row('2024-01-08', 470),
+        row('2024-01-09', 460), row('2024-01-10', 450),
+      ],
+    })).toEqual([]);
+  });
+
   it.each([
     ['unsorted', [row('2024-01-10', 2), row('2024-01-03', 1)]],
     ['duplicate', [row('2024-01-03', 1), row('2024-01-03', 2)]],
