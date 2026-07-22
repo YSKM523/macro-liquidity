@@ -1803,7 +1803,7 @@ refactor: event-time backtest engine
 - [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）
 - [ ] BT-05：公平基准与尾部指标（PR-10）
 
-PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，`totalReturn=null`，不会退回零现金收益。
+PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，NAV 为空且全部绩效 totals 为 null。API 明确标记 `CURRENT_REVISION_MUTABLE` / `responseReproducible=false`：未来 FRED correction 会改变既往回测；raw PIT 可审计重建，但当前 payload 未冻结完整输入。
 
 PR-09 回滚：完整本地代码可从 PR-09 base `37fd6c4` 对后续提交做单独 revert；0009 仅在本地临时数据库验证且未部署。若未来已应用到共享数据库，不应直接删除新增表，应先停止依赖写入并用向前 migration 迁移/停用；本地验证库可丢弃对应临时 `--persist-to` 目录后从 0001 重建。
 

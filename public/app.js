@@ -676,23 +676,25 @@ function renderEventBacktest(result) {
   const event = result && result.event_time;
   if (!event) return '<p class="rb-note">事件时间数据不足</p>';
   const assumptions = event.assumptions || {};
+  const provenance = event.provenance || {};
   const assumption = (value) => value == null ? '—' : value;
   const disclosure = `<div class="rb-sub">正式绩效 · event-time</div>`
     + `<p class="rb-note">日频收盘执行：tradable_at 之后首个 SPX 23:59:59Z 收盘；周频信号不等于执行日。</p>`
     + `<p class="rb-note">现金：SOFR ACT/360（仅使用区间起点之前日期的已知 fixing）· 手续费 ${assumption(assumptions.commissionBps)}bp · 基础滑点 ${assumption(assumptions.baseSlippageBps)}bp · 高波动额外滑点 ${assumption(assumptions.highVolExtraSlippageBps)}bp（VIX≥${assumption(assumptions.vixStressLevel)}，陈旧/缺失同样保守计入）。</p>`
     + `<p class="rb-note">超过 100% 敞口：SOFR + ${assumption(assumptions.financingSpreadBps)}bp 融资；SPX adjusted_close 为 FRED 指数收盘，不含股息。</p>`;
+  const provenanceNote = `<p class="rb-note">输入版本：${rbEsc(provenance.revisionPolicy || '—')} · cutoff ${rbEsc(provenance.maxFetchedAt || '—')} · 当前响应不可独立复现（未来 FRED correction 会改变历史结果）。</p>`;
   const legacy = result.strategy_long_flat && result.strategy_long_flat.methodology === 'LEGACY_WEEKLY'
     ? '<p class="rb-note">旧 weekly long/flat 仅保留为 LEGACY_WEEKLY 诊断，不代表正式绩效。</p>'
     : '';
   if (event.status === 'DATA_INCOMPLETE') {
-    return disclosure + legacy
+    return disclosure + provenanceNote + legacy
       + `<div class="rb-concl">数据不完整，不展示绩效：${rbEsc(event.reason || '未提供原因')}</div>`;
   }
   const finalRow = event.nav && event.nav.length ? event.nav[event.nav.length - 1] : null;
-  return disclosure + legacy
+  return disclosure + provenanceNote + legacy
     + `<div class="rb-stat"><span class="k">累计收益</span><span class="v">${rbPct(event.totals.totalReturn)}</span></div>`
     + `<div class="rb-stat"><span class="k">日频净值区间</span><span class="v">${event.totals.sessions} 个交易日</span></div>`
-    + `<div class="rb-stat"><span class="k">执行 / 未执行信号</span><span class="v">${event.executions.length} / ${event.unexecuted.length}</span></div>`
+    + `<div class="rb-stat"><span class="k">执行 / 同收盘替换 / 末端未执行</span><span class="v">${event.executions.length} / ${event.superseded.length} / ${event.unexecuted.length}</span></div>`
     + `<div class="rb-stat"><span class="k">期末敞口</span><span class="v">${finalRow ? rbPct(finalRow.exposure, 0) : '—'}</span></div>`;
 }
 

@@ -36,6 +36,7 @@ Implementation commits: `0764210..c8c08ec`
 - Final self-review added a no-lookahead regression proving a same-date 99% SOFR fixing was incorrectly visible at interval start; the RED cash return was 0.00825. The strict-prior-date fix in `eaa4e73` restored the expected 5% Fri→Mon carry of 0.0004166667 and documents the conservative date-only availability rule.
 - Task/spec review found the global mandatory backtest checklist still marked PR-09's four delivered gates incomplete. The review fix checks only next-tradable execution, daily prices, non-zero cash carry, and costs; the remaining five PR-10/later gates stay unchecked.
 - Task rereview found activation stamping daily rows with activation time and generic FRED source instead of raw-vintage provenance. The regression separates PIT `fetched_at` from activation time across SPX/VIX/SOFR, covers a corrected SPX vintage and same-value synthetic upgrade, and preserves unchanged-row/fence behavior.
+- Whole-branch review found four Important issues: partial NAV/cost leakage on incomplete cash; no hard active/latest-PIT value fence; mutable-current inputs presented without a compact cutoff/reproducibility warning; and legacy 8.1%/Sharpe 1.10 prose appearing formal. It also noted missing same-close supersession audit. The fix erases incomplete performance, adds the transactional mismatch guard, exposes `CURRENT_REVISION_MUTABLE` provenance with `responseReproducible=false`, labels every legacy metric, and records superseded signals.
 - Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 501/501 tests, exit 0**.
 - Fresh final `env -u NODE_OPTIONS npx tsc --noEmit`: **exit 0**.
 - `git diff --check 37fd6c4..HEAD`: **exit 0**.
@@ -55,6 +56,7 @@ Implementation commits: `0764210..c8c08ec`
 - The PR-09 compatibility target remains `score > 55 ? 100% : 0%`. Dashboard exposure tiers, fair benchmarks, beta matching, and tail analytics belong to PR-10.
 - FRED index-close history excludes dividends and may differ from a tradable total-return product.
 - `tradingCostRate` is the accumulated per-turnover cost rate, not a dollar/NAV attribution amount.
+- Current-revision event-time results are mutable and not independently reproducible from the compact response alone; exact reconstruction requires the raw PIT store and cutoff policy.
 - Local Wrangler 3.114.17 emitted an available-update warning; it did not affect migration success.
 
 ## Rollback

@@ -180,7 +180,9 @@ describe('/api/backtest event-time performance', () => {
     expect(response.status).toBe(200);
     expect(body.event_time.status).toBe('DATA_INCOMPLETE');
     expect(body.event_time.reason).toMatch(/SOFR/i);
-    expect(body.event_time.totals.totalReturn).toBeNull();
+    expect(body.event_time.nav).toEqual([]);
+    expect(body.event_time.totals).toEqual({ totalReturn: null, tradingCostRate: null, sessions: null });
+    expect(body.event_time.provenance.revisionPolicy).toBe('CURRENT_REVISION_MUTABLE');
   });
 });
 

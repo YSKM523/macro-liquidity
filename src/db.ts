@@ -390,6 +390,25 @@ export async function activateIngestRun(
        ON CONFLICT(series_id, date) DO UPDATE SET value = excluded.value`
     ).bind(runId, runId, runId),
     db.prepare(
+      `SELECT CASE WHEN NOT EXISTS (
+         SELECT 1 FROM observations active
+         WHERE active.series_id IN ('SP500','VIXCLS','SOFR')
+           AND EXISTS (SELECT 1 FROM observations_pit any_raw
+             WHERE any_raw.series_id=active.series_id
+               AND any_raw.observation_date=active.date)
+           AND NOT EXISTS (
+             SELECT 1 FROM observations_pit latest
+             WHERE latest.series_id=active.series_id
+               AND latest.observation_date=active.date
+               AND latest.value=active.value
+               AND latest.vintage_date=(
+                 SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
+                 WHERE candidate.series_id=active.series_id
+                   AND candidate.observation_date=active.date)
+           )
+       ) THEN 1 ELSE json('active observation/latest PIT vintage mismatch') END AS pit_active_match`
+    ),
+    db.prepare(
       `INSERT INTO market_prices_daily
          (symbol,date,close,adjusted_close,source,fetched_at,data_run_id)
        SELECT CASE active.series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END,
@@ -523,7 +542,7 @@ export async function activateIngestRun(
       `ingest run ${runId} activation lease/state fence rejected; target must be RUNNING: ${String((error as any)?.message ?? error)}`,
     );
   });
-  if (Number((results[6]?.meta as any)?.changes ?? 0) !== 1) {
+  if (Number((results[7]?.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest run ${runId} must be RUNNING before activation`);
   }
 }
@@ -1032,14 +1051,14 @@ export async function loadEventBacktestInputs(db: D1Database): Promise<EventBack
        ORDER BY julianday(decision_at),date`,
     ).all<{ signal_date: string; decision_at: string; tradable_at: string; score: number }>(),
     db.prepare(
-      `SELECT symbol,date,adjusted_close,source
+      `SELECT symbol,date,adjusted_close,source,fetched_at,data_run_id
        FROM market_prices_daily WHERE symbol IN ('SPX','VIX')
        ORDER BY date,symbol`,
-    ).all<{ symbol: 'SPX' | 'VIX'; date: string; adjusted_close: number; source: string }>(),
+    ).all<{ symbol: 'SPX' | 'VIX'; date: string; adjusted_close: number; source: string; fetched_at: string; data_run_id: string }>(),
     db.prepare(
-      `SELECT date,rate,source FROM cash_rates_daily
+      `SELECT date,rate,source,fetched_at,data_run_id FROM cash_rates_daily
        WHERE rate_id='SOFR' ORDER BY date`,
-    ).all<{ date: string; rate: number; source: string }>(),
+    ).all<{ date: string; rate: number; source: string; fetched_at: string; data_run_id: string }>(),
   ]);
   const markets = marketRows.results ?? [];
   return {
@@ -1051,12 +1070,15 @@ export async function loadEventBacktestInputs(db: D1Database): Promise<EventBack
     })),
     prices: markets.filter(row => row.symbol === 'SPX').map(row => ({
       date: row.date, adjustedClose: row.adjusted_close, source: row.source,
+      fetchedAt: row.fetched_at, dataRunId: row.data_run_id,
     })),
     vix: markets.filter(row => row.symbol === 'VIX').map(row => ({
       date: row.date, value: row.adjusted_close, source: row.source,
+      fetchedAt: row.fetched_at, dataRunId: row.data_run_id,
     })),
     cashRates: (cashRows.results ?? []).map(row => ({
       date: row.date, rate: row.rate, source: row.source,
+      fetchedAt: row.fetched_at, dataRunId: row.data_run_id,
     })),
   };
 }

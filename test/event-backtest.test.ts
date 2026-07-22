@@ -41,6 +41,9 @@ describe('event-time execution scheduler', () => {
     ], prices);
     expect(result.executions).toHaveLength(1);
     expect(result.executions[0]).toMatchObject({ signalDate: '2024-01-04', newExposure: 0 });
+    expect(result.superseded).toEqual([expect.objectContaining({
+      signalDate: '2024-01-03', executionDate: '2024-01-05', reason: 'SUPERSEDED_AT_SAME_CLOSE',
+    })]);
   });
 
   it('reports signals after the final price as explicitly unexecuted', () => {
@@ -113,8 +116,8 @@ describe('daily event-time NAV', () => {
     const result = runEventTimeBacktest({ signals: [longSignal], prices: daily, vix: calmVix, cashRates: [...cashRates] });
     expect(result.status).toBe('DATA_INCOMPLETE');
     expect(result.reason).toMatch(/SOFR.*(?:missing|stale)/i);
-    expect(result.nav.length).toBeLessThan(daily.length);
-    expect(result.totals.totalReturn).toBeNull();
+    expect(result.nav).toEqual([]);
+    expect(result.totals).toEqual({ totalReturn: null, tradingCostRate: null, sessions: null });
   });
 
   it('adds conservative slippage for high, stale, or missing VIX', () => {
@@ -144,6 +147,21 @@ describe('daily event-time NAV', () => {
     }
   });
 
+  it('summarizes mutable current-revision provenance using strict timestamp epochs', () => {
+    const result = runEventTimeBacktest({
+      signals: [longSignal],
+      prices: daily.map((row, index) => ({ ...row, fetchedAt: index === 0 ? '2024-01-10T00:00:00.900Z' : '2024-01-10T00:00:00Z', dataRunId: index === 0 ? 'market-a' : 'market-b' })),
+      vix: calmVix.map(row => ({ ...row, fetchedAt: '2024-01-09T00:00:00Z', dataRunId: 'market-a' })),
+      cashRates: sofr.map(row => ({ ...row, fetchedAt: '2024-01-08T00:00:00Z', dataRunId: 'MIGRATION_0009_BACKFILL' })),
+    });
+    expect(result.provenance).toEqual({
+      revisionPolicy: 'CURRENT_REVISION_MUTABLE', responseReproducible: false,
+      maxFetchedAt: '2024-01-10T00:00:00.900Z',
+      sourceLabels: ['FRED:SOFR', 'FRED:SP500', 'FRED:VIXCLS'],
+      dataRunCount: 3, containsSynthetic: true,
+    });
+  });
+
   it('fails closed for negative VIX and insufficient executable sessions', () => {
     expect(() => runEventTimeBacktest({
       signals: [longSignal], prices: daily,
@@ -152,6 +170,7 @@ describe('daily event-time NAV', () => {
     const oneSession = runEventTimeBacktest({ signals: [longSignal], prices: daily.slice(0, 1), vix: calmVix, cashRates: sofr });
     expect(oneSession.status).toBe('DATA_INCOMPLETE');
     expect(oneSession.reason).toMatch(/insufficient.*session/i);
-    expect(oneSession.totals.totalReturn).toBeNull();
+    expect(oneSession.nav).toEqual([]);
+    expect(oneSession.totals).toEqual({ totalReturn: null, tradingCostRate: null, sessions: null });
   });
 });

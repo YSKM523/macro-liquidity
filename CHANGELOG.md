@@ -11,6 +11,8 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added daily close-to-close NAV with SOFR ACT/360 carry, 1 bp commission, 2 bps base slippage, conservative 3 bps high/stale/missing-VIX slippage, and SOFR plus 100 bps financing support above 100% exposure.
 - Made missing/stale SOFR and insufficient sessions return typed `DATA_INCOMPLETE` with null total performance, while retaining the old weekly long/flat output as `LEGACY_WEEKLY` diagnostics.
 - Exposed event-time assumptions and incomplete-data reasons in `/api/backtest` and the dashboard without changing Champion formulas, weights, thresholds, hysteresis, or snapshot channels.
+- Made `DATA_INCOMPLETE` erase all partial NAV/cost/session performance, added same-close superseded-signal audit rows, and rejected active/latest-PIT value mismatches inside the activation transaction.
+- Labeled event-time inputs `CURRENT_REVISION_MUTABLE` with a compact source/run/synthetic/max-fetch cutoff summary and `responseReproducible=false`; future FRED corrections can change historical results because the response payload is not frozen.
 - Added local-only migration `0009_event_time_backtest.sql`; no deploy, remote D1 access, benchmark, exposure-tier, or tail-metric work was performed.
 
 ### PR-08 — Point-in-time observation storage

@@ -13,6 +13,8 @@ export interface DailyMarketPrice {
   date: string;
   adjustedClose: number;
   source: string;
+  fetchedAt?: string;
+  dataRunId?: string;
 }
 
 export interface ScheduledExecution extends EventSignal {
@@ -31,18 +33,23 @@ export interface UnexecutedSignal extends EventSignal {
 export interface ExecutionSchedule {
   executions: ScheduledExecution[];
   unexecuted: UnexecutedSignal[];
+  superseded: Array<EventSignal & { executionDate: string; reason: 'SUPERSEDED_AT_SAME_CLOSE' }>;
 }
 
 export interface DailyVix {
   date: string;
   value: number;
   source: string;
+  fetchedAt?: string;
+  dataRunId?: string;
 }
 
 export interface DailyCashRate {
   date: string;
   rate: number;
   source: string;
+  fetchedAt?: string;
+  dataRunId?: string;
 }
 
 export interface EventBacktestInputs {
@@ -69,8 +76,19 @@ export interface EventBacktestResult {
   nav: EventNavRow[];
   executions: ScheduledExecution[];
   unexecuted: UnexecutedSignal[];
-  totals: { totalReturn: number | null; tradingCostRate: number; sessions: number };
+  superseded: ExecutionSchedule['superseded'];
+  totals: { totalReturn: number | null; tradingCostRate: number | null; sessions: number | null };
   assumptions: typeof EVENT_BACKTEST_ASSUMPTIONS;
+  provenance: InputProvenance;
+}
+
+export interface InputProvenance {
+  revisionPolicy: 'CURRENT_REVISION_MUTABLE';
+  responseReproducible: false;
+  maxFetchedAt: string | null;
+  sourceLabels: string[];
+  dataRunCount: number;
+  containsSynthetic: boolean;
 }
 
 function requireDate(value: string, field: string): void {
@@ -110,6 +128,7 @@ export function scheduleExecutions(
 
   const selected = new Map<string, typeof validated[number]>();
   const unexecuted: UnexecutedSignal[] = [];
+  const superseded: ExecutionSchedule['superseded'] = [];
   for (const candidate of validated) {
     const price = prices.find(row => row.executionMs > candidate.tradableMs);
     if (!price) {
@@ -119,7 +138,10 @@ export function scheduleExecutions(
     const current = selected.get(price.date);
     if (!current || candidate.decisionMs > current.decisionMs ||
       (candidate.decisionMs === current.decisionMs && candidate.index > current.index)) {
+      if (current) superseded.push({ ...current.signal, executionDate: price.date, reason: 'SUPERSEDED_AT_SAME_CLOSE' });
       selected.set(price.date, candidate);
+    } else {
+      superseded.push({ ...candidate.signal, executionDate: price.date, reason: 'SUPERSEDED_AT_SAME_CLOSE' });
     }
   }
 
@@ -140,7 +162,7 @@ export function scheduleExecutions(
     });
     exposure = newExposure;
   }
-  return { executions, unexecuted };
+  return { executions, unexecuted, superseded };
 }
 
 const DAY_MS = 86_400_000;
@@ -186,31 +208,50 @@ function latestBefore<T extends { date: string }>(rows: T[], date: string): T | 
 
 function incomplete(
   reason: string,
-  nav: EventNavRow[],
   schedule: ExecutionSchedule,
-  tradingCost: number,
+  provenance: InputProvenance,
 ): EventBacktestResult {
   return {
-    status: 'DATA_INCOMPLETE', reason, nav,
-    executions: schedule.executions, unexecuted: schedule.unexecuted,
-    totals: { totalReturn: null, tradingCostRate: tradingCost, sessions: nav.length },
+    status: 'DATA_INCOMPLETE', reason, nav: [],
+    executions: schedule.executions, unexecuted: schedule.unexecuted, superseded: schedule.superseded,
+    totals: { totalReturn: null, tradingCostRate: null, sessions: null },
     assumptions: EVENT_BACKTEST_ASSUMPTIONS,
+    provenance,
+  };
+}
+
+function inputProvenance(inputs: EventBacktestInputs): InputProvenance {
+  const rows = [...inputs.prices, ...inputs.vix, ...inputs.cashRates];
+  let maxFetchedAt: string | null = null;
+  let maxMs = -Infinity;
+  for (const row of rows) {
+    if (!row.fetchedAt) continue;
+    const ms = isoTimestampMs(row.fetchedAt, 'backtest input fetchedAt');
+    if (ms > maxMs) { maxMs = ms; maxFetchedAt = row.fetchedAt; }
+  }
+  const runIds = new Set(rows.map(row => row.dataRunId).filter((value): value is string => Boolean(value)));
+  return {
+    revisionPolicy: 'CURRENT_REVISION_MUTABLE', responseReproducible: false, maxFetchedAt,
+    sourceLabels: [...new Set(rows.map(row => row.source))].sort(),
+    dataRunCount: runIds.size,
+    containsSynthetic: runIds.has('MIGRATION_0009_BACKFILL'),
   };
 }
 
 export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktestResult {
   const prices = [...inputs.prices].sort((a, b) => a.date.localeCompare(b.date));
+  const provenance = inputProvenance(inputs);
   const schedule = scheduleExecutions(inputs.signals, prices);
   const vix = validateDatedSeries(inputs.vix, row => row.value, 'VIX');
   if (vix.some(row => row.value < 0)) throw new Error('invalid VIX value');
   const cashRates = validateDatedSeries(inputs.cashRates, row => row.rate, 'SOFR');
-  if (schedule.executions.length === 0) return incomplete('no executable PIT signal', [], schedule, 0);
+  if (schedule.executions.length === 0) return incomplete('no executable PIT signal', schedule, provenance);
 
   const executionByDate = new Map(schedule.executions.map(execution => [execution.executionDate, execution]));
   const firstDate = schedule.executions[0].executionDate;
   const firstIndex = prices.findIndex(row => row.date === firstDate);
   if (firstIndex < 0 || firstIndex >= prices.length - 1) {
-    return incomplete('insufficient executable market sessions', [], schedule, 0);
+    return incomplete('insufficient executable market sessions', schedule, provenance);
   }
   let navValue = 1;
   let exposure = 0;
@@ -229,9 +270,9 @@ export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktest
       // With date-only materialization, excluding the interval-start date is
       // the conservative no-lookahead representation of "known at start".
       const fixing = latestBefore(cashRates, previous.date);
-      if (!fixing) return incomplete(`SOFR missing at ${previous.date}`, nav, schedule, tradingCost);
+      if (!fixing) return incomplete(`SOFR missing at ${previous.date}`, schedule, provenance);
       if (calendarDays(fixing.date, previous.date) > EVENT_BACKTEST_ASSUMPTIONS.cashRateMaxStaleCalendarDays) {
-        return incomplete(`SOFR stale at ${previous.date}`, nav, schedule, tradingCost);
+        return incomplete(`SOFR stale at ${previous.date}`, schedule, provenance);
       }
       assetReturn = exposure * (current.adjustedClose / previous.adjustedClose - 1);
       const annualCashRate = fixing.rate / 100;
@@ -270,8 +311,9 @@ export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktest
 
   return {
     status: 'OK', reason: null, nav,
-    executions: schedule.executions, unexecuted: schedule.unexecuted,
+    executions: schedule.executions, unexecuted: schedule.unexecuted, superseded: schedule.superseded,
     totals: { totalReturn: navValue - 1, tradingCostRate: tradingCost, sessions: nav.length },
     assumptions: EVENT_BACKTEST_ASSUMPTIONS,
+    provenance,
   };
 }

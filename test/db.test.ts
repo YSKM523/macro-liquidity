@@ -225,10 +225,10 @@ describe('event-time backtest repository', () => {
     const results = [
       [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T20:00:00Z', score: 60 }],
       [
-        { symbol: 'SPX', date: '2024-01-05', adjusted_close: 100, source: 'FRED:SP500' },
-        { symbol: 'VIX', date: '2024-01-05', adjusted_close: 20, source: 'FRED:VIXCLS' },
+        { symbol: 'SPX', date: '2024-01-05', adjusted_close: 100, source: 'FRED:SP500', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a' },
+        { symbol: 'VIX', date: '2024-01-05', adjusted_close: 20, source: 'FRED:VIXCLS', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a' },
       ],
-      [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+      [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-b' }],
     ];
     const db = {
       prepare(sql: string) {
@@ -247,9 +247,9 @@ describe('event-time backtest repository', () => {
     expect(queries[2]).toMatch(/cash_rates_daily[\s\S]*ORDER BY date/i);
     expect(loaded).toEqual({
       signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
-      prices: [{ date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500' }],
-      vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
-      cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+      prices: [{ date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a' }],
+      vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a' }],
+      cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-b' }],
     });
   });
 });

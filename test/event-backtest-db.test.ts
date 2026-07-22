@@ -164,4 +164,32 @@ describe('event-time daily input storage', () => {
     expect(await db.prepare("SELECT state FROM ingest_runs WHERE run_id='target'").first()).toEqual({ state: 'RUNNING' });
     await mf.dispose();
   }, 30_000);
+
+  it('rejects the whole activation when active value disagrees with the latest PIT vintage', async () => {
+    const { mf, db } = await emptyDb();
+    await apply(db);
+    await db.batch([
+      db.prepare("INSERT INTO observations VALUES ('SP500','2024-01-02',3900)"),
+      db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('prior','ACTIVE','FULL','2024-01-01T00:00:00Z')"),
+      db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('mismatch','RUNNING','INCREMENTAL','2024-01-03T00:00:00Z')"),
+      db.prepare("INSERT INTO ingest_series_attempts (run_id,series_id,status,started_at,completed_at,row_count) VALUES ('mismatch','SP500','SUCCEEDED','2024-01-03T00:00:00Z','2024-01-03T00:01:00Z',1)"),
+      db.prepare("INSERT INTO staging_observations VALUES ('mismatch','SP500','2024-01-02',4100)"),
+      db.prepare("INSERT INTO ingest_lock VALUES ('fred_ingest','mismatch',strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now','+60 seconds'))"),
+    ]);
+    await stagePitObservations(db, 'mismatch', [{
+      seriesId: 'SP500', observationDate: '2024-01-02', vintageDate: '2024-01-03',
+      releasedAt: '2024-01-02T23:59:59Z', fetchedAt: '2024-01-03T00:02:00Z',
+      tradableAt: '2024-01-03T14:30:00Z', source: 'ALFRED', checksum: 'mismatch-pit',
+      releaseTimeStatus: 'CONSERVATIVE_DATE_END', value: 4000,
+    }]);
+
+    await expect(activateIngestRun(db, 'mismatch', '2024-01-03T00:05:00Z'))
+      .rejects.toThrow(/PIT|mismatch|activation/i);
+    expect(await db.prepare("SELECT value FROM observations WHERE series_id='SP500'").first()).toEqual({ value: 3900 });
+    expect(await db.prepare("SELECT state FROM ingest_runs WHERE run_id='prior'").first()).toEqual({ state: 'ACTIVE' });
+    expect(await db.prepare("SELECT state FROM ingest_runs WHERE run_id='mismatch'").first()).toEqual({ state: 'RUNNING' });
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM market_prices_daily').first()).toEqual({ n: 0 });
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM observations_pit').first()).toEqual({ n: 0 });
+    await mf.dispose();
+  }, 30_000);
 });

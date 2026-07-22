@@ -161,6 +161,10 @@ describe('static UI assets', () => {
     expect(js).toContain('LEGACY_WEEKLY');
     expect(js).toContain("event.status === 'DATA_INCOMPLETE'");
     expect(js).toContain('数据不完整，不展示绩效');
+    expect(js).toContain('revisionPolicy');
+    expect(js).toContain('maxFetchedAt');
+    expect(js).toContain('当前响应不可独立复现');
+    expect(js).toContain('执行 / 同收盘替换 / 末端未执行');
     expect(js).not.toMatch(/assumptions\.[A-Za-z]+\s*\?\?\s*\d/);
   });
 
