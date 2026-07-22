@@ -170,6 +170,16 @@ describe('static UI assets', () => {
     expect(js).toContain('17:00:00Z');
     expect(js).not.toContain('当前响应不可独立复现');
     expect(js).toContain('执行 / 同收盘替换 / 末端未执行');
+    expect(js).toContain('DASHBOARD_EXPOSURE_TIERS_V1');
+    expect(js).toContain('PIT_SNAPSHOT_VIX_PROXY');
+    expect(js).toContain('100% SPX');
+    expect(js).toContain('平均 Beta 匹配静态 SPX/现金');
+    expect(js).toContain('前20个已完成交易日');
+    expect(js).toContain('前一收盘 200DMA');
+    expect(js).toContain('择时 Alpha');
+    expect(js).toContain('Sortino');
+    expect(js).toContain('最大回撤持续期');
+    expect(js).toContain('rbEsc(event.reason');
     expect(js).not.toMatch(/assumptions\.[A-Za-z]+\s*\?\?\s*\d/);
   });
 

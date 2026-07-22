@@ -622,6 +622,8 @@ async function fetchRobust() {
 }
 
 function rbPct(x, d = 1) { return (x * 100).toFixed(d) + '%'; }
+function rbMaybePct(x, d = 1) { return x == null ? '—' : rbPct(x, d); }
+function rbMaybeNum(x, d = 2) { return x == null ? '—' : Number(x).toFixed(d); }
 function rbIcCls(x) { return x >= 0 ? 'rb-pos' : 'rb-neg'; }
 function rbEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
@@ -681,7 +683,9 @@ function renderEventBacktest(result) {
   const disclosure = `<div class="rb-sub">正式绩效 · event-time</div>`
     + `<p class="rb-note">日频收盘执行：只有 tradable_at 严格早于当日 17:00:00Z 保守最早美股收盘界线，才使用该日实际 SPX 日线；等于或晚于界线则等待下一条实际日线。23:59:59Z 只是日频记账标记，不是交易所实际收盘时间戳。</p>`
     + `<p class="rb-note">现金：SOFR ACT/360（仅使用区间起点之前日期的已知 fixing）· 手续费 ${assumption(assumptions.commissionBps)}bp · 基础滑点 ${assumption(assumptions.baseSlippageBps)}bp · 高波动额外滑点 ${assumption(assumptions.highVolExtraSlippageBps)}bp（VIX≥${assumption(assumptions.vixStressLevel)}，陈旧/缺失同样保守计入）。</p>`
-    + `<p class="rb-note">超过 100% 敞口：SOFR + ${assumption(assumptions.financingSpreadBps)}bp 融资；SPX adjusted_close 为 FRED 指数收盘，不含股息。</p>`;
+    + `<p class="rb-note">超过 100% 敞口：SOFR + ${assumption(assumptions.financingSpreadBps)}bp 融资；SPX adjusted_close 为 FRED 指数收盘，不含股息。</p>`
+    + `<p class="rb-note">正式仓位：DASHBOARD_EXPOSURE_TIERS_V1（100% / 90% / 75% / 50% / 25%）；历史 stress 只用冻结周快照 VIX 的 PIT_SNAPSHOT_VIX_PROXY，缺失时最多 75%，不读取决策后激活的日线。</p>`
+    + `<p class="rb-note">公平基准共享同一窗口、SOFR 与交易成本：100% SPX；平均 Beta 匹配静态 SPX/现金；10% 波动目标只用前20个已完成交易日收益且上限100%；200DMA 只比较前一收盘与此前200个收盘均线。</p>`;
   const reproducible = provenance.revisionPolicy === 'APPEND_ONLY_AS_OF'
     && provenance.responseReproducible === true;
   const provenanceNote = `<p class="rb-note">输入版本：${rbEsc(provenance.revisionPolicy || '—')}`
@@ -698,8 +702,33 @@ function renderEventBacktest(result) {
     return disclosure + provenanceNote + legacy
       + `<div class="rb-concl">数据不完整，不展示绩效：${rbEsc(event.reason || '未提供原因')}</div>`;
   }
+  const portfolio = event.portfolio;
+  if (!portfolio || portfolio.methodology !== 'DASHBOARD_EXPOSURE_TIERS_V1') {
+    return disclosure + provenanceNote + legacy
+      + '<div class="rb-concl">数据不完整，不展示绩效：正式组合分析缺失</div>';
+  }
+  const metricRow = (label, entry, timingAlpha) => {
+    const metrics = entry.metrics || {};
+    return `<tr><td>${label}</td>`
+      + `<td class="num">${rbMaybePct(metrics.totalReturn)}</td>`
+      + `<td class="num">${timingAlpha == null ? '—' : rbMaybePct(timingAlpha)}</td>`
+      + `<td class="num">${rbMaybeNum(metrics.averageBeta)}</td>`
+      + `<td class="num">${rbMaybePct(metrics.annualizedVolatility)}</td>`
+      + `<td class="num">${rbMaybeNum(metrics.sharpe)}</td>`
+      + `<td class="num">${rbMaybeNum(metrics.sortino)}</td>`
+      + `<td class="num">${rbMaybePct(metrics.maxDrawdown)}</td>`
+      + `<td class="num">${metrics.maxDrawdownDurationSessions == null ? '—' : metrics.maxDrawdownDurationSessions}</td></tr>`;
+  };
+  const portfolioTable = `<div class="rb-sub">组合与公平基准</div>`
+    + '<table class="rb-table"><thead><tr><th>组合</th><th class="num">累计收益</th><th class="num">择时 Alpha</th><th class="num">平均 Beta</th><th class="num">年化波动</th><th class="num">Sharpe</th><th class="num">Sortino</th><th class="num">最大回撤</th><th class="num">最大回撤持续期</th></tr></thead><tbody>'
+    + metricRow('Dashboard 分档', portfolio.strategy, portfolio.timingAlpha)
+    + metricRow('100% SPX', portfolio.benchmarks.spxBuyHold, null)
+    + metricRow('平均 Beta 匹配静态 SPX/现金', portfolio.benchmarks.betaMatchedStatic, null)
+    + metricRow('前20个已完成交易日 · 10% 波动目标', portfolio.benchmarks.volatilityTarget, null)
+    + metricRow('前一收盘 200DMA 风控', portfolio.benchmarks.movingAverage200, null)
+    + '</tbody></table>';
   const finalRow = event.nav && event.nav.length ? event.nav[event.nav.length - 1] : null;
-  return disclosure + provenanceNote + legacy
+  return disclosure + provenanceNote + legacy + portfolioTable
     + `<div class="rb-stat"><span class="k">累计收益</span><span class="v">${rbPct(event.totals.totalReturn)}</span></div>`
     + `<div class="rb-stat"><span class="k">日频净值区间</span><span class="v">${event.totals.sessions} 个交易日</span></div>`
     + `<div class="rb-stat"><span class="k">执行 / 同收盘替换 / 末端未执行</span><span class="v">${event.executions.length} / ${event.superseded.length} / ${event.unexecuted.length}</span></div>`

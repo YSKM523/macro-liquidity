@@ -25,7 +25,7 @@ const dbState = vi.hoisted(() => ({
   activeSnapshotState: 'FAILED' as 'PENDING' | 'SUCCEEDED' | 'FAILED',
   eventInputs: {
     asOfCutoff: '2024-01-10T01:00:00.001Z',
-    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliqDir: 'UP', snapshotVixEod: 20, targetExposure: 1, portfolioTier: 'STRONG_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
     prices: [
       { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
       { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
@@ -93,7 +93,7 @@ beforeEach(() => {
   dbState.activeSnapshotState = 'FAILED';
   dbState.eventInputs = {
     asOfCutoff: '2024-01-10T01:00:00.001Z',
-    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliqDir: 'UP', snapshotVixEod: 20, targetExposure: 1, portfolioTier: 'STRONG_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
     prices: [
       { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
       { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
@@ -178,6 +178,16 @@ describe('/api/backtest event-time performance', () => {
       revisionPolicy: 'APPEND_ONLY_AS_OF', responseReproducible: true,
       asOfCutoff: '2024-01-10T01:00:00.001Z',
     });
+    expect(body.event_time.portfolio).toMatchObject({
+      methodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
+      stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
+      benchmarks: {
+        spxBuyHold: { methodology: 'SPX_BUY_HOLD' },
+        betaMatchedStatic: { methodology: 'STATIC_SPX_CASH_AVERAGE_BETA' },
+        volatilityTarget: { methodology: 'PRIOR_20_SESSION_10PCT_VOL_TARGET_CAP_100' },
+        movingAverage200: { methodology: 'PRIOR_CLOSE_200DMA_RISK_CONTROL' },
+      },
+    });
     expect(vi.mocked(loadEventBacktestInputs)).toHaveBeenCalledWith(env.DB, '2024-01-10T01:00:00.001Z');
   });
 
@@ -191,6 +201,7 @@ describe('/api/backtest event-time performance', () => {
     expect(body.event_time.nav).toEqual([]);
     expect(body.event_time.totals).toEqual({ totalReturn: null, tradingCostRate: null, sessions: null });
     expect(body.event_time.provenance.revisionPolicy).toBe('APPEND_ONLY_AS_OF');
+    expect(body.event_time.portfolio).toBeNull();
   });
 });
 
