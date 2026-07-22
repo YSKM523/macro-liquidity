@@ -68,8 +68,24 @@ describe('purged folds and frozen holdout', () => {
     const before = runFrozenHoldout(rows);
     const later = runFrozenHoldout([...rows, snap('2026-07-23', 101), snap('2026-11-01', 102, { spx: 300 })]);
     expect(later.frozen).toEqual(before.frozen);
+    expect(before.frozen.trainingOutcomeCutoffExclusive).toBe('2026-04-23');
     expect(later.status).toBe('PENDING_MATURITY');
     expect(later.metrics).toBeNull();
+  });
+
+  it('does not expose q10 before 20 pre-holdout calibration outcomes', () => {
+    const short = Array.from({ length: 25 }, (_, i) => snap(addDays('2025-01-01', i * 7), i));
+    const holdout = runFrozenHoldout(short);
+    expect(holdout.frozen.trainingN).toBeLessThan(20);
+    expect(holdout.frozen.q10).toBeNull();
+  });
+
+  it('labels fitted weights as diagnostic and never recalibrates aggregate tail with the last fold', () => {
+    const result = runPurgedValidation(rows, { initialTrain: 40, testN: 10 });
+    expect(result.folds[0]).toHaveProperty('diagnosticFittedWeights');
+    expect(result.folds[0]).toHaveProperty('diagnosticFitted');
+    expect(result.folds[0]).not.toHaveProperty('weights');
+    expect(result.aggregateMetrics?.tail).toMatchObject({ threshold: null, thresholdSemantics: 'FOLD_SPECIFIC', method: 'TRAIN_ONLY_Q10' });
   });
 
   it('fails closed for non-PIT or ungoverned rows', () => {

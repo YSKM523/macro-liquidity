@@ -44,6 +44,10 @@ describe('validation metric taxonomy', () => {
       pair(0, 10, .1, 'BEARISH', .25), pair(1, 20, .1, 'BEARISH', .25), pair(2, 30, .1, 'BULLISH', 1),
     ], .1);
     expect(empty.ic).toEqual({ value: null, n: 3, status: 'ZERO_VARIANCE' });
+    const constantScores = evaluateValidationMetrics([
+      pair(0, 50, -.1, 'BEARISH', .25), pair(1, 50, .1, 'BULLISH', 1), pair(2, 50, .2, 'BULLISH', 1),
+    ], -.05);
+    expect(constantScores.ic).toEqual({ value: null, n: 3, status: 'ZERO_VARIANCE' });
   });
 
   it('calibrates q10 deterministically and types insufficient tail events as null', () => {
@@ -65,5 +69,15 @@ describe('validation metric taxonomy', () => {
     expect(result.risk.precision).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
     expect(result.tail.threshold).toBeNull();
     expect(JSON.stringify(result)).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('fails the complete formal series closed when even one persisted signal is missing', () => {
+    const pairs = Array.from({ length: 6 }, (_, i) => pair(i, 60, .1, 'BULLISH', 1));
+    pairs[2] = { ...pairs[2], verdict: null };
+    pairs[4] = { ...pairs[4], targetExposure: null };
+    const result = evaluateValidationMetrics(pairs, -.1, 20);
+    expect(result.formalVerdict).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
+    expect(result.risk.precision).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
+    expect(result.risk.downsideRecall).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
   });
 });
