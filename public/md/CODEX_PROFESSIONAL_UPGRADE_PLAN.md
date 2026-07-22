@@ -921,7 +921,7 @@ Sortino
 
 ## BT-06 Purged Walk-Forward
 
-> **PR-15 本地实现（2026-07-22）**：`PURGED_VALIDATION_V1` 以 `tradableAt` 后第一条合资格 PIT 日收盘入场、entry+91 日后第一条实际 PIT 日收盘出场；先按 outcome 与 test 起点 purge，再对 outcome 做 91 个日历日 embargo，同时报告重叠和最早 exit 贪心的半开区间非重叠样本。完全前瞻 holdout 按 execution date 固定从 `2026-07-23` 开始；非 tail 指标成熟前返回 `PENDING_MATURITY`，前瞻 tail 因登记时无诚实阈值永久为 `UNAVAILABLE_AT_REGISTRATION`，不把历史尾部伪装成 unseen。
+> **PR-15 本地实现（2026-07-22）**：`PURGED_VALIDATION_V1` 以 `tradableAt` 后第一条合资格 PIT 日收盘入场、entry+91 日后第一条实际 PIT 日收盘出场；先按 outcome 与 test 起点 purge，再对 outcome 做 91 个日历日 embargo，同时报告重叠和最早 exit 贪心的半开区间非重叠样本。初始 `75c93d5` 登记已标记 `INVALIDATED_BY_REVIEW`，修订协议于 `20:17:47Z` 锚定 implementation commit `31d2640` 并冻结 exact literal identity/digest。完全前瞻 holdout 按 execution date 固定从 `2026-07-23` 开始；非 tail 指标成熟前返回 `PENDING_MATURITY`，前瞻 tail 永久为 `UNAVAILABLE_AT_REGISTRATION`。
 
 同时报告：
 

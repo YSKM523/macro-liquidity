@@ -10,7 +10,7 @@ _最后更新：2026-07-22（PR-15 purged validation 仅本地实现；未推送
 ## PR-15 本地状态
 
 - `PURGED_VALIDATION_V1` 已加入 `/api/walkforward`、`/api/robustness` 与 dashboard：正式标签使用 `tradableAt` 后首个合资格 PIT 日收盘入场、entry+91 日后首个实际 PIT 日收盘出场，并按 outcome purge/embargo；同时报告重叠/半开区间非重叠、方向/正式 verdict/风险/IC/尾部 typed metrics。
-- 完全前瞻 holdout 已在真实 commit 时间登记，按 execution date 从 `2026-07-23` 开始；方向/verdict/risk/IC 当前必须是 `PENDING_MATURITY`，登记时没有诚实 tail threshold，因此前瞻 tail 永久为 `UNAVAILABLE_AT_REGISTRATION`，不能用历史数据补作 unseen 结果。
+- 初始 `19:37:28Z` / `75c93d5` 登记已因 review 发现的旧周频时点、错误 embargo 和事后 tail 校准而标记 `INVALIDATED_BY_REVIEW`；修订协议于 `20:17:47Z` 锚定 `31d2640`，literal identity/digest 不会随未来 Champion 改写。holdout 按 execution date 从 `2026-07-23` 开始；方向/verdict/risk/IC 当前为 `PENDING_MATURITY`，前瞻 tail 永久为 `UNAVAILABLE_AT_REGISTRATION`。
 - governed 信号必须匹配登记的 Champion model/config；日价 PIT provenance 不完整、混合 cohort 或 post-holdout legacy 均 fail closed，API/UI 披露 cohort 与 provenance 计数。
 - migration 0010 历史会显示 `PARTIAL_LEGACY`，legacy q10 calibration 为 null；非 PIT、畸形 provenance 与 post-holdout legacy fail closed。
 - Champion 评分、权重、阈值、迟滞、stress 和仓位策略未改变；无 migration、push、部署或远程数据库操作。
@@ -33,7 +33,7 @@ _最后更新：2026-07-22（PR-15 purged validation 仅本地实现；未推送
 - 历史已修复：手机横向滚动、favicon、首页全屏 command center、左侧 Primary Screen 细分小卡片、去除红色细线、去除渐变/透明 UI 风格。
 
 ## 验证记录
-- PR-15：`npm test -- --reporter=dot` 752 个测试通过；TypeScript strict、ESLint、correctness、no-lookahead、rebuild consistency、0001–0010 本地 migration 双跑和 staging dry-run 全部通过。
+- PR-15：上一完整矩阵为 752 个测试通过；最终修订后的完整矩阵待重跑。TypeScript strict 与修订 focused tests 已通过。
 - `env -u NODE_OPTIONS npm test`：13 个测试文件、248 个测试通过。
 - `env -u NODE_OPTIONS npx tsc --noEmit`：通过。
 - 线上桌面验证：`1920x1080`、`2560x1440`、`3840x2160` 首页均无页面级上下滚动，核心面板在首屏内完整显示。

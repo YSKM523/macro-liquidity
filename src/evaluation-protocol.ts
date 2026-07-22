@@ -1,6 +1,5 @@
 import { addDays, spearman } from './backtest';
-import { CHAMPION_MODEL_VERSION, championConfigDigest, sha256Hex } from './model-version';
-import { CHAMPION_MODEL_CONFIG, SCORING_FACTOR_KEYS } from './config';
+import { sha256Hex } from './model-version';
 import { scheduleExecutions } from './event-backtest';
 import type { EventBacktestInputs, EventSignal, ScheduledExecution } from './event-backtest';
 import { isoTimestampMs } from './pit';
@@ -47,7 +46,10 @@ export interface ForwardPair {
   dataRunId?: string | null;
 }
 
-const FACTOR_KEYS = [...SCORING_FACTOR_KEYS] as string[];
+const REGISTERED_SCORING_FACTOR_KEYS = Object.freeze([
+  'netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve',
+] as const);
+const FACTOR_KEYS = [...REGISTERED_SCORING_FACTOR_KEYS];
 
 export const VALIDATION_PROTOCOL = Object.freeze({
   protocol: 'PURGED_VALIDATION_V1' as const,
@@ -87,20 +89,31 @@ function canonicalize(value: unknown): unknown {
 
 const REGISTERED_IDENTITY = Object.freeze({
   registeredAt: '2026-07-22T19:37:28Z',
-  registrationCommit: '75c93d526bf6073440335d3c90a7d5c0b90ea58b',
+  amendedAt: '2026-07-22T20:17:47Z',
+  registrationCommit: '31d26408ec6a3e05ef6da9ce7a9277320dcbf8f9',
+  originalRegistration: Object.freeze({
+    registeredAt: '2026-07-22T19:37:28Z',
+    registrationCommit: '75c93d526bf6073440335d3c90a7d5c0b90ea58b',
+    status: 'INVALIDATED_BY_REVIEW' as const,
+    reason: 'WEEKLY_PRE_DECISION_PRICE_SIGNAL_DATE_EMBARGO_AND_POST_HOC_TAIL_CALIBRATION',
+  }),
   holdoutFrom: VALIDATION_PROTOCOL.holdoutFrom,
-  modelVersion: CHAMPION_MODEL_VERSION,
-  configHash: championConfigDigest(),
-  scoringFactorKeys: [...SCORING_FACTOR_KEYS],
-  portfolioMethodology: CHAMPION_MODEL_CONFIG.portfolio.methodology,
+  modelVersion: 'champion-v1.0.0',
+  configHash: '17ad1ca8854b0fbd8e56d6255b7ee2f4fe8a85ae1a95a328ade46ffdff02a0cf',
+  scoringFactorKeys: REGISTERED_SCORING_FACTOR_KEYS,
+  portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1' as const,
   riskCallThresholdMaximum: 0.5,
   prospectiveTailStatus: 'UNAVAILABLE_AT_REGISTRATION' as const,
 });
 const REGISTRATION_CANONICAL = JSON.stringify(canonicalize({ protocol: VALIDATION_PROTOCOL, identity: REGISTERED_IDENTITY }));
+const REGISTERED_PROTOCOL_DIGEST = '80092bd0142ae4faf8e62f00ec7ccb3e8b6c0d94bd1a9944110833ec372f8b28';
+if (sha256Hex(REGISTRATION_CANONICAL) !== REGISTERED_PROTOCOL_DIGEST) {
+  throw new Error('registered validation protocol literal mismatch; create an explicit amendment');
+}
 export const HOLDOUT_REGISTRATION = Object.freeze({
   protocol: VALIDATION_PROTOCOL.protocol,
   ...REGISTERED_IDENTITY,
-  protocolDigest: sha256Hex(REGISTRATION_CANONICAL),
+  protocolDigest: REGISTERED_PROTOCOL_DIGEST,
 });
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

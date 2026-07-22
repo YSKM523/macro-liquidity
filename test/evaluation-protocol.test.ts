@@ -161,10 +161,21 @@ describe('purged folds and frozen holdout', () => {
   it('freezes the registered Champion identity without a mutable pre-period artifact', () => {
     expect(HOLDOUT_REGISTRATION.holdoutFrom).toBe('2026-07-23');
     expect(HOLDOUT_REGISTRATION.registeredAt).toBe('2026-07-22T19:37:28Z');
-    expect(HOLDOUT_REGISTRATION.registrationCommit).toBe('75c93d526bf6073440335d3c90a7d5c0b90ea58b');
-    expect(HOLDOUT_REGISTRATION.modelVersion).toBe(CHAMPION_MODEL_VERSION);
-    expect(HOLDOUT_REGISTRATION.configHash).toBe(championConfigDigest());
-    expect(HOLDOUT_REGISTRATION.protocolDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(HOLDOUT_REGISTRATION.amendedAt).toBe('2026-07-22T20:17:47Z');
+    expect(HOLDOUT_REGISTRATION.registrationCommit).toBe('31d26408ec6a3e05ef6da9ce7a9277320dcbf8f9');
+    expect(HOLDOUT_REGISTRATION.originalRegistration).toEqual({
+      registeredAt: '2026-07-22T19:37:28Z',
+      registrationCommit: '75c93d526bf6073440335d3c90a7d5c0b90ea58b',
+      status: 'INVALIDATED_BY_REVIEW',
+      reason: 'WEEKLY_PRE_DECISION_PRICE_SIGNAL_DATE_EMBARGO_AND_POST_HOC_TAIL_CALIBRATION',
+    });
+    expect(HOLDOUT_REGISTRATION.modelVersion).toBe('champion-v1.0.0');
+    expect(HOLDOUT_REGISTRATION.configHash).toBe('17ad1ca8854b0fbd8e56d6255b7ee2f4fe8a85ae1a95a328ade46ffdff02a0cf');
+    expect(HOLDOUT_REGISTRATION.scoringFactorKeys).toEqual([
+      'netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve',
+    ]);
+    expect(HOLDOUT_REGISTRATION.portfolioMethodology).toBe('DASHBOARD_EXPOSURE_TIERS_V1');
+    expect(HOLDOUT_REGISTRATION.protocolDigest).toBe('80092bd0142ae4faf8e62f00ec7ccb3e8b6c0d94bd1a9944110833ec372f8b28');
     const before = runFrozenHoldout(rows);
     const mutated = rows.map((row, index) => index === 20 ? { ...row, score: 99, spx: 999 } : row);
     const after = runFrozenHoldout(mutated);
