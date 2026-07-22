@@ -1,6 +1,8 @@
 import type { Obs } from './fred';
 import type { StressStatus } from './prices';
 import type { FreshnessRule } from './config';
+import { mapPortfolioPolicy } from './portfolio-policy';
+import type { PortfolioPolicy } from './portfolio-policy';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
@@ -336,6 +338,7 @@ export interface Guidance {
   lean: string;
   divergence: string | null;
   triggers: GuidanceTrigger[];
+  portfolioPolicy: PortfolioPolicy;
 }
 
 export function buildGuidance(input: GuidanceInput): Guidance {
@@ -428,7 +431,8 @@ export function buildGuidance(input: GuidanceInput): Guidance {
         }
     : { label: '实时风险(stress)触发 → 立刻刹车', detail: '当前未触发', armed: false };
 
-  return { tone, tierLabel, exposure, lean, divergence, triggers: [trigger0, trigger1] };
+  const portfolioPolicy = mapPortfolioPolicy({ score, verdict, netliqDir, stressStatus });
+  return { tone, tierLabel, exposure, lean, divergence, triggers: [trigger0, trigger1], portfolioPolicy };
 }
 
 // ── Part 4: verdict + reason + computeSnapshot ────────────────────────────────
