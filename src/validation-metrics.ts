@@ -7,6 +7,7 @@ export type MetricStatus =
   | 'NO_ELIGIBLE_OBSERVATIONS'
   | 'ZERO_VARIANCE'
   | 'MISSING_FORMAL_SIGNAL'
+  | 'PARTIAL_LEGACY_CALIBRATION'
   | 'PENDING_MATURITY';
 
 export interface RateEstimate {
@@ -107,14 +108,17 @@ export function evaluateValidationMetrics(pairs: ForwardPair[], tailThreshold: n
   const caught = tailThreshold == null ? 0 : riskCalls.filter(pair => pair.fwd <= tailThreshold).length;
   const tailReady = tailThreshold != null && calibrationN >= MIN_TAIL_CALIBRATION_N
     && tailEvents.length >= MIN_TEST_TAIL_EVENTS;
-  const tailStatus: MetricStatus = tailThreshold == null || calibrationN < MIN_TAIL_CALIBRATION_N
+  const missingRiskSignal = pairs.some(pair => pair.targetExposure == null);
+  const tailStatus: MetricStatus = missingRiskSignal
+    ? 'MISSING_FORMAL_SIGNAL'
+    : tailThreshold == null || calibrationN < MIN_TAIL_CALIBRATION_N
     ? 'INSUFFICIENT_SAMPLE'
     : tailEvents.length < MIN_TEST_TAIL_EVENTS ? 'INSUFFICIENT_SAMPLE' : 'OK';
   const tailRate = (hits: number, n: number): RateEstimate => ({
-    value: tailReady && n > 0 ? hits / n : null,
+    value: tailReady && !missingRiskSignal && n > 0 ? hits / n : null,
     hits, n, abstentions: pairs.length - n,
     minRequired: MIN_TEST_TAIL_EVENTS,
-    status: tailReady && n > 0 ? 'OK' : tailStatus,
+    status: tailReady && !missingRiskSignal && n > 0 ? 'OK' : tailStatus,
   });
   return {
     direction: directionRate(pairs),

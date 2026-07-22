@@ -26,6 +26,8 @@ export interface ForwardPair {
   verdict: FormalVerdict | null;
   targetExposure: number | null;
   factors: Record<string, number>;
+  pitStatus: string | null;
+  provenanceStatus: string | null;
 }
 
 export const VALIDATION_PROTOCOL = Object.freeze({
@@ -90,6 +92,8 @@ export function buildForwardPairs(snaps: ValidationSnap[], horizonWeeks: number 
       verdict: snaps[startIdx].verdict ?? null,
       targetExposure: snaps[startIdx].targetExposure ?? null,
       factors: snaps[startIdx].factors,
+      pitStatus: snaps[startIdx].pitStatus ?? null,
+      provenanceStatus: snaps[startIdx].provenanceStatus ?? null,
     });
   }
   return pairs;
@@ -101,8 +105,8 @@ export function purgeTrainingPairs(pairs: ForwardPair[], testFrom: string, embar
   let purgedOverlapN = 0;
   let embargoedN = 0;
   for (const pair of pairs) {
-    if (pair.signalDate >= embargoFrom) { embargoedN++; continue; }
     if (pair.outcomeDate >= testFrom) { purgedOverlapN++; continue; }
+    if (pair.signalDate >= embargoFrom) { embargoedN++; continue; }
     kept.push(pair);
   }
   return { pairs: kept, purgedOverlapN, embargoedN, embargoFrom };
@@ -150,6 +154,7 @@ export interface PurgedFold {
   diagnosticFittedWeights: Record<string, number>;
   diagnosticFitted: Pick<ValidationMetrics, 'direction' | 'ic'>;
   q10: number | null;
+  tailCalibrationStatus: 'GOVERNED' | 'PARTIAL_LEGACY_CALIBRATION' | 'INSUFFICIENT_SAMPLE';
   metrics: ValidationMetrics;
   trainPairs: ForwardPair[];
   testPairs: ForwardPair[];
@@ -174,7 +179,8 @@ export function buildPurgedFolds(
     const purged = purgeTrainingPairs(candidates, testFrom, embargoDays);
     const testPairs = allPairs.filter(pair => pair.startIdx >= testStartIdx && pair.startIdx <= testEndIdx);
     if (testPairs.length === 0) continue;
-    const q10 = purged.pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
+    const legacyCalibration = purged.pairs.some(pair => pair.provenanceStatus === 'LEGACY');
+    const q10 = !legacyCalibration && purged.pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
       ? quantile(purged.pairs.map(pair => pair.fwd), .1) : null;
     const diagnosticFittedWeights = trainingWeights(purged.pairs);
     const fittedPairs = testPairs.flatMap(pair => {
@@ -186,6 +192,11 @@ export function buildPurgedFolds(
       return [{ ...pair, score }];
     });
     const fitted = evaluateValidationMetrics(fittedPairs, null, 0);
+    const metrics = evaluateValidationMetrics(testPairs, q10, purged.pairs.length);
+    if (legacyCalibration) {
+      metrics.tail.recall = { ...metrics.tail.recall, value: null, status: 'PARTIAL_LEGACY_CALIBRATION' };
+      metrics.tail.precision = { ...metrics.tail.precision, value: null, status: 'PARTIAL_LEGACY_CALIBRATION' };
+    }
     folds.push({
       testFrom, testTo,
       testLabelThrough: testPairs.at(-1)!.outcomeDate,
@@ -198,7 +209,9 @@ export function buildPurgedFolds(
       diagnosticFittedWeights,
       diagnosticFitted: { direction: fitted.direction, ic: fitted.ic },
       q10,
-      metrics: evaluateValidationMetrics(testPairs, q10, purged.pairs.length),
+      tailCalibrationStatus: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION'
+        : purged.pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN ? 'GOVERNED' : 'INSUFFICIENT_SAMPLE',
+      metrics,
       trainPairs: purged.pairs,
       testPairs,
     });
@@ -206,23 +219,36 @@ export function buildPurgedFolds(
   return folds;
 }
 
-function governedPit(snaps: ValidationSnap[]): boolean {
-  return snaps.every(snap => snap.pitStatus === 'PIT' && snap.provenanceStatus === 'GOVERNED');
-}
-
 function frozenTraining(snaps: ValidationSnap[]) {
   const pre = snaps.filter(snap => snap.date < HOLDOUT_REGISTRATION.holdoutFrom);
   const trainingOutcomeCutoffExclusive = addDays(HOLDOUT_REGISTRATION.holdoutFrom, -VALIDATION_PROTOCOL.embargoDays);
   const pairs = buildForwardPairs(pre).filter(pair => pair.outcomeDate < trainingOutcomeCutoffExclusive);
+  const legacyCalibration = pairs.some(pair => pair.provenanceStatus === 'LEGACY');
   return {
     trainingOutcomeCutoffExclusive,
     trainingThrough: pairs.at(-1)?.signalDate ?? null,
     trainingLabelThrough: pairs.at(-1)?.outcomeDate ?? null,
     trainingN: pairs.length,
     weights: trainingWeights(pairs),
-    q10: pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
+    calibrationStatus: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const
+      : pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN ? 'GOVERNED' as const : 'INSUFFICIENT_SAMPLE' as const,
+    q10: !legacyCalibration && pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
       ? quantile(pairs.map(pair => pair.fwd), .1) : null,
   };
+}
+
+function provenanceSummary(snaps: ValidationSnap[]) {
+  const governedCount = snaps.filter(snap => snap.provenanceStatus === 'GOVERNED').length;
+  const legacyCount = snaps.filter(snap => snap.provenanceStatus === 'LEGACY').length;
+  return {
+    totalCount: snaps.length, governedCount, legacyCount,
+    completeness: legacyCount === 0 ? 'COMPLETE' as const : 'PARTIAL_LEGACY' as const,
+  };
+}
+
+function validPitProvenance(snaps: ValidationSnap[]): boolean {
+  return snaps.every(snap => snap.pitStatus === 'PIT'
+    && (snap.provenanceStatus === 'GOVERNED' || snap.provenanceStatus === 'LEGACY'));
 }
 
 export function runFrozenHoldout(snaps: ValidationSnap[]) {
@@ -231,13 +257,17 @@ export function runFrozenHoldout(snaps: ValidationSnap[]) {
     ...HOLDOUT_REGISTRATION,
     ...frozenTraining(snaps),
   };
-  if (!governedPit(snaps)) return { status: 'DATA_INCOMPLETE' as const, frozen, overlappingN: 0, independentN: 0, metrics: null };
+  const provenance = provenanceSummary(snaps);
+  const postRegistration = snaps.filter(snap => snap.date >= HOLDOUT_REGISTRATION.holdoutFrom);
+  if (!validPitProvenance(snaps) || postRegistration.some(snap => snap.provenanceStatus !== 'GOVERNED')) {
+    return { status: 'DATA_INCOMPLETE' as const, frozen, provenance, overlappingN: 0, independentN: 0, metrics: null };
+  }
   const pairs = buildForwardPairs(snaps).filter(pair => pair.signalDate >= HOLDOUT_REGISTRATION.holdoutFrom);
   if (pairs.length < VALIDATION_PROTOCOL.minimumRateN) {
-    return { status: 'PENDING_MATURITY' as const, frozen, overlappingN: pairs.length, independentN: greedyIndependentPairs(pairs).length, metrics: null };
+    return { status: 'PENDING_MATURITY' as const, frozen, provenance, overlappingN: pairs.length, independentN: greedyIndependentPairs(pairs).length, metrics: null };
   }
   return {
-    status: 'OK' as const, frozen,
+    status: 'OK' as const, frozen, provenance,
     overlappingN: pairs.length,
     independentN: greedyIndependentPairs(pairs).length,
     metrics: evaluateValidationMetrics(pairs, frozen.q10, frozen.trainingN),
@@ -250,8 +280,9 @@ export function runPurgedValidation(
 ) {
   assertChronological(snaps);
   const protocol = { ...VALIDATION_PROTOCOL, protocolDigest: HOLDOUT_REGISTRATION.protocolDigest };
-  if (!governedPit(snaps)) {
-    return { status: 'DATA_INCOMPLETE' as const, protocol, folds: [], aggregateMetrics: null, holdout: runFrozenHoldout(snaps) };
+  const provenance = provenanceSummary(snaps);
+  if (!validPitProvenance(snaps)) {
+    return { status: 'DATA_INCOMPLETE' as const, protocol, provenance, folds: [], aggregateMetrics: null, holdout: runFrozenHoldout(snaps) };
   }
   const folds = buildPurgedFolds(snaps, opts);
   const testPairs = folds.flatMap(fold => fold.testPairs);
@@ -259,20 +290,23 @@ export function runPurgedValidation(
   const totalTailEvents = folds.reduce((sum, fold) => sum + fold.metrics.tail.tailEvents, 0);
   const totalCaught = folds.reduce((sum, fold) => sum + fold.metrics.tail.caught, 0);
   const totalRiskCalls = folds.reduce((sum, fold) => sum + fold.metrics.tail.riskCalls, 0);
-  const calibrationReady = folds.length > 0 && folds.every(fold => fold.metrics.tail.calibrationN >= VALIDATION_PROTOCOL.minimumTailCalibrationN);
+  const legacyCalibration = folds.some(fold => fold.tailCalibrationStatus === 'PARTIAL_LEGACY_CALIBRATION');
+  const calibrationReady = folds.length > 0 && !legacyCalibration
+    && folds.every(fold => fold.metrics.tail.calibrationN >= VALIDATION_PROTOCOL.minimumTailCalibrationN);
   const tailReady = calibrationReady && totalTailEvents >= VALIDATION_PROTOCOL.minimumTestTailEvents;
   const aggregateTail = aggregateBase == null ? null : {
     recall: {
       value: tailReady ? totalCaught / totalTailEvents : null,
       hits: totalCaught, n: totalTailEvents, abstentions: testPairs.length - totalTailEvents,
       minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
-      status: tailReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+      status: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const : tailReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     },
     precision: {
       value: tailReady && totalRiskCalls > 0 ? totalCaught / totalRiskCalls : null,
       hits: totalCaught, n: totalRiskCalls, abstentions: testPairs.length - totalRiskCalls,
       minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
-      status: tailReady && totalRiskCalls > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+      status: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const
+        : tailReady && totalRiskCalls > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     },
     tailEvents: totalTailEvents,
     caught: totalCaught,
@@ -284,9 +318,12 @@ export function runPurgedValidation(
     method: 'TRAIN_ONLY_Q10' as const,
   };
   return {
-    status: folds.length > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
-    protocol,
-    folds: folds.map(({ trainPairs: _trainPairs, testPairs: _testPairs, ...fold }) => fold),
+    status: folds.length > 0 ? (provenance.legacyCount > 0 ? 'PARTIAL_LEGACY' as const : 'OK' as const) : 'INSUFFICIENT_SAMPLE' as const,
+    protocol, provenance,
+    folds: folds.map(({ trainPairs: _trainPairs, testPairs, ...fold }) => ({
+      ...fold,
+      labels: testPairs.map(pair => ({ signalDate: pair.signalDate, outcomeDate: pair.outcomeDate })),
+    })),
     aggregateMetrics: aggregateBase == null || aggregateTail == null ? null : { ...aggregateBase, tail: aggregateTail },
     overlappingN: testPairs.length,
     independentN: greedyIndependentPairs(testPairs).length,

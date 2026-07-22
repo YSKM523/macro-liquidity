@@ -134,6 +134,28 @@ function governedSnapshotModels(rows: NormalizedSnapshotRow[]): ReturnType<typeo
   return [...unique.values()];
 }
 
+function validationSnapsFromRows(rows: any[]) {
+  return rows
+    .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
+    .map((r: any) => {
+      let provenanceStatus = 'INVALID';
+      try { provenanceStatus = normalizeSnapshotProvenance(r).provenance_status; } catch { /* typed fail-closed result */ }
+      const policy = isPortfolioVerdict(r.verdict) && isPortfolioDirection(r.netliq_dir)
+        ? mapPortfolioPolicy({
+          score: r.score, verdict: r.verdict, netliqDir: r.netliq_dir,
+          stressStatus: snapshotVixStressStatus(r.vix_eod),
+        })
+        : null;
+      return {
+        date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
+        verdict: isPortfolioVerdict(r.verdict) ? r.verdict : null,
+        targetExposure: policy?.targetExposure ?? null,
+        pitStatus: r.pit_status,
+        provenanceStatus,
+      };
+    });
+}
+
 function presentSnapshot(row: unknown, stress: ReturnType<typeof evaluateLiveStress>, channel: 'OFFICIAL' | 'PROVISIONAL') {
   if (!row) return null;
   const r: any = row;
@@ -408,7 +430,7 @@ export default {
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
-      return json(runWalkForward(snaps));
+      return json({ ...runWalkForward(snaps), validation: runPurgedValidation(validationSnapsFromRows(rows)) });
     }
     if (p === '/api/robustness' || p === '/api/v1/robustness') {
       const v1 = p === '/api/v1/robustness';
@@ -419,26 +441,7 @@ export default {
           date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
-      const validationSnaps = rows
-        .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
-        .map((r: any) => {
-          let provenanceStatus = 'INVALID';
-          try { provenanceStatus = normalizeSnapshotProvenance(r).provenance_status; } catch { /* fail closed below */ }
-          const policy = isPortfolioVerdict(r.verdict) && isPortfolioDirection(r.netliq_dir)
-            ? mapPortfolioPolicy({
-              score: r.score, verdict: r.verdict, netliqDir: r.netliq_dir,
-              stressStatus: snapshotVixStressStatus(r.vix_eod),
-            })
-            : null;
-          return {
-            date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
-            verdict: isPortfolioVerdict(r.verdict) ? r.verdict : null,
-            targetExposure: policy?.targetExposure ?? null,
-            pitStatus: r.pit_status,
-            provenanceStatus,
-          };
-        });
-      const result = { ...runRobustness(snaps), validation: runPurgedValidation(validationSnaps) };
+      const result = { ...runRobustness(snaps), validation: runPurgedValidation(validationSnapsFromRows(rows)) };
       if (!v1) return json(result);
       try {
         const normalizedRows = rows.map(normalizeSnapshotProvenance);

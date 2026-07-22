@@ -7,7 +7,7 @@ function pair(index: number, score: number, fwd: number, verdict: ForwardPair['v
     startIdx: index, endIdx: index + 1,
     signalDate: `2024-01-${String(index + 1).padStart(2, '0')}`,
     outcomeDate: `2024-05-${String(index + 1).padStart(2, '0')}`,
-    score, fwd, verdict, targetExposure, factors: {},
+    score, fwd, verdict, targetExposure, factors: {}, pitStatus: 'PIT', provenanceStatus: 'GOVERNED',
   };
 }
 
