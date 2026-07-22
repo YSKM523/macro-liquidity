@@ -31,6 +31,20 @@ describe('bounded HTTP retry policy', () => {
     expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([20_000, 30_000, 30_000, 30_000]);
   });
 
+  it('honors a caller delay cap below the requested base delay', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(new Response('', { status: 200 }));
+    const sleep = vi.fn(async (_delayMs: number) => undefined);
+
+    await fetchWithRetry(fetchFn, 'https://example.test', undefined, {
+      baseDelayMs: 100, maxDelayMs: 25, random: () => 1, sleep,
+    });
+
+    expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([25, 25]);
+  });
+
   it('retries transport errors and rethrows the terminal error after exhaustion', async () => {
     const terminal = new TypeError('network unavailable');
     const fetchFn = vi.fn(async () => { throw terminal; });

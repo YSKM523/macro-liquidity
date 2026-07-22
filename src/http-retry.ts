@@ -17,8 +17,8 @@ const MAX_DELAY_MS = 30_000;
 const defaultSleep = (delayMs: number) => new Promise<void>(resolve => setTimeout(resolve, delayMs));
 
 function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number): number {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(maximum, Math.max(minimum, Math.floor(value!)));
+  const candidate = Number.isFinite(value) ? Math.floor(value!) : fallback;
+  return Math.min(maximum, Math.max(minimum, candidate));
 }
 
 function retryableStatus(status: number): boolean {
@@ -26,11 +26,11 @@ function retryableStatus(status: number): boolean {
 }
 
 function delayForAttempt(failedAttempt: number, options: HttpRetryOptions): number {
-  const base = boundedInteger(options.baseDelayMs, DEFAULT_BASE_DELAY_MS, 0, MAX_DELAY_MS);
-  const requestedCap = boundedInteger(options.maxDelayMs, DEFAULT_MAX_DELAY_MS, 0, MAX_DELAY_MS);
-  const cap = Math.max(base, requestedCap);
+  const cap = boundedInteger(options.maxDelayMs, DEFAULT_MAX_DELAY_MS, 0, MAX_DELAY_MS);
+  const base = boundedInteger(options.baseDelayMs, DEFAULT_BASE_DELAY_MS, 0, cap);
   const exponential = Math.min(cap, base * 2 ** (failedAttempt - 1));
-  const random = Math.min(1, Math.max(0, options.random?.() ?? Math.random()));
+  const sample = options.random?.() ?? Math.random();
+  const random = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0;
   return Math.floor(exponential * random);
 }
 
