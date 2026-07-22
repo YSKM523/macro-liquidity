@@ -13,6 +13,7 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added dev/staging/production Wrangler environments, reproducible npm gates, CI, manual protected production deployment, Model Card, Champion–Challenger registry, and operations runbook.
 - Bound v1 backtest model provenance to the exact signal cohort selected by its strict `as_of` cutoff, including honest governed/legacy union reporting; unrelated diagnostic rows can no longer leak a different model or data-run identity into the response.
 - Added every event-backtest behavior and reporting constant to the recursively frozen Champion descriptor and runtime path, including compatibility threshold, benchmark windows/target/cap, annualization, ACT/360 and unit conversions, plus named benchmark methodologies.
+- Tightened the production deploy provenance gate to reject tracked changes and untracked bundle inputs before any migration or Wrangler deployment command.
 - Kept the staging D1 identifier as an unmistakable placeholder. No push, deploy, remote database/R2 access, secret creation, or real alert delivery was performed; staging deployment remains unverified.
 - Champion formulas, weights, 45/55 thresholds, hysteresis, portfolio tiers, and PR-11/PR-12 research results are unchanged.
 

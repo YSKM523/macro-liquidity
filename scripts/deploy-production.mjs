@@ -25,17 +25,15 @@ if (!execute || !confirmed || !schemaConfirmed || !immutableCommit || !credentia
   process.exitCode = 1;
 } else {
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
-  const trackedStatus = spawnSync(
-    'git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' },
-  );
-  if (head.status !== 0 || trackedStatus.status !== 0) {
+  const worktreeStatus = spawnSync('git', ['status', '--porcelain'], { encoding: 'utf8' });
+  if (head.status !== 0 || worktreeStatus.status !== 0) {
     console.error('production deploy requires a readable Git worktree');
     process.exitCode = 1;
   } else if (head.stdout.trim().toLowerCase() !== commitSha) {
     console.error('CODE_COMMIT_SHA must equal checked-out HEAD');
     process.exitCode = 1;
-  } else if (trackedStatus.stdout.trim() !== '') {
-    console.error('production deploy requires the tracked worktree to be clean');
+  } else if (worktreeStatus.stdout.trim() !== '') {
+    console.error('production deploy requires the tracked worktree to be clean, including no untracked files');
     process.exitCode = 1;
   } else {
     const run = (commandArgs) => spawnSync('npx', commandArgs, {

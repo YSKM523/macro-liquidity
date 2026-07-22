@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Vitest executes in Node.
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 // @ts-ignore Vitest executes in Node.
 import { execFileSync, spawnSync } from 'node:child_process';
 // @ts-ignore Vitest executes in Node.
@@ -14,15 +14,15 @@ const read = (path: string) => readFileSync(path, 'utf8');
 function deployFixture() {
   const root = mkdtempSync(join(tmpdir(), 'deploy-git-gate-'));
   writeFileSync(join(root, 'tracked.txt'), 'clean\n');
-  execFileSync('git', ['init', '-q'], { cwd: root });
-  execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: root });
-  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
-  execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
-  execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const fakeNpx = join(root, 'npx');
   writeFileSync(fakeNpx, '#!/bin/sh\necho unexpected-npx >&2\nexit 99\n', { mode: 0o700 });
   chmodSync(fakeNpx, 0o700);
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  execFileSync('git', ['add', 'tracked.txt', 'npx'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const run = (sha: string) => spawnSync(process.execPath, [
     resolve('scripts/deploy-production.mjs'), '--execute',
     '--confirm-production=DEPLOY_PRODUCTION', '--schema-confirmed=0010',
@@ -101,6 +101,20 @@ describe('production governance configuration', () => {
       const result = fixture.run(fixture.head);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toMatch(/tracked worktree.*clean/i);
+      expect(result.stderr).not.toContain('unexpected-npx');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses deployment when an untracked public asset could enter the Wrangler bundle', () => {
+    const fixture = deployFixture();
+    try {
+      mkdirSync(join(fixture.root, 'public'));
+      writeFileSync(join(fixture.root, 'public', 'untracked.js'), 'globalThis.injected = true;\n');
+      const result = fixture.run(fixture.head);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/worktree.*clean/i);
       expect(result.stderr).not.toContain('unexpected-npx');
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });

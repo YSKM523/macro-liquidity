@@ -22,7 +22,7 @@
 | PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
 | PR-11 | 已完成（本地） | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
 | PR-12 | 已完成（本地） | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
-| PR-13 | 本地实现与验证完成，待最终独立复审结论 | `9f2a4f6`–`54ad16e` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；53 files / 685 tests；未部署 |
+| PR-13 | 本地实现与验证完成，待最终独立复审结论 | `9f2a4f6`–候选 HEAD | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；53 files / 686 tests；未部署 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 

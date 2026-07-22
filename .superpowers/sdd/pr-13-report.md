@@ -109,7 +109,7 @@ Snapshot writer hardening was completed in remediation 1: every official/nowcast
 
 - RED: production-governance tests showed that a different valid 40-hex SHA or dirty tracked source progressed to the fake migration command.
 - GREEN: governance tests passed 6/6; typecheck, lint, and diff check passed.
-- Before any Wrangler command, the wrapper now requires `CODE_COMMIT_SHA === git rev-parse HEAD` and an empty tracked-only Git status. Mismatch/dirty tests use a temporary Git repository and fake `npx`, proving no migration/deploy command is reached.
+- Before any Wrangler command, the wrapper now requires `CODE_COMMIT_SHA === git rev-parse HEAD` and a clean Git worktree. Mismatch/dirty tests use a temporary Git repository and fake `npx`, proving no migration/deploy command is reached.
 
 ### Re-review remediation 4 — bounded concurrency-test budget
 
@@ -128,9 +128,14 @@ Snapshot writer hardening was completed in remediation 1: every official/nowcast
 - GREEN: focused model/event/portfolio/worker verification passed 4 files / 82 tests; typecheck, lint, and diff check passed.
 - Runtime code now consumes every added field, including the zero-volatility cap and formal methodology checks. The recursively frozen canonical descriptor's final SHA-256 is `17ad1ca8854b0fbd8e56d6255b7ee2f4fe8a85ae1a95a328ade46ffdff02a0cf`; Node `crypto` equality and per-field numeric drift are covered. Scores, weights, 45/55 bands, and all existing formula outputs are unchanged.
 
+### Re-review remediation 7 — untracked deployment bundle provenance
+
+- RED: a temporary Git repository with an untracked `public/untracked.js` reached the fake `npx` migration command because the clean-HEAD gate used `git status --porcelain --untracked-files=no`.
+- GREEN: production-governance tests passed 7/7 after the gate switched to full porcelain status. Both tracked changes and untracked files are rejected before any migration/deploy process; typecheck, lint, and diff check passed.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.
 - Live-cache safety RED: focused operations suite failed before collection because `src/live-data.ts` did not exist. Typed non-OK provider results and `UNKNOWN` stress now throw through the cache loader (incrementing the circuit), stale/failed stress is forced to `UNKNOWN`, and an open circuit preserves the typed fail-closed payload. Focused operations/governance tests pass 13/13; worker regression tests pass 26/26; typecheck and ESLint pass.
 - Fresh full suite before the final persisted-identity hardening: 53 files / 667 tests passed. After adding the exact v1 backtest persisted-model identity contract, focused model/DB/worker passed 47/47 and ESLint/typecheck passed. A final all-suite run is recorded below.
-- FINAL REVIEW REMEDIATION: `npm test -- --silent` — 53 files / 685 tests passed. `npm run typecheck`, real `npm run lint`, correctness (79/79), no-lookahead (42/42), rebuild consistency (5/5), migrations 0001–0010 + second no-op, full-schema restore drill with identical source/restored SHA-256 `4f34f735723ad38f6746f9382979a84bf7fe5cb9be53a343d758e9f15d08424a`, staging deploy dry-run, backup dry-run, and `git diff --check` all passed. Wrangler emitted only its existing version-update warning. No production deploy, remote D1/R2 call, secret change, or real alert occurred.
+- FINAL REVIEW REMEDIATION: `npm test -- --silent` — 53 files / 686 tests passed. `npm run typecheck`, real `npm run lint`, correctness (79/79), no-lookahead (42/42), rebuild consistency (5/5), migrations 0001–0010 + second no-op, full-schema restore drill with identical source/restored SHA-256 `4f34f735723ad38f6746f9382979a84bf7fe5cb9be53a343d758e9f15d08424a`, staging deploy dry-run, backup dry-run, and `git diff --check` all passed. Wrangler emitted only its existing version-update warning. No production deploy, remote D1/R2 call, secret change, or real alert occurred.

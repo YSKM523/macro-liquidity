@@ -10,7 +10,7 @@ Run `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:cor
 
 ## Production deployment
 
-Use the protected manual workflow. It applies all remote production D1 migrations before application deployment and injects the immutable `${{ github.sha }}` as `CODE_COMMIT_SHA`. The `npm run deploy` wrapper repeats the migration gate and requires all of `--execute`, `--confirm-production=DEPLOY_PRODUCTION`, and `--schema-confirmed=0010`; direct or partial invocations fail closed. The supplied SHA must exactly equal `git rev-parse HEAD`, and tracked worktree changes are forbidden. Do not substitute another valid-looking SHA, a branch name, or a local sentinel.
+Use the protected manual workflow. It applies all remote production D1 migrations before application deployment and injects the immutable `${{ github.sha }}` as `CODE_COMMIT_SHA`. The `npm run deploy` wrapper repeats the migration gate and requires all of `--execute`, `--confirm-production=DEPLOY_PRODUCTION`, and `--schema-confirmed=0010`; direct or partial invocations fail closed. The supplied SHA must exactly equal `git rev-parse HEAD`, and the entire worktree must be clean, including no untracked files that Wrangler could bundle. Do not substitute another valid-looking SHA, a branch name, or a local sentinel.
 
 ## Admin refresh
 
