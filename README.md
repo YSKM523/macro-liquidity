@@ -5,7 +5,7 @@
 🔗 **在线**:https://macro-liquidity-dashboard.pp-account.workers.dev
 📄 **算法说明(站内)**:[`/algorithm`](https://macro-liquidity-dashboard.pp-account.workers.dev/algorithm) · 全文 [`docs/ALGORITHM.md`](docs/ALGORITHM.md)
 
-> ⚠️ **诚实定位**:这是一个**弱信号的宏观环境 / 风控仪表盘,不是择时预言机**。方向命中率仅 **~52%**(被市场 ~76% 的上涨漂移钳死),真正价值在 **IC / Sharpe 的风险排序**,不在猜涨跌。详见 [§ 诚实定位](#-诚实定位为什么别盯命中率)。**仅供研究 / 教育,不构成投资建议。**
+> ⚠️ **诚实定位**:这是一个**弱信号的宏观环境 / 风控仪表盘,不是择时预言机**。方向命中率仅 **~52%**(被市场 ~76% 的上涨漂移钳死),真正价值在 **IC / 风险排序**,不在猜涨跌；现有 Sharpe 数字均为 `LEGACY_WEEKLY` 诊断，不是正式 event-time 指标。详见 [§ 诚实定位](#-诚实定位为什么别盯命中率)。**仅供研究 / 教育,不构成投资建议。**
 
 ---
 

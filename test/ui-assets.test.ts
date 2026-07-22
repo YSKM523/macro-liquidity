@@ -159,6 +159,7 @@ describe('static UI assets', () => {
     expect(js).toContain('基础滑点');
     expect(js).toContain('高波动额外滑点');
     expect(js).toContain('LEGACY_WEEKLY');
+    expect(js).toContain('LEGACY_WEEKLY 策略稳健性');
     expect(js).toContain("event.status === 'DATA_INCOMPLETE'");
     expect(js).toContain('数据不完整，不展示绩效');
     expect(js).toContain('revisionPolicy');
@@ -166,6 +167,15 @@ describe('static UI assets', () => {
     expect(js).toContain('当前响应不可独立复现');
     expect(js).toContain('执行 / 同收盘替换 / 末端未执行');
     expect(js).not.toMatch(/assumptions\.[A-Za-z]+\s*\?\?\s*\d/);
+  });
+
+  it('labels every published weekly Sharpe claim as LEGACY_WEEKLY', () => {
+    const docs = readFileSync('docs/ALGORITHM.md', 'utf8');
+    const publicDocs = readFileSync('public/algorithm.md', 'utf8');
+    expect(publicDocs).toBe(docs);
+    for (const line of docs.split('\n').filter(line => /Sharpe(?:\s*\(?1\.10|\s+vs| 更高)/i.test(line))) {
+      expect(line).toContain('LEGACY_WEEKLY');
+    }
   });
 
   it('escapes adversarial provider provenance before inserting it as HTML', () => {

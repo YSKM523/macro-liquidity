@@ -632,7 +632,7 @@ function renderRobust(r) {
     + `<div class="rb-stat"><span class="k">重叠样本</span><span class="v">n=${ic.overlapping.n} · IC=${ic.overlapping.ic_spearman.toFixed(3)}</span></div>`
     + `<div class="rb-stat"><span class="k">非重叠样本(独立)</span><span class="v">n=${ic.non_overlapping.n} · IC=${ic.non_overlapping.ic_spearman.toFixed(3)}</span></div>`;
 
-  const stratBlock = `<div class="rb-sub">策略稳健性(score&gt;55 多/空)</div>`
+  const stratBlock = `<div class="rb-sub">LEGACY_WEEKLY 策略稳健性(score&gt;55 多/空)</div>`
     + `<div class="rb-stat"><span class="k">年化 vs 买入持有</span><span class="v">${rbPct(st.ann_return)} vs ${rbPct(st.buyhold_ann)}</span></div>`
     + `<div class="rb-stat"><span class="k">Sharpe</span><span class="v ${rbIcCls(sh.point)}">${sh.point.toFixed(2)} <span class="rb-ci">95%CI [${sh.ci_lo.toFixed(2)}, ${sh.ci_hi.toFixed(2)}] · p(≤0)=${sh.p_value.toFixed(2)}</span></span></div>`
     + `<div class="rb-stat"><span class="k">最大回撤</span><span class="v rb-neg">−${rbPct(st.max_drawdown)}</span></div>`
