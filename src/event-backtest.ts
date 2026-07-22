@@ -23,6 +23,7 @@ export interface EventSignal {
   codeCommitSha?: string | null;
   dataCutoff?: string | null;
   createdAt?: string | null;
+  factors?: Record<string, number>;
 }
 
 export interface DailyMarketPrice {

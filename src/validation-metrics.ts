@@ -8,6 +8,7 @@ export type MetricStatus =
   | 'ZERO_VARIANCE'
   | 'MISSING_FORMAL_SIGNAL'
   | 'PARTIAL_LEGACY_CALIBRATION'
+  | 'UNAVAILABLE_AT_REGISTRATION'
   | 'PENDING_MATURITY';
 
 export interface RateEstimate {
@@ -78,7 +79,7 @@ function verdictRate(pairs: ForwardPair[]): RateEstimate {
 }
 
 function riskRates(pairs: ForwardPair[]) {
-  const eligible = pairs.filter(pair => pair.targetExposure != null && pair.fwd !== 0);
+  const eligible = pairs.filter(pair => pair.targetExposure != null);
   const missing = pairs.some(pair => pair.targetExposure == null);
   const riskCalls = eligible.filter(pair => pair.targetExposure! <= .5);
   const downside = eligible.filter(pair => pair.fwd < 0);
@@ -106,19 +107,17 @@ export function evaluateValidationMetrics(pairs: ForwardPair[], tailThreshold: n
   const tailEvents = tailThreshold == null ? [] : pairs.filter(pair => pair.fwd <= tailThreshold);
   const riskCalls = pairs.filter(pair => pair.targetExposure != null && pair.targetExposure <= .5);
   const caught = tailThreshold == null ? 0 : riskCalls.filter(pair => pair.fwd <= tailThreshold).length;
-  const tailReady = tailThreshold != null && calibrationN >= MIN_TAIL_CALIBRATION_N
+  const recallReady = tailThreshold != null && calibrationN >= MIN_TAIL_CALIBRATION_N
     && tailEvents.length >= MIN_TEST_TAIL_EVENTS;
+  const precisionReady = tailThreshold != null && calibrationN >= MIN_TAIL_CALIBRATION_N
+    && riskCalls.length >= MIN_TEST_TAIL_EVENTS;
   const missingRiskSignal = pairs.some(pair => pair.targetExposure == null);
-  const tailStatus: MetricStatus = missingRiskSignal
-    ? 'MISSING_FORMAL_SIGNAL'
-    : tailThreshold == null || calibrationN < MIN_TAIL_CALIBRATION_N
-    ? 'INSUFFICIENT_SAMPLE'
-    : tailEvents.length < MIN_TEST_TAIL_EVENTS ? 'INSUFFICIENT_SAMPLE' : 'OK';
-  const tailRate = (hits: number, n: number): RateEstimate => ({
-    value: tailReady && !missingRiskSignal && n > 0 ? hits / n : null,
+  const tailRate = (hits: number, n: number, ready: boolean): RateEstimate => ({
+    value: ready && !missingRiskSignal && n > 0 ? hits / n : null,
     hits, n, abstentions: pairs.length - n,
     minRequired: MIN_TEST_TAIL_EVENTS,
-    status: tailReady && !missingRiskSignal && n > 0 ? 'OK' : tailStatus,
+    status: ready && !missingRiskSignal && n > 0 ? 'OK'
+      : missingRiskSignal ? 'MISSING_FORMAL_SIGNAL' : 'INSUFFICIENT_SAMPLE',
   });
   return {
     direction: directionRate(pairs),
@@ -126,8 +125,8 @@ export function evaluateValidationMetrics(pairs: ForwardPair[], tailThreshold: n
     risk,
     ic: informationCoefficient(pairs),
     tail: {
-      recall: tailRate(caught, tailEvents.length),
-      precision: tailRate(caught, riskCalls.length),
+      recall: tailRate(caught, tailEvents.length, recallReady),
+      precision: tailRate(caught, riskCalls.length, precisionReady),
       tailEvents: tailEvents.length,
       caught,
       riskCalls: riskCalls.length,

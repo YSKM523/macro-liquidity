@@ -79,13 +79,13 @@ describe('date interval labels', () => {
         codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'run-formal',
       }],
       prices: [
-        { date: '2026-07-22', adjustedClose: 50, source: 'PIT', provenanceStatus: 'PIT_RAW' },
-        { date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW' },
-        { date: '2026-10-23', adjustedClose: 110, source: 'PIT', provenanceStatus: 'PIT_RAW' },
+        { date: '2026-07-22', adjustedClose: 50, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-22T23:00:00Z', dataRunId: 'px-run', activationRunId: 'act-1', activatedAt: '2026-07-23T00:00:00Z' },
+        { date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-24T23:00:00Z', dataRunId: 'px-run', activationRunId: 'act-2', activatedAt: '2026-07-25T00:00:00Z' },
+        { date: '2026-10-23', adjustedClose: 110, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-10-23T23:00:00Z', dataRunId: 'px-run', activationRunId: 'act-3', activatedAt: '2026-10-24T00:00:00Z' },
       ], vix: [], cashRates: [],
     };
     const [label] = buildFormalForwardPairs(input);
-    expect(label).toMatchObject({ modelDate: '2026-07-22', signalDate: '2026-07-24', entryDate: '2026-07-24', outcomeDate: '2026-10-23', fwd: .1 });
+    expect(label).toMatchObject({ modelDate: '2026-07-22', signalDate: '2026-07-24', entryDate: '2026-07-24', outcomeDate: '2026-10-23' });
     expect(label.fwd).toBeCloseTo(.1);
   });
 

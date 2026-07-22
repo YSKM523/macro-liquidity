@@ -1,5 +1,8 @@
 import { addDays, spearman } from './backtest';
-import { sha256Hex } from './model-version';
+import { CHAMPION_MODEL_VERSION, championConfigDigest, sha256Hex } from './model-version';
+import { CHAMPION_MODEL_CONFIG, SCORING_FACTOR_KEYS } from './config';
+import { scheduleExecutions } from './event-backtest';
+import type { EventBacktestInputs, EventSignal, ScheduledExecution } from './event-backtest';
 import { evaluateValidationMetrics, quantile } from './validation-metrics';
 import type { ValidationMetrics } from './validation-metrics';
 
@@ -14,6 +17,10 @@ export interface ValidationSnap {
   targetExposure?: number | null;
   pitStatus?: string | null;
   provenanceStatus?: 'GOVERNED' | 'LEGACY' | string | null;
+  modelVersion?: string | null;
+  configHash?: string | null;
+  codeCommitSha?: string | null;
+  dataRunId?: string | null;
 }
 
 export interface ForwardPair {
@@ -28,7 +35,18 @@ export interface ForwardPair {
   factors: Record<string, number>;
   pitStatus: string | null;
   provenanceStatus: string | null;
+  modelDate?: string;
+  decisionAt?: string;
+  tradableAt?: string;
+  entryDate?: string;
+  exitDate?: string;
+  modelVersion?: string | null;
+  configHash?: string | null;
+  codeCommitSha?: string | null;
+  dataRunId?: string | null;
 }
+
+const FACTOR_KEYS = [...SCORING_FACTOR_KEYS] as string[];
 
 export const VALIDATION_PROTOCOL = Object.freeze({
   protocol: 'PURGED_VALIDATION_V1' as const,
@@ -40,23 +58,48 @@ export const VALIDATION_PROTOCOL = Object.freeze({
   holdoutFrom: '2026-07-23',
   purgeRule: 'OUTCOME_ON_OR_AFTER_TEST_FROM',
   independentRule: 'GREEDY_INTERVAL_NON_OVERLAP',
+  intervalConvention: 'HALF_OPEN_RETURN_INTERVAL_ENTRY_EXCLUDED_EXIT_INCLUDED',
+  entryRule: 'FIRST_ACTUAL_CLOSE_STRICTLY_AFTER_TRADABLE_AT_ELIGIBILITY',
+  exitRule: 'FIRST_ACTUAL_CLOSE_ON_OR_AFTER_ENTRY_PLUS_91_CALENDAR_DAYS',
   tailRule: 'TRAIN_ONLY_Q10_LINEAR_TYPE7',
   diagnosticWeightRule: 'MAX_POSITIVE_TRAIN_SPEARMAN_NORMALIZED_ELSE_EQUAL',
   directionRule: 'SCORE_VS_50_ZERO_ABSTAINS',
   formalVerdictRule: 'PERSISTED_VERDICT_NEUTRAL_ABSTAINS',
+  icRule: 'SPEARMAN_PERSISTED_SCORE_VS_FORWARD_RETURN',
   riskRule: 'EXISTING_TARGET_EXPOSURE_LTE_0_50',
+  diagnosticFactorKeys: FACTOR_KEYS,
   minimumRateN: 5,
   minimumIcN: 3,
   minimumTailCalibrationN: 20,
   minimumTestTailEvents: 3,
 });
 
-const PROTOCOL_CANONICAL = JSON.stringify(VALIDATION_PROTOCOL, Object.keys(VALIDATION_PROTOCOL).sort());
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value != null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalize(child)]));
+  }
+  return value;
+}
+
+const REGISTERED_IDENTITY = Object.freeze({
+  registeredAt: '2026-07-22T19:37:28Z',
+  registrationCommit: '75c93d526bf6073440335d3c90a7d5c0b90ea58b',
+  holdoutFrom: VALIDATION_PROTOCOL.holdoutFrom,
+  modelVersion: CHAMPION_MODEL_VERSION,
+  configHash: championConfigDigest(),
+  scoringFactorKeys: [...SCORING_FACTOR_KEYS],
+  portfolioMethodology: CHAMPION_MODEL_CONFIG.portfolio.methodology,
+  riskCallThresholdMaximum: 0.5,
+  prospectiveTailStatus: 'UNAVAILABLE_AT_REGISTRATION' as const,
+});
+const REGISTRATION_CANONICAL = JSON.stringify(canonicalize({ protocol: VALIDATION_PROTOCOL, identity: REGISTERED_IDENTITY }));
 export const HOLDOUT_REGISTRATION = Object.freeze({
   protocol: VALIDATION_PROTOCOL.protocol,
-  holdoutFrom: VALIDATION_PROTOCOL.holdoutFrom,
-  registeredAt: '2026-07-22T00:00:00Z',
-  protocolDigest: sha256Hex(PROTOCOL_CANONICAL),
+  ...REGISTERED_IDENTITY,
+  protocolDigest: sha256Hex(REGISTRATION_CANONICAL),
 });
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -102,9 +145,66 @@ export function buildForwardPairs(snaps: ValidationSnap[], horizonWeeks: number 
       factors: snaps[startIdx].factors,
       pitStatus: snaps[startIdx].pitStatus ?? null,
       provenanceStatus: snaps[startIdx].provenanceStatus ?? null,
+      modelVersion: snaps[startIdx].modelVersion ?? null,
+      configHash: snaps[startIdx].configHash ?? null,
+      codeCommitSha: snaps[startIdx].codeCommitSha ?? null,
+      dataRunId: snaps[startIdx].dataRunId ?? null,
     });
   }
   return pairs;
+}
+
+function formalProvenance(signal: EventSignal): 'GOVERNED' | 'LEGACY' | 'INVALID' {
+  const legacy = signal.modelVersion === 'LEGACY_UNVERSIONED'
+    && signal.configHash === 'LEGACY_UNVERSIONED' && signal.codeCommitSha === 'LEGACY_UNVERSIONED';
+  if (legacy) return 'LEGACY';
+  if (typeof signal.modelVersion !== 'string' || typeof signal.configHash !== 'string'
+    || !/^[a-f0-9]{64}$/.test(signal.configHash)
+    || typeof signal.codeCommitSha !== 'string'
+    || !(signal.codeCommitSha === 'LOCAL_UNCONFIGURED' || /^[a-f0-9]{40}$/.test(signal.codeCommitSha))) return 'INVALID';
+  return 'GOVERNED';
+}
+
+function prepareFormal(input: EventBacktestInputs): { pairs: ForwardPair[]; executions: ScheduledExecution[] } {
+  if (typeof input.asOfCutoff !== 'string' || !Number.isFinite(Date.parse(input.asOfCutoff))) {
+    throw new Error('formal validation requires an explicit as-of cutoff');
+  }
+  for (const price of input.prices) {
+    if (price.provenanceStatus !== 'PIT_RAW') throw new Error('formal validation requires PIT_RAW daily prices');
+    if (!price.fetchedAt || !price.dataRunId || !price.activationRunId || !price.activatedAt) {
+      throw new Error('formal validation requires complete daily price provenance');
+    }
+    if (Date.parse(price.activatedAt) >= Date.parse(input.asOfCutoff)) throw new Error('formal validation price not visible at cutoff');
+  }
+  const schedule = scheduleExecutions(input.signals, input.prices);
+  const prices = [...input.prices].sort((left, right) => left.date.localeCompare(right.date));
+  const pairs: ForwardPair[] = [];
+  for (let startIdx = 0; startIdx < schedule.executions.length; startIdx++) {
+    const execution = schedule.executions[startIdx];
+    const target = addDays(execution.executionDate, VALIDATION_PROTOCOL.horizonWeeks * 7);
+    const exit = prices.find(price => price.date >= target);
+    if (!exit) continue;
+    const lag = (dateMs(exit.date) - dateMs(target)) / 86_400_000;
+    if (lag > VALIDATION_PROTOCOL.outcomeToleranceDays) continue;
+    pairs.push({
+      startIdx, endIdx: prices.findIndex(price => price.date === exit.date),
+      signalDate: execution.executionDate, outcomeDate: exit.date,
+      modelDate: execution.signalDate, decisionAt: execution.decisionAt, tradableAt: execution.tradableAt,
+      entryDate: execution.executionDate, exitDate: exit.date,
+      score: execution.score, fwd: exit.adjustedClose / execution.price - 1,
+      verdict: execution.verdict === 'BULLISH' || execution.verdict === 'BEARISH' || execution.verdict === 'NEUTRAL'
+        ? execution.verdict : null,
+      targetExposure: execution.targetExposure ?? null,
+      factors: execution.factors ?? {}, pitStatus: 'PIT', provenanceStatus: formalProvenance(execution),
+      modelVersion: execution.modelVersion, configHash: execution.configHash,
+      codeCommitSha: execution.codeCommitSha, dataRunId: execution.dataRunId,
+    });
+  }
+  return { pairs, executions: schedule.executions };
+}
+
+export function buildFormalForwardPairs(input: EventBacktestInputs): ForwardPair[] {
+  return prepareFormal(input).pairs;
 }
 
 export function purgeTrainingPairs(pairs: ForwardPair[], testFrom: string, embargoDays: number = VALIDATION_PROTOCOL.embargoDays) {
@@ -114,22 +214,20 @@ export function purgeTrainingPairs(pairs: ForwardPair[], testFrom: string, embar
   let embargoedN = 0;
   for (const pair of pairs) {
     if (pair.outcomeDate >= testFrom) { purgedOverlapN++; continue; }
-    if (pair.signalDate >= embargoFrom) { embargoedN++; continue; }
+    if (pair.outcomeDate >= embargoFrom) { embargoedN++; continue; }
     kept.push(pair);
   }
   return { pairs: kept, purgedOverlapN, embargoedN, embargoFrom };
 }
 
 export function greedyIndependentPairs(pairs: ForwardPair[]): ForwardPair[] {
-  const sorted = [...pairs].sort((a, b) => a.signalDate.localeCompare(b.signalDate) || a.outcomeDate.localeCompare(b.outcomeDate));
+  const sorted = [...pairs].sort((a, b) => a.outcomeDate.localeCompare(b.outcomeDate) || a.signalDate.localeCompare(b.signalDate));
   const result: ForwardPair[] = [];
   for (const pair of sorted) {
     if (result.length === 0 || pair.signalDate >= result[result.length - 1].outcomeDate) result.push(pair);
   }
   return result;
 }
-
-const FACTOR_KEYS = ['netliqTrend','impulse','credit','funding','rates','dollar','vol','reserveAdequacy','curve'];
 
 export function trainingWeights(pairs: ForwardPair[]): Record<string, number> {
   const raw: Record<string, number> = {};
@@ -173,20 +271,25 @@ export function buildPurgedFolds(
   opts: { initialTrain?: number; testN?: number; horizonWeeks?: number; embargoDays?: number } = {},
 ): PurgedFold[] {
   assertChronological(snaps);
+  const horizonWeeks = opts.horizonWeeks ?? VALIDATION_PROTOCOL.horizonWeeks;
+  return buildPurgedFoldsFromPairs(buildForwardPairs(snaps, horizonWeeks), opts);
+}
+
+function buildPurgedFoldsFromPairs(
+  allPairs: ForwardPair[],
+  opts: { initialTrain?: number; testN?: number; embargoDays?: number } = {},
+): PurgedFold[] {
   const initialTrain = opts.initialTrain ?? VALIDATION_PROTOCOL.initialTrain;
   const testN = opts.testN ?? VALIDATION_PROTOCOL.testN;
-  const horizonWeeks = opts.horizonWeeks ?? VALIDATION_PROTOCOL.horizonWeeks;
   const embargoDays = opts.embargoDays ?? VALIDATION_PROTOCOL.embargoDays;
-  const allPairs = buildForwardPairs(snaps, horizonWeeks);
   const folds: PurgedFold[] = [];
-  for (let testStartIdx = initialTrain; testStartIdx < snaps.length; testStartIdx += testN) {
-    const testEndIdx = Math.min(snaps.length - 1, testStartIdx + testN - 1);
-    const testFrom = snaps[testStartIdx].date;
-    const testTo = snaps[testEndIdx].date;
-    const candidates = allPairs.filter(pair => pair.startIdx < testStartIdx);
-    const purged = purgeTrainingPairs(candidates, testFrom, embargoDays);
-    const testPairs = allPairs.filter(pair => pair.startIdx >= testStartIdx && pair.startIdx <= testEndIdx);
+  for (let testStartIdx = initialTrain; testStartIdx < allPairs.length; testStartIdx += testN) {
+    const testPairs = allPairs.slice(testStartIdx, testStartIdx + testN);
     if (testPairs.length === 0) continue;
+    const testFrom = testPairs[0].signalDate;
+    const testTo = testPairs.at(-1)!.signalDate;
+    const candidates = allPairs.slice(0, testStartIdx);
+    const purged = purgeTrainingPairs(candidates, testFrom, embargoDays);
     const legacyCalibration = purged.pairs.some(pair => pair.provenanceStatus === 'LEGACY');
     const q10 = !legacyCalibration && purged.pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
       ? quantile(purged.pairs.map(pair => pair.fwd), .1) : null;
@@ -207,8 +310,9 @@ export function buildPurgedFolds(
     }
     folds.push({
       testFrom, testTo,
-      testLabelThrough: testPairs.at(-1)!.outcomeDate,
-      trainLabelThrough: purged.pairs.at(-1)?.outcomeDate ?? null,
+      testLabelThrough: testPairs.reduce((latest, pair) => pair.outcomeDate > latest ? pair.outcomeDate : latest, testPairs[0].outcomeDate),
+      trainLabelThrough: purged.pairs.length === 0 ? null
+        : purged.pairs.reduce((latest, pair) => pair.outcomeDate > latest ? pair.outcomeDate : latest, purged.pairs[0].outcomeDate),
       trainN: purged.pairs.length,
       purgedOverlapN: purged.purgedOverlapN,
       embargoedN: purged.embargoedN,
@@ -227,102 +331,119 @@ export function buildPurgedFolds(
   return folds;
 }
 
-function frozenTraining(snaps: ValidationSnap[]) {
-  const pre = snaps.filter(snap => snap.date < HOLDOUT_REGISTRATION.holdoutFrom);
-  const trainingOutcomeCutoffExclusive = addDays(HOLDOUT_REGISTRATION.holdoutFrom, -VALIDATION_PROTOCOL.embargoDays);
-  const pairs = buildForwardPairs(pre).filter(pair => pair.outcomeDate < trainingOutcomeCutoffExclusive);
-  const legacyCalibration = pairs.some(pair => pair.provenanceStatus === 'LEGACY');
+function provenanceSummary(rows: Array<Pick<ForwardPair, 'provenanceStatus'>>) {
+  const governedCount = rows.filter(row => row.provenanceStatus === 'GOVERNED').length;
+  const legacyCount = rows.filter(row => row.provenanceStatus === 'LEGACY').length;
+  const invalidCount = rows.length - governedCount - legacyCount;
   return {
-    trainingOutcomeCutoffExclusive,
-    trainingThrough: pairs.at(-1)?.signalDate ?? null,
-    trainingLabelThrough: pairs.at(-1)?.outcomeDate ?? null,
-    trainingN: pairs.length,
-    weights: trainingWeights(pairs),
-    calibrationStatus: legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const
-      : pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN ? 'GOVERNED' as const : 'INSUFFICIENT_SAMPLE' as const,
-    q10: !legacyCalibration && pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
-      ? quantile(pairs.map(pair => pair.fwd), .1) : null,
+    totalCount: rows.length, governedCount, legacyCount, invalidCount,
+    completeness: invalidCount > 0 ? 'INCOMPLETE' as const
+      : legacyCount === 0 ? 'COMPLETE' as const : 'PARTIAL_LEGACY' as const,
   };
 }
 
-function provenanceSummary(snaps: ValidationSnap[]) {
-  const governedCount = snaps.filter(snap => snap.provenanceStatus === 'GOVERNED').length;
-  const legacyCount = snaps.filter(snap => snap.provenanceStatus === 'LEGACY').length;
-  return {
-    totalCount: snaps.length, governedCount, legacyCount,
-    completeness: legacyCount === 0 ? 'COMPLETE' as const : 'PARTIAL_LEGACY' as const,
-  };
+function validPitProvenance(rows: ForwardPair[]): boolean {
+  return rows.every(row => row.pitStatus === 'PIT'
+    && (row.provenanceStatus === 'GOVERNED' || row.provenanceStatus === 'LEGACY'));
 }
 
-function validPitProvenance(snaps: ValidationSnap[]): boolean {
-  return snaps.every(snap => snap.pitStatus === 'PIT'
-    && (snap.provenanceStatus === 'GOVERNED' || snap.provenanceStatus === 'LEGACY'));
+function governedIdentityIssue(rows: Array<Pick<ForwardPair,
+  'provenanceStatus' | 'modelVersion' | 'configHash' | 'codeCommitSha' | 'dataRunId'>>): string | null {
+  const governed = rows.filter(row => row.provenanceStatus === 'GOVERNED');
+  if (governed.some(row => row.modelVersion !== HOLDOUT_REGISTRATION.modelVersion
+    || row.configHash !== HOLDOUT_REGISTRATION.configHash)) return 'MODEL_COHORT_MISMATCH';
+  if (governed.some(row => typeof row.codeCommitSha !== 'string'
+    || !(row.codeCommitSha === 'LOCAL_UNCONFIGURED' || /^[a-f0-9]{40}$/.test(row.codeCommitSha))
+    || typeof row.dataRunId !== 'string' || row.dataRunId.length === 0)) return 'INCOMPLETE_GOVERNED_PROVENANCE';
+  return null;
 }
 
-export function runFrozenHoldout(snaps: ValidationSnap[]) {
-  assertChronological(snaps);
-  const frozen = {
-    ...HOLDOUT_REGISTRATION,
-    ...frozenTraining(snaps),
+function cohortSummary(rows: ForwardPair[]) {
+  const governed = rows.filter(row => row.provenanceStatus === 'GOVERNED');
+  const models = [...new Set(governed.map(row => `${row.modelVersion}|${row.configHash}`))];
+  const codeCommitShas = [...new Set(governed.map(row => row.codeCommitSha).filter((value): value is string => typeof value === 'string'))];
+  const dataRunIds = [...new Set(governed.map(row => row.dataRunId).filter((value): value is string => typeof value === 'string'))];
+  return { governedCount: governed.length, modelCohorts: models, codeCommitShas, dataRunCount: dataRunIds.length };
+}
+
+function runFrozenHoldoutPairs(pairs: ForwardPair[], prospective: ForwardPair[] = pairs) {
+  const provenance = provenanceSummary(prospective);
+  const postRegistration = prospective.filter(pair => pair.signalDate >= HOLDOUT_REGISTRATION.holdoutFrom);
+  const issue = !validPitProvenance(prospective) ? 'INVALID_PIT_PROVENANCE' : governedIdentityIssue(prospective);
+  const registration = HOLDOUT_REGISTRATION;
+  const base = {
+    registration, provenance, cohort: cohortSummary(prospective),
+    tailStatus: 'UNAVAILABLE_AT_REGISTRATION' as const,
   };
-  const provenance = provenanceSummary(snaps);
-  const postRegistration = snaps.filter(snap => snap.date >= HOLDOUT_REGISTRATION.holdoutFrom);
-  if (!validPitProvenance(snaps) || postRegistration.some(snap => snap.provenanceStatus !== 'GOVERNED')) {
-    return { status: 'DATA_INCOMPLETE' as const, frozen, provenance, overlappingN: 0, independentN: 0, metrics: null };
+  if (issue || postRegistration.some(pair => pair.provenanceStatus !== 'GOVERNED')) {
+    return { ...base, status: 'DATA_INCOMPLETE' as const, reason: issue ?? 'POST_REGISTRATION_NOT_GOVERNED', overlappingN: 0, independentN: 0, metrics: null };
   }
-  const pairs = buildForwardPairs(snaps).filter(pair => pair.signalDate >= HOLDOUT_REGISTRATION.holdoutFrom);
-  if (pairs.length < VALIDATION_PROTOCOL.minimumRateN) {
-    return { status: 'PENDING_MATURITY' as const, frozen, provenance, overlappingN: pairs.length, independentN: greedyIndependentPairs(pairs).length, metrics: null };
+  const matured = pairs.filter(pair => pair.signalDate >= HOLDOUT_REGISTRATION.holdoutFrom);
+  if (matured.length < VALIDATION_PROTOCOL.minimumRateN) {
+    return { ...base, status: 'PENDING_MATURITY' as const, reason: null, overlappingN: matured.length, independentN: greedyIndependentPairs(matured).length, metrics: null };
   }
-  const metrics = evaluateValidationMetrics(pairs, frozen.q10, frozen.trainingN);
-  if (frozen.calibrationStatus === 'PARTIAL_LEGACY_CALIBRATION') {
-    metrics.tail.recall = { ...metrics.tail.recall, value: null, status: 'PARTIAL_LEGACY_CALIBRATION' };
-    metrics.tail.precision = { ...metrics.tail.precision, value: null, status: 'PARTIAL_LEGACY_CALIBRATION' };
-  }
+  const metrics = evaluateValidationMetrics(matured, null, 0);
+  metrics.tail.recall = { ...metrics.tail.recall, value: null, status: 'UNAVAILABLE_AT_REGISTRATION' };
+  metrics.tail.precision = { ...metrics.tail.precision, value: null, status: 'UNAVAILABLE_AT_REGISTRATION' };
   return {
-    status: 'OK' as const, frozen, provenance,
-    overlappingN: pairs.length,
-    independentN: greedyIndependentPairs(pairs).length,
+    ...base, status: 'OK' as const, reason: null,
+    overlappingN: matured.length,
+    independentN: greedyIndependentPairs(matured).length,
     metrics,
   };
 }
 
-export function runPurgedValidation(
-  snaps: ValidationSnap[],
-  opts: { initialTrain?: number; testN?: number } = {},
-) {
+export function runFrozenHoldout(snaps: ValidationSnap[]) {
   assertChronological(snaps);
+  const pairs = buildForwardPairs(snaps);
+  const prospective = snaps.map((snap, index): ForwardPair => ({
+    startIdx: index, endIdx: index, signalDate: snap.date, outcomeDate: snap.date,
+    score: snap.score, fwd: 0, verdict: snap.verdict ?? null, targetExposure: snap.targetExposure ?? null,
+    factors: snap.factors, pitStatus: snap.pitStatus ?? null, provenanceStatus: snap.provenanceStatus ?? null,
+    modelVersion: snap.modelVersion, configHash: snap.configHash, codeCommitSha: snap.codeCommitSha, dataRunId: snap.dataRunId,
+  }));
+  return runFrozenHoldoutPairs(pairs, prospective);
+}
+
+function runValidationPairs(pairs: ForwardPair[], prospective: ForwardPair[] = pairs) {
   const protocol = { ...VALIDATION_PROTOCOL, protocolDigest: HOLDOUT_REGISTRATION.protocolDigest };
-  const provenance = provenanceSummary(snaps);
-  if (!validPitProvenance(snaps)) {
-    return { status: 'DATA_INCOMPLETE' as const, protocol, provenance, folds: [], aggregateMetrics: null, holdout: runFrozenHoldout(snaps) };
+  const provenance = provenanceSummary(prospective);
+  const identityIssue = governedIdentityIssue(prospective);
+  if (!validPitProvenance(prospective) || identityIssue) {
+    return {
+      status: 'DATA_INCOMPLETE' as const, reason: identityIssue ?? 'INVALID_PIT_PROVENANCE',
+      protocol, provenance, cohort: cohortSummary(prospective), folds: [], aggregateMetrics: null,
+      overlappingN: 0, independentN: 0, holdout: runFrozenHoldoutPairs(pairs, prospective),
+    };
   }
-  const folds = buildPurgedFolds(snaps, opts);
+  const folds = buildPurgedFoldsFromPairs(pairs);
   const testPairs = folds.flatMap(fold => fold.testPairs);
   const aggregateBase = testPairs.length > 0 ? evaluateValidationMetrics(testPairs, null, 0) : null;
   const totalTailEvents = folds.reduce((sum, fold) => sum + fold.metrics.tail.tailEvents, 0);
   const totalCaught = folds.reduce((sum, fold) => sum + fold.metrics.tail.caught, 0);
   const totalRiskCalls = folds.reduce((sum, fold) => sum + fold.metrics.tail.riskCalls, 0);
   const legacyCalibration = folds.some(fold => fold.tailCalibrationStatus === 'PARTIAL_LEGACY_CALIBRATION');
-  const missingRiskSignal = folds.some(fold => fold.metrics.tail.recall.status === 'MISSING_FORMAL_SIGNAL');
+  const missingRiskSignal = prospective.some(pair => pair.targetExposure == null)
+    || folds.some(fold => fold.metrics.tail.recall.status === 'MISSING_FORMAL_SIGNAL');
   const calibrationReady = folds.length > 0 && !legacyCalibration
     && folds.every(fold => fold.metrics.tail.calibrationN >= VALIDATION_PROTOCOL.minimumTailCalibrationN);
-  const tailReady = calibrationReady && !missingRiskSignal && totalTailEvents >= VALIDATION_PROTOCOL.minimumTestTailEvents;
+  const recallReady = calibrationReady && !missingRiskSignal && totalTailEvents >= VALIDATION_PROTOCOL.minimumTestTailEvents;
+  const precisionReady = calibrationReady && !missingRiskSignal && totalRiskCalls >= VALIDATION_PROTOCOL.minimumTestTailEvents;
   const aggregateTail = aggregateBase == null ? null : {
     recall: {
-      value: tailReady ? totalCaught / totalTailEvents : null,
+      value: recallReady ? totalCaught / totalTailEvents : null,
       hits: totalCaught, n: totalTailEvents, abstentions: testPairs.length - totalTailEvents,
       minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
       status: missingRiskSignal ? 'MISSING_FORMAL_SIGNAL' as const
-        : legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const : tailReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+        : legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const : recallReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     },
     precision: {
-      value: tailReady && totalRiskCalls > 0 ? totalCaught / totalRiskCalls : null,
+      value: precisionReady ? totalCaught / totalRiskCalls : null,
       hits: totalCaught, n: totalRiskCalls, abstentions: testPairs.length - totalRiskCalls,
       minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
       status: missingRiskSignal ? 'MISSING_FORMAL_SIGNAL' as const
         : legacyCalibration ? 'PARTIAL_LEGACY_CALIBRATION' as const
-        : tailReady && totalRiskCalls > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+        : precisionReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     },
     tailEvents: totalTailEvents,
     caught: totalCaught,
@@ -335,14 +456,61 @@ export function runPurgedValidation(
   };
   return {
     status: folds.length > 0 ? (provenance.legacyCount > 0 ? 'PARTIAL_LEGACY' as const : 'OK' as const) : 'INSUFFICIENT_SAMPLE' as const,
-    protocol, provenance,
+    reason: null, protocol, provenance, cohort: cohortSummary(prospective),
     folds: folds.map(({ trainPairs: _trainPairs, testPairs, ...fold }) => ({
       ...fold,
-      labels: testPairs.map(pair => ({ signalDate: pair.signalDate, outcomeDate: pair.outcomeDate })),
+      labels: testPairs.map(pair => ({
+        modelDate: pair.modelDate ?? pair.signalDate, decisionAt: pair.decisionAt ?? null,
+        tradableAt: pair.tradableAt ?? null, signalDate: pair.signalDate, entryDate: pair.entryDate ?? pair.signalDate,
+        outcomeDate: pair.outcomeDate, exitDate: pair.exitDate ?? pair.outcomeDate,
+      })),
     })),
     aggregateMetrics: aggregateBase == null || aggregateTail == null ? null : { ...aggregateBase, tail: aggregateTail },
     overlappingN: testPairs.length,
     independentN: greedyIndependentPairs(testPairs).length,
-    holdout: runFrozenHoldout(snaps),
+    holdout: runFrozenHoldoutPairs(pairs, prospective),
   };
+}
+
+export function runPurgedValidation(snaps: ValidationSnap[], overrides?: never) {
+  if (arguments.length > 1 || overrides !== undefined) throw new Error('formal validation protocol overrides are not allowed');
+  assertChronological(snaps);
+  const pairs = buildForwardPairs(snaps);
+  const prospective = snaps.map((snap, index): ForwardPair => ({
+    startIdx: index, endIdx: index, signalDate: snap.date, outcomeDate: snap.date,
+    score: snap.score, fwd: 0, verdict: snap.verdict ?? null, targetExposure: snap.targetExposure ?? null,
+    factors: snap.factors, pitStatus: snap.pitStatus ?? null, provenanceStatus: snap.provenanceStatus ?? null,
+    modelVersion: snap.modelVersion, configHash: snap.configHash, codeCommitSha: snap.codeCommitSha, dataRunId: snap.dataRunId,
+  }));
+  return runValidationPairs(pairs, prospective);
+}
+
+export function runFormalValidation(input: EventBacktestInputs) {
+  try {
+    const prepared = prepareFormal(input);
+    const prospective = prepared.executions.map((execution, index): ForwardPair => ({
+      startIdx: index, endIdx: index, signalDate: execution.executionDate, outcomeDate: execution.executionDate,
+      modelDate: execution.signalDate, decisionAt: execution.decisionAt, tradableAt: execution.tradableAt,
+      entryDate: execution.executionDate, score: execution.score, fwd: 0,
+      verdict: execution.verdict === 'BULLISH' || execution.verdict === 'BEARISH' || execution.verdict === 'NEUTRAL'
+        ? execution.verdict : null,
+      targetExposure: execution.targetExposure ?? null, factors: execution.factors ?? {}, pitStatus: 'PIT',
+      provenanceStatus: formalProvenance(execution), modelVersion: execution.modelVersion,
+      configHash: execution.configHash, codeCommitSha: execution.codeCommitSha, dataRunId: execution.dataRunId,
+    }));
+    return runValidationPairs(prepared.pairs, prospective);
+  } catch (error) {
+    const protocol = { ...VALIDATION_PROTOCOL, protocolDigest: HOLDOUT_REGISTRATION.protocolDigest };
+    const provenance = { totalCount: 0, governedCount: 0, legacyCount: 0, invalidCount: 0, completeness: 'INCOMPLETE' as const };
+    return {
+      status: 'DATA_INCOMPLETE' as const, reason: 'INVALID_FORMAL_INPUT', detail: String((error as Error).message),
+      protocol, provenance, cohort: { governedCount: 0, modelCohorts: [], codeCommitShas: [], dataRunCount: 0 },
+      folds: [], aggregateMetrics: null, overlappingN: 0, independentN: 0,
+      holdout: {
+        status: 'DATA_INCOMPLETE' as const, reason: 'INVALID_FORMAL_INPUT', registration: HOLDOUT_REGISTRATION,
+        provenance, cohort: { governedCount: 0, modelCohorts: [], codeCommitShas: [], dataRunCount: 0 },
+        tailStatus: 'UNAVAILABLE_AT_REGISTRATION' as const, overlappingN: 0, independentN: 0, metrics: null,
+      },
+    };
+  }
 }
