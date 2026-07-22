@@ -7,10 +7,11 @@ import { buildReserveManifest, fredCsvUrl, nyFedRepoUrl, parseFredCsv, parseNyFe
 const endDate = process.argv[2];
 if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate ?? '')) throw new Error('usage: node scripts/fetch-reserve-snapshot.mjs YYYY-MM-DD');
 
-const startDate = '2002-01-01';
+const fredStartDate = '2002-01-01';
+const nyFedStartDate = '2021-07-29';
 const fredIds = PREREGISTRATION.sources.FRED.series;
 const fredUrls = Object.fromEntries(fredIds.map(id => [id, fredCsvUrl(id, endDate)]));
-const nyFedUrl = nyFedRepoUrl(startDate, endDate);
+const nyFedUrl = nyFedRepoUrl(nyFedStartDate, endDate);
 const requests = [
   ...fredIds.map(id => ({ id, url: fredUrls[id], accept: 'text/csv' })),
   { id: 'NYFED_SRF_ACCEPTED', url: nyFedUrl, accept: 'application/json' },
@@ -27,11 +28,11 @@ const series = Object.fromEntries([
   ['NYFED_SRF_ACCEPTED', parseNyFedSrf(bodies.NYFED_SRF_ACCEPTED)],
 ]);
 const retrievedAt = new Date().toISOString();
-const snapshotId = `reserve-current-vintage-${endDate}-v1`;
+const snapshotId = `reserve-current-vintage-${endDate}-v2`;
 const snapshot = {
-  schemaVersion: 1, snapshotId, evidenceClass: PREREGISTRATION.evidenceClass,
+  schemaVersion: 2, snapshotId, evidenceClass: PREREGISTRATION.evidenceClass,
   retrievedAt, source: PREREGISTRATION.source,
-  request: { startDate, endDate, fredUrls, nyFedUrl }, series,
+  request: { fredStartDate, nyFedStartDate, endDate, fredUrls, nyFedUrl }, series,
 };
 const snapshotText = `${JSON.stringify(snapshot, null, 2)}\n`;
 const responseHashes = Object.fromEntries(responses.map(response => [response.id, sha256Hex(response.body)]));

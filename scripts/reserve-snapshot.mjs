@@ -3,7 +3,8 @@ import { PREREGISTRATION } from './reserve-preregistration.mjs';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HASH = /^[0-9a-f]{64}$/;
-const START_DATE = '2002-01-01';
+const FRED_START_DATE = '2002-01-01';
+const SRF_LAUNCH_DATE = '2021-07-29';
 const FRED_IDS = Object.freeze(['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCRRATE', 'SP500']);
 const SERIES = Object.freeze([...FRED_IDS, 'NYFED_SRF_ACCEPTED']);
 
@@ -14,11 +15,12 @@ function validDate(date) {
 export function fredCsvUrl(seriesId, endDate) {
   if (!FRED_IDS.includes(seriesId)) throw new Error(`${seriesId} is not in the FRED allowlist`);
   if (!validDate(endDate)) throw new Error('FRED end date is invalid');
-  return `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}&cosd=${START_DATE}&coed=${endDate}`;
+  return `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}&cosd=${FRED_START_DATE}&coed=${endDate}`;
 }
 
 export function nyFedRepoUrl(startDate, endDate) {
   if (!validDate(startDate) || !validDate(endDate) || startDate > endDate) throw new Error('NY Fed request date range is invalid');
+  if (startDate !== SRF_LAUNCH_DATE) throw new Error(`NY Fed canonical request must start at SRF launch ${SRF_LAUNCH_DATE}`);
   return `https://markets.newyorkfed.org/api/rp/results/search.json?startDate=${startDate}&endDate=${endDate}&operationTypes=Repo`;
 }
 
@@ -52,6 +54,7 @@ export function parseNyFedSrf(body) {
   const byDate = new Map();
   for (const operation of parsed.repo.operations) {
     if (!validDate(operation?.operationDate)) throw new Error('NY Fed operationDate is invalid');
+    if (operation.operationDate < SRF_LAUNCH_DATE) throw new Error('NY Fed operationDate is before SRF launch');
     if (operation.operationType !== 'Repo') throw new Error('NY Fed operationType must be Repo');
     if (typeof operation.term !== 'string') throw new Error('NY Fed term is missing');
     if (!Number.isFinite(operation.totalAmtAccepted) || operation.totalAmtAccepted < 0) throw new Error('NY Fed totalAmtAccepted is invalid');
@@ -91,17 +94,18 @@ function validateRows(name, rows) {
 }
 
 function validateEnvelope(snapshot) {
-  if (snapshot?.schemaVersion !== 1) throw new Error('snapshot schemaVersion mismatch');
+  if (snapshot?.schemaVersion !== 2) throw new Error('snapshot schemaVersion mismatch');
   if (typeof snapshot.snapshotId !== 'string' || !snapshot.snapshotId) throw new Error('snapshotId is invalid');
   if (snapshot.evidenceClass !== PREREGISTRATION.evidenceClass) throw new Error('snapshot evidence class mismatch');
   if (snapshot.source !== PREREGISTRATION.source) throw new Error('snapshot source mismatch');
   if (typeof snapshot.retrievedAt !== 'string' || new Date(snapshot.retrievedAt).toISOString() !== snapshot.retrievedAt) throw new Error('snapshot retrievedAt is invalid');
-  if (snapshot.request?.startDate !== START_DATE || !validDate(snapshot.request?.endDate)) throw new Error('snapshot request range mismatch');
+  if (snapshot.request?.fredStartDate !== FRED_START_DATE || snapshot.request?.nyFedStartDate !== SRF_LAUNCH_DATE || !validDate(snapshot.request?.endDate)) throw new Error('snapshot request range mismatch');
   if (!sameKeys(snapshot.request.fredUrls, FRED_IDS)) throw new Error('snapshot FRED URL set mismatch');
   for (const id of FRED_IDS) if (snapshot.request.fredUrls[id] !== fredCsvUrl(id, snapshot.request.endDate)) throw new Error(`${id} snapshot URL mismatch`);
-  if (snapshot.request.nyFedUrl !== nyFedRepoUrl(START_DATE, snapshot.request.endDate)) throw new Error('NY Fed snapshot URL mismatch');
+  if (snapshot.request.nyFedUrl !== nyFedRepoUrl(SRF_LAUNCH_DATE, snapshot.request.endDate)) throw new Error('NY Fed snapshot URL mismatch');
   if (!sameKeys(snapshot.series, SERIES)) throw new Error('snapshot series set mismatch');
   for (const id of SERIES) validateRows(id, snapshot.series[id]);
+  if (snapshot.series.NYFED_SRF_ACCEPTED[0].date < SRF_LAUNCH_DATE) throw new Error('NY Fed normalized series begins before SRF launch');
 }
 
 export async function buildReserveManifest(snapshot, snapshotText, responseHashes) {
@@ -122,7 +126,8 @@ export async function buildReserveManifest(snapshot, snapshotText, responseHashe
   return {
     schemaVersion: snapshot.schemaVersion, snapshotId: snapshot.snapshotId,
     evidenceClass: snapshot.evidenceClass, source: snapshot.source, retrievedAt: snapshot.retrievedAt,
-    requestStartDate: snapshot.request.startDate, requestEndDate: snapshot.request.endDate,
+    fredStartDate: snapshot.request.fredStartDate, nyFedStartDate: snapshot.request.nyFedStartDate,
+    requestEndDate: snapshot.request.endDate,
     snapshotSha256: sha256Hex(snapshotText), series,
   };
 }
@@ -137,7 +142,9 @@ export async function verifyReserveSnapshot(snapshot, snapshotText, manifest) {
   for (const field of ['schemaVersion', 'snapshotId', 'evidenceClass', 'source', 'retrievedAt']) {
     if (manifest[field] !== bytesObject[field]) throw new Error(`manifest ${field} mismatch`);
   }
-  if (manifest.requestStartDate !== bytesObject.request.startDate || manifest.requestEndDate !== bytesObject.request.endDate) throw new Error('manifest request range mismatch');
+  if (manifest.fredStartDate !== bytesObject.request.fredStartDate
+    || manifest.nyFedStartDate !== bytesObject.request.nyFedStartDate
+    || manifest.requestEndDate !== bytesObject.request.endDate) throw new Error('manifest request range mismatch');
   if (!sameKeys(manifest.series, SERIES)) throw new Error('manifest series set mismatch');
   for (const id of SERIES) {
     const metadata = manifest.series[id];

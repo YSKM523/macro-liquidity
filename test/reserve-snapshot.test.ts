@@ -5,12 +5,12 @@ import { buildReserveManifest, fredCsvUrl, nyFedRepoUrl, parseFredCsv, parseNyFe
 const ids = ['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCRRATE', 'SP500'];
 const snapshotFixture = async () => {
   const fredUrls = Object.fromEntries(ids.map(id => [id, fredCsvUrl(id, '2024-01-03')]));
-  const nyFedUrl = nyFedRepoUrl('2002-01-01', '2024-01-03');
+  const nyFedUrl = nyFedRepoUrl('2021-07-29', '2024-01-03');
   const series = Object.fromEntries([...ids, 'NYFED_SRF_ACCEPTED'].map((id, index) => [id, [{ date: '2024-01-03', value: index + 1 }]]));
   const snapshot = {
-    schemaVersion: 1, snapshotId: 'reserve-current-vintage-2024-01-03-v1', evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
+    schemaVersion: 2, snapshotId: 'reserve-current-vintage-2024-01-03-v2', evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
     retrievedAt: '2024-01-03T12:00:00.000Z', source: 'FRED_AND_NYFED_CURRENT_VINTAGE',
-    request: { startDate: '2002-01-01', endDate: '2024-01-03', fredUrls, nyFedUrl }, series,
+    request: { fredStartDate: '2002-01-01', nyFedStartDate: '2021-07-29', endDate: '2024-01-03', fredUrls, nyFedUrl }, series,
   };
   const text = `${JSON.stringify(snapshot, null, 2)}\n`;
   const responseHashes = Object.fromEntries([...ids, 'NYFED_SRF_ACCEPTED'].map(id => [id, 'a'.repeat(64)]));
@@ -21,7 +21,8 @@ const snapshotFixture = async () => {
 describe('reserve challenger canonical current-vintage artifact', () => {
   it('binds exact canonical FRED and NY Fed URLs', () => {
     expect(fredCsvUrl('TGCRRATE', '2026-07-22')).toBe('https://fred.stlouisfed.org/graph/fredgraph.csv?id=TGCRRATE&cosd=2002-01-01&coed=2026-07-22');
-    expect(nyFedRepoUrl('2002-01-01', '2026-07-22')).toBe('https://markets.newyorkfed.org/api/rp/results/search.json?startDate=2002-01-01&endDate=2026-07-22&operationTypes=Repo');
+    expect(nyFedRepoUrl('2021-07-29', '2026-07-22')).toBe('https://markets.newyorkfed.org/api/rp/results/search.json?startDate=2021-07-29&endDate=2026-07-22&operationTypes=Repo');
+    expect(() => nyFedRepoUrl('2002-01-01', '2026-07-22')).toThrow(/launch/);
     expect(() => fredCsvUrl('TGCR', '2026-07-22')).toThrow(/allowlist/);
   });
 
@@ -40,6 +41,7 @@ describe('reserve challenger canonical current-vintage artifact', () => {
     ] } }))).toEqual([{ date: '2024-01-03', value: 1.5 }, { date: '2024-01-04', value: 0 }]);
     expect(() => parseNyFedSrf('{"repo":{"operations":[{"operationDate":"2024-01-03","operationType":"Repo","term":"Overnight"}]}}')).toThrow(/totalAmtAccepted/);
     expect(() => parseNyFedSrf('{"repo":{"operations":[{"operationDate":"2024-01-03","operationType":"Reverse Repo","term":"Overnight","totalAmtAccepted":0}]}}')).toThrow(/operationType/);
+    expect(() => parseNyFedSrf('{"repo":{"operations":[{"operationDate":"2021-07-28","operationType":"Repo","term":"Overnight","totalAmtAccepted":0}]}}')).toThrow(/before SRF launch/);
   });
 
   it('verifies bytes/object, exact series set, metadata, normalized hashes, and provider response hashes', async () => {

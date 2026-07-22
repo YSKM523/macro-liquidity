@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { renderReserveReport } from './reserve-report.mjs';
 import { runReserveResearch } from './run-reserve-research.mjs';
 
-const snapshotId = 'reserve-current-vintage-2026-07-22-v1';
+const snapshotId = 'reserve-current-vintage-2026-07-22-v2';
 const snapshotPath = resolve(`scripts/data/${snapshotId}.json`);
 const manifestPath = resolve(`scripts/data/${snapshotId}.manifest.json`);
 const snapshotText = await readFile(snapshotPath, 'utf8');

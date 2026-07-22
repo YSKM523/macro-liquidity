@@ -1,0 +1,236 @@
+{
+  "auditStatus": "INVALIDATED_BY_REVIEW",
+  "invalidReason": "NY Fed v1 included pre-2021-07-29 temporary Repo operations; not a valid SRF history.",
+  "schemaVersion": 1,
+  "preregistrationStatus": "AMENDED_BEFORE_FULL_FETCH",
+  "methodologyVersion": "PR12_RESEARCH_V1_SOURCE_CORRECTED",
+  "amendments": [
+    {
+      "id": "A-001",
+      "kind": "PRIMARY_SOURCE_CORRECTION",
+      "chronology": "Committed after exact-ID short-window validation and before any canonical full fetch or report run.",
+      "reason": "The preregistered FRED IDs TGCR and SRFONTSYD returned HTTP 404.",
+      "change": "Use FRED TGCRRATE and the official NY Fed Markets Repo results endpoint; sum totalAmtAccepted by operationDate across same-day Overnight Repo operations.",
+      "tuning": false,
+      "formulaChanged": false,
+      "weightsChanged": false,
+      "thresholdsChanged": false,
+      "replacementEligibleChanged": false
+    }
+  ],
+  "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+  "source": "FRED_AND_NYFED_CURRENT_VINTAGE",
+  "snapshotId": "reserve-current-vintage-2026-07-22-v1",
+  "snapshotSha256": "d9ac12d89b147dbf63a009a4e4cbebacdceb7d55afe289a4c3968bf22de74866",
+  "retrievedAt": "2026-07-22T16:12:55.950Z",
+  "replacementEligible": false,
+  "sample": {
+    "weeklyCount": 1231,
+    "completeCount": 248,
+    "incompleteCount": 983,
+    "scoredCount": 196,
+    "firstAnchor": "2002-12-20",
+    "lastAnchor": "2026-07-17",
+    "decisionStatusCounts": {
+      "DATA_INCOMPLETE": 983,
+      "OK": 248
+    },
+    "stateCounts": {
+      "TRANSITION": 58,
+      "SCARCE": 94,
+      "STRESSED": 44
+    }
+  },
+  "latest": {
+    "anchorDate": "2026-07-17",
+    "decisionStatus": "DATA_INCOMPLETE",
+    "relativeReserves": {
+      "status": "STALE_GDP",
+      "reserveAsOf": "2026-07-15",
+      "reserveAgeDays": 2,
+      "gdpAsOf": "2026-01-01",
+      "gdpAgeDays": 197,
+      "reserveB": 3142.721,
+      "gdpB": 31865.721,
+      "value": null
+    },
+    "reserveChange13": {
+      "status": "CURRENT_INCOMPLETE",
+      "currentAsOf": "2026-07-15",
+      "priorAsOf": "2026-04-15",
+      "horizonCalendarDays": 91,
+      "value": null
+    },
+    "sofrIorb": {
+      "status": "OK",
+      "pairCount": 5,
+      "firstPairDate": "2026-07-13",
+      "latestPairDate": "2026-07-17",
+      "ageDays": 0,
+      "medianBps": -3,
+      "p95Bps": -1.2000000000000002
+    },
+    "auxiliaryFunding": {
+      "status": "OK",
+      "effrPairCount": 5,
+      "tgcrPairCount": 5,
+      "srfCount": 5,
+      "latestEffrPairDate": "2026-07-17",
+      "latestTgcrPairDate": "2026-07-17",
+      "latestSrfDate": "2026-07-17",
+      "effrAgeDays": 0,
+      "tgcrAgeDays": 0,
+      "srfAgeDays": 0,
+      "effrMedianBps": -2,
+      "tgcrMedianBps": -6,
+      "srfMaxB": 0.10200000000000001
+    },
+    "provenance": {
+      "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+      "source": "FRED_AND_NYFED_CURRENT_VINTAGE",
+      "methodologyVersion": "PR12_RESEARCH_V1_SOURCE_CORRECTED",
+      "replacementEligible": false
+    },
+    "priorCompleteWeeks": 248,
+    "components": null,
+    "score": null,
+    "state": "UNKNOWN"
+  },
+  "oos": {
+    "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+    "overlapping": {
+      "ic": 0.23633928167874005,
+      "n": 194
+    },
+    "nonOverlapping": {
+      "ic": -0.007142857142857143,
+      "n": 15
+    },
+    "bootstrap": {
+      "ciLow": -0.049213735645096596,
+      "ciHigh": 0.480455387108467,
+      "pValue": 0.0515,
+      "seed": 12012,
+      "blockLength": 13,
+      "iterations": 2000
+    },
+    "folds": [
+      {
+        "fold": 1,
+        "evaluationStart": "2018-01-01",
+        "evaluationEndExclusive": "2020-01-01",
+        "trainN": 0,
+        "evaluationN": 0,
+        "ic": null
+      },
+      {
+        "fold": 2,
+        "evaluationStart": "2020-01-01",
+        "evaluationEndExclusive": "2022-01-01",
+        "trainN": 0,
+        "evaluationN": 0,
+        "ic": null
+      },
+      {
+        "fold": 3,
+        "evaluationStart": "2022-01-01",
+        "evaluationEndExclusive": "2023-01-01",
+        "trainN": 0,
+        "evaluationN": 22,
+        "ic": -0.33258046301524563
+      },
+      {
+        "fold": 4,
+        "evaluationStart": "2023-01-01",
+        "evaluationEndExclusive": "2024-01-01",
+        "trainN": 8,
+        "evaluationN": 52,
+        "ic": 0.3293776146162384
+      },
+      {
+        "fold": 5,
+        "evaluationStart": "2024-01-01",
+        "evaluationEndExclusive": "2025-01-01",
+        "trainN": 60,
+        "evaluationN": 52,
+        "ic": 0.25288141381371126
+      },
+      {
+        "fold": 6,
+        "evaluationStart": "2025-01-01",
+        "evaluationEndExclusive": "2100-01-01",
+        "trainN": 113,
+        "evaluationN": 68,
+        "ic": 0.4439439630492041
+      }
+    ],
+    "positiveFoldCount": 3,
+    "scoreCounts": {
+      "total": 1231,
+      "scored": 196,
+      "aligned": 194
+    },
+    "stateCounts": {
+      "UNKNOWN": 1035,
+      "TRANSITION": 58,
+      "SCARCE": 94,
+      "STRESSED": 44
+    },
+    "quintiles": [
+      {
+        "quintile": 1,
+        "count": 38,
+        "mean": 0.022432963348263158,
+        "median": 0.024534777055999997,
+        "negativeProbability": 0.23684210526315788,
+        "tail10": -0.038259702020700004
+      },
+      {
+        "quintile": 2,
+        "count": 39,
+        "mean": 0.03723242354582051,
+        "median": 0.047001465719,
+        "negativeProbability": 0.2564102564102564,
+        "tail10": -0.0400120139214
+      },
+      {
+        "quintile": 3,
+        "count": 39,
+        "mean": 0.05049518234771795,
+        "median": 0.056068946121,
+        "negativeProbability": 0.15384615384615385,
+        "tail10": -0.015006978164799994
+      },
+      {
+        "quintile": 4,
+        "count": 39,
+        "mean": 0.07517414833079489,
+        "median": 0.071209578674,
+        "negativeProbability": 0.07692307692307693,
+        "tail10": 0.004091556013200001
+      },
+      {
+        "quintile": 5,
+        "count": 39,
+        "mean": 0.042947310347410256,
+        "median": 0.047662953073,
+        "negativeProbability": 0.20512820512820512,
+        "tail10": -0.051099947595399986
+      }
+    ],
+    "monotonicity": {
+      "adjacentMeanNonDecreasing": false,
+      "adjacentMeanViolations": 1,
+      "topNoWorseMean": true,
+      "topNoWorseTail10": false
+    },
+    "decision": {
+      "decision": "DROP_RESEARCH",
+      "replacementEligible": false
+    }
+  },
+  "decision": {
+    "decision": "DROP_RESEARCH",
+    "replacementEligible": false
+  }
+}

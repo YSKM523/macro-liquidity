@@ -11,3 +11,13 @@
 - Evidence limitation: both providers are frozen current-vintage research sources, not a historical-vintage/PIT reconstruction. The NY Fed result API describes published operation results; it does not prove when every historical row became visible to this research process.
 - Integrity: the final artifact must bind exact provider URLs/parameters, normalized rows, row/date ranges, provider hashes, and whole snapshot bytes.
 - Tuning declaration: `false`. Formula, 0.30/0.25/0.25/0.20 weights, state cutoffs, freshness rules, target, folds, bootstrap, decision gate, allowed decisions, and `replacementEligible=false` remain unchanged.
+
+## A-002 — Post-fetch SRF boundary correctness
+
+- Timing: independent review after v1 fetch commit `af45724`, before corrected v2 fetch and canonical report publication.
+- Defect: the official Repo results endpoint also contains historical temporary repo operations. The v1 parser aggregated every Overnight Repo since 2002, so `reserve-current-vintage-2026-07-22-v1` is not a valid SRF series.
+- Disposition: v1 and its accidentally generated result are preserved only as `INVALIDATED_BY_REVIEW` audit evidence and are never canonical inputs.
+- Correction: canonical NY Fed URL must start exactly at the official Standing Repo Facility launch, `2021-07-29`; parser and snapshot verifier reject any earlier `operationDate`.
+- Small-value exercises: retained because official operation results include them and the API exposes no unambiguous exercise flag. Their inclusion can overstate market-driven SRF demand and remains a disclosed limitation.
+- Corrective rerun: one v2 source fetch and one v2 report are permitted to repair chronology; this is not result-driven tuning.
+- Tuning declaration: `false`. Formula, weights, state thresholds, freshness, target, folds, bootstrap, decision gate, allowed decisions, and replacement eligibility are unchanged.

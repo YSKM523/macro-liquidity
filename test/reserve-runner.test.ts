@@ -9,21 +9,21 @@ const iso = (base: string, days: number) => new Date(Date.parse(`${base}T00:00:0
 
 async function fixture() {
   const ids = ['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCRRATE', 'SP500'];
-  const endDate = '2022-06-30';
-  const weekly = Array.from({ length: 130 }, (_, index) => ({ date: iso('2020-01-01', index * 7), value: 3_000_000 + index * 1_000 }));
-  const daily = Array.from({ length: 911 }, (_, index) => ({ date: iso('2020-01-01', index), value: 1 + index / 10_000 }));
+  const endDate = '2024-06-30';
+  const weekly = Array.from({ length: 235 }, (_, index) => ({ date: iso('2020-01-01', index * 7), value: 3_000_000 + index * 1_000 }));
+  const daily = Array.from({ length: 1_643 }, (_, index) => ({ date: iso('2020-01-01', index), value: 1 + index / 10_000 }));
   const series: any = {
     WRESBAL: weekly,
-    GDP: Array.from({ length: 11 }, (_, index) => ({ date: iso('2020-01-01', index * 91), value: 22_000 + index * 100 })),
+    GDP: Array.from({ length: 19 }, (_, index) => ({ date: iso('2020-01-01', index * 91), value: 22_000 + index * 100 })),
     SOFR: daily.map(row => ({ ...row, value: 1.01 + Number(row.value) / 100 })),
     IORB: daily.map(row => ({ ...row, value: 1.10 + Number(row.value) / 100 })),
     EFFR: daily.map(row => ({ ...row, value: 1.02 + Number(row.value) / 100 })),
     TGCRRATE: daily.map(row => ({ ...row, value: 1.00 + Number(row.value) / 100 })),
-    NYFED_SRF_ACCEPTED: daily.map(row => ({ ...row, value: indexMod(row.date, 7) === 0 ? 1 : 0 })),
+    NYFED_SRF_ACCEPTED: daily.filter(row => row.date >= '2021-07-29').map(row => ({ ...row, value: indexMod(row.date, 7) === 0 ? 1 : 0 })),
     SP500: daily.map((row, index) => ({ date: row.date, value: 3_000 + index })),
   };
   const fredUrls = Object.fromEntries(ids.map(id => [id, fredCsvUrl(id, endDate)]));
-  const snapshot = { schemaVersion: 1, snapshotId: 'fixture', evidenceClass: 'RESEARCH_CURRENT_VINTAGE', retrievedAt: '2022-06-30T12:00:00.000Z', source: 'FRED_AND_NYFED_CURRENT_VINTAGE', request: { startDate: '2002-01-01', endDate, fredUrls, nyFedUrl: nyFedRepoUrl('2002-01-01', endDate) }, series };
+  const snapshot = { schemaVersion: 2, snapshotId: 'fixture', evidenceClass: 'RESEARCH_CURRENT_VINTAGE', retrievedAt: '2024-06-30T12:00:00.000Z', source: 'FRED_AND_NYFED_CURRENT_VINTAGE', request: { fredStartDate: '2002-01-01', nyFedStartDate: '2021-07-29', endDate, fredUrls, nyFedUrl: nyFedRepoUrl('2021-07-29', endDate) }, series };
   const text = `${JSON.stringify(snapshot, null, 2)}\n`;
   const hashes = Object.fromEntries([...ids, 'NYFED_SRF_ACCEPTED'].map(id => [id, 'b'.repeat(64)]));
   return { snapshot, text, manifest: await buildReserveManifest(snapshot, text, hashes) };
@@ -38,7 +38,7 @@ describe('reserve research frozen runner', () => {
     const { snapshot, text, manifest } = await fixture();
     const report = await runReserveResearch(snapshot, text, manifest, { bootstrapIterations: 20 });
     expect(report).toMatchObject({
-      methodologyVersion: 'PR12_RESEARCH_V1_SOURCE_CORRECTED', evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
+      methodologyVersion: 'PR12_RESEARCH_V2_SRF_BOUNDARY', evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
       snapshotId: 'fixture', replacementEligible: false,
       sample: { weeklyCount: expect.any(Number), completeCount: expect.any(Number), scoredCount: expect.any(Number) },
       oos: { folds: expect.any(Array), decision: { replacementEligible: false } },
