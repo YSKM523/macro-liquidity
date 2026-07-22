@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "snapshotId": "netliq-current-vintage-2026-07-22",
+  "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+  "retrievedAt": "2026-07-22T15:09:46.800Z",
+  "snapshotSha256": "ffce5c984d606bac259adb8920f18b02e9a68d8e78bacaee521cf19178a36101",
+  "series": {
+    "WALCL": {
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=WALCL&cosd=2002-01-01",
+      "rowCount": 1231,
+      "firstDate": "2002-12-18",
+      "lastDate": "2026-07-15",
+      "sha256": "50f485a62c0e08b3eee8241942c768dce1a796f1c4d35da96e53335c3ff0879f"
+    },
+    "WDTGAL": {
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=WDTGAL&cosd=2002-01-01",
+      "rowCount": 1231,
+      "firstDate": "2002-12-18",
+      "lastDate": "2026-07-15",
+      "sha256": "b6d583aee36ec6f7816d937289d4bc5c1248379805040cc3345c828f2fa3654b"
+    },
+    "WTREGEN": {
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=WTREGEN&cosd=2002-01-01",
+      "rowCount": 1231,
+      "firstDate": "2002-12-18",
+      "lastDate": "2026-07-15",
+      "sha256": "7fbed1b9ce07b22e6a0dc9735a427191281957fcfd7efea95a0923c61792a3b4"
+    },
+    "RRPONTSYD": {
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=RRPONTSYD&cosd=2002-01-01",
+      "rowCount": 3287,
+      "firstDate": "2003-02-07",
+      "lastDate": "2026-07-21",
+      "sha256": "39acbdf9ac36d065b2998421b7a108ef0682390af3cf42f7709e133086941545"
+    },
+    "SP500": {
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2002-01-01",
+      "rowCount": 2512,
+      "firstDate": "2016-07-22",
+      "lastDate": "2026-07-21",
+      "sha256": "8f2900fba8d8d87cd447d3a17b6eb5da988bad4a4d88fcc843ffc6c5802580b1"
+    }
+  }
+}
