@@ -17,7 +17,7 @@
 | PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
-| PR-08 | 已完成（本地） | `07f7c81`–`9c43cdf` | append-only ALFRED vintage、event-time resolver、release override 与冻结正式 manifest |
+| PR-08 | 已完成（本地） | `07f7c81`–`9b02841` | append-only ALFRED vintage、惰性 event-time resolver、可复现 release override 与冻结正式 endpoint audit index |
 | PR-09～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1769,9 +1769,15 @@ feat: point-in-time observation storage
 - [x] ALFRED vintage schema 与 inclusive checkpoint
 - [x] `released_at` / `fetched_at` / `tradable_at` 与 release calendar override
 - [x] append-only raw observations、revision view 与原子激活
-- [x] event-time no-lookahead frame 与完整 configured-series manifest
-- [x] legacy 一次升级、PIT 正式快照和输入清单冻结
-- [x] 本地 migration、454 tests 与 TypeScript strict 验证（实现 commits `07f7c81..9c43cdf`）
+- [x] 惰性 event-time no-lookahead frame；`data_cutoff` / `tradable_at` 覆盖完整评分历史
+- [x] `snapshot_inputs` 冻结每序列 endpoint audit index；原始行 + `decision_at` + `release_resolution_at` 可重放完整评分历史
+- [x] release calendar 按 vintage 唯一选取版本，缺失/重叠 fail closed；override append-only 版本化并按固定 resolution cutoff 解析
+- [x] legacy 一次升级；任何既有 PIT 正式快照均冻结，包括异常 `data_run_id IS NULL` 行
+- [x] 本地 fresh migration 首次应用与二次幂等检查、463 tests 与 TypeScript strict 验证（实现 commits `07f7c81..9b02841`）
+
+PR-08 已知限制：ALFRED 历史只提供 vintage 日期时仍使用保守日末发布时间；默认 next-weekday 规则尚未覆盖美股假日。resolver 不再保留全部 frame，但当前服务仍一次加载并排序全部原始 PIT 行。`snapshot_inputs` 仅是 endpoint audit index，不应被解释为全部评分行 manifest。这些限制留给 PR-09 的交易日历/执行引擎或独立的流式数据库读取改造，不在 PR-08 扩展模型公式、权重或阈值。
+
+PR-08 回滚：代码使用 `git revert 9b02841`（以及此前 PR-08 commits，若需整体撤回）；仅本地验证库可删除对应 `--persist-to` 临时目录后从 0001 重建。0008 尚未应用远程数据库；若未来已远程应用，不应回写或删除 append-only PIT 数据，应先停止新写入并以向前 migration 恢复兼容结构。
 
 ---
 
@@ -1888,7 +1894,7 @@ feat: model versioning, CI, staging, observability and backup
 - [x] 发布前数据无法读取
 - [x] 未来 vintage 无法进入历史信号
 - [x] 观察日与发布日期区分
-- [x] 每个快照可以列出完整输入
+- [x] 每个快照列出每序列 endpoint audit index，完整评分历史可由 raw + 两个时间 cutoff 重放
 - [x] 历史修订不会改变冻结快照
 
 ## 回测

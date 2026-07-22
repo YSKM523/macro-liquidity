@@ -29,9 +29,9 @@ flowchart LR
 
 - **单个 Cloudflare Worker** 托管前端(Workers Static Assets)、`/api/*` 接口和每日 `cron`。
 - **FRED = 宏观历史与模型逻辑的唯一真相源**；实时行情层按 Yahoo → Stooq（可用时）→ FRED 官方序列降级，只影响顶部读数和 live-stress、**不入库且不改变宏观分**。FRED 映射为 SPX=`SP500`、VIX=`VIXCLS`、DXY=`DTWEXBGS`、10Y=`DGS10`。每个结果分别携带实际 instrument/provider 的行情时间和抓取时间；无合法 provider 时间戳时不会拿抓取时间代替。
-- **D1**(SQLite)先按 `run_id` 保存逐序列尝试、兼容 staging 和 ALFRED vintage staging；全部校验通过后在一个 fenced 事务中更新兼容表 `observations`、追加 `observations_pit` 并切换唯一 ACTIVE run。失败 run 保留审计信息且不改变两张生产观测表。正式快照冻结完整 configured-series 输入清单，`cron` 每 3 小时增量更新 nowcast，正式历史只由全量 PIT 重建写入。
+- **D1**(SQLite)先按 `run_id` 保存逐序列尝试、兼容 staging 和 ALFRED vintage staging；全部校验通过后在一个 fenced 事务中更新兼容表 `observations`、追加 `observations_pit` 并切换唯一 ACTIVE run。失败 run 保留审计信息且不改变两张生产观测表。正式快照冻结完整 configured-series endpoint 索引，`cron` 每 3 小时增量更新 nowcast，正式历史只由全量 PIT 重建写入。
 
-Point-in-Time 层使用 ALFRED `output_type=3`，从最后 `vintage_date`（含）继续抓取新值与修订。原始 vintage 和正式 `snapshot_inputs` 均 append-only；同一 PIT 主键 checksum 冲突会让整批激活回滚。ALFRED 只保证 vintage 日期，因此历史发布日期保守取当天 `23:59:59Z`，同日实际抓到的值使用 HTTP 成功响应后的 `fetchedAt`，人工 override 在读取时生效且严格校验；默认可交易时间为之后下一个工作日 `14:30Z`。frame 的可交易时间会抬高到所有实际评分历史输入的最晚 `tradableAt`。该 weekday 规则尚不包含美股假日，PR-09 才会加入交易日历和执行引擎。
+Point-in-Time 层使用 ALFRED `output_type=3`，从最后 `vintage_date`（含）继续抓取新值与修订。原始 vintage、正式 `snapshot_inputs` 和 release override 均 append-only；override 以 `(series_id, vintage_date, created_at)` 版本化，并按快照固定的 `release_resolution_at` 选择当时已创建的最新版本。同一 PIT 主键 checksum 冲突会让整批激活回滚。`snapshot_inputs` 是每个 configured series 的 endpoint audit index，并不是全部评分历史行；完整评分历史由原始 vintage、`decision_at` 与 `release_resolution_at` 重放。ALFRED 只保证 vintage 日期，因此历史发布日期保守取当天 `23:59:59Z`，同日实际抓到的值使用 HTTP 成功响应后的 `fetchedAt`；默认可交易时间为之后下一个工作日 `14:30Z`。frame 的 `data_cutoff` 与可交易时间分别覆盖所有实际评分历史输入的最晚 `releasedAt` / `tradableAt`。该 weekday 规则尚不包含美股假日，PR-09 才会加入交易日历和执行引擎。
 
 ---
 
@@ -144,7 +144,7 @@ flowchart TD
 - **Cloudflare Worker**(TypeScript)+ **Workers Static Assets** + **D1**(SQLite)+ **Cron Triggers**
 - 数据:**FRED**(宏观与官方行情 fallback)+ **Yahoo / Stooq**(实时价格)
 - 前端:原生 HTML / CSS / JS + 自托管 [Lightweight-Charts](https://github.com/tradingview/lightweight-charts),仿 Stripe 纯色风格
-- 测试:**Vitest**(454 测试，覆盖模型逻辑、原子摄取、PIT/vintage、冻结 manifest、provider fallback、锁与 API)
+- 测试:**Vitest**(463 测试，覆盖模型逻辑、原子摄取、PIT/vintage、冻结 endpoint audit index、provider fallback、锁与 API)
 - 部署:`wrangler`
 
 ---
