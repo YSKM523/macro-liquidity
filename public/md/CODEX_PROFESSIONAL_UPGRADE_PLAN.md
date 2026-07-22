@@ -19,7 +19,7 @@
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
 | PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
-| PR-10 | 待复审（本地候选） | `52b551a`–`38090b7` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 536 tests、TypeScript、migration twice 已通过，等待独立 review |
+| PR-10 | 待复审（本地候选） | `52b551a`–`ceb8b25` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现并修复首轮 review findings；31 files / 551 tests、TypeScript、migration twice 已通过，等待独立 rereview |
 | PR-11～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1826,7 +1826,7 @@ feat: portfolio backtest aligned with dashboard exposure tiers
 - [x] 同一窗口比较 100% SPX、平均 Beta 静态组合、prior-only 20-session vol target、prior-close 200DMA
 - [x] 全部组合共用 SOFR prior-date、费用、VIX 滑点与 incomplete gate
 - [x] 报告总收益、相对 Beta 静态组合的累计择时收益差、平均 Beta、波动、Sharpe、Sortino、最大回撤与持续期；不足样本返回 null
-- [x] fresh full 31 files / 536 tests、TypeScript strict、diff-check、local 0001–0009 migrations twice
+- [x] review-fix 后 fresh full 31 files / 551 tests、TypeScript strict、diff-check、local 0001–0009 migrations twice
 - [ ] independent task/spec + whole-branch review（完成后更新状态行）
 
 PR-10 已知限制：SPX 是不含股息的 FRED 指数收盘；历史 stress 仅用冻结周快照 VIX 水平 proxy，不复建完整实时四资产 stress overlay。20-session 波动目标和 200DMA 可借用同一 `as_of` cutoff 已可见的 evaluation-window 前价格作 warm-up，但净值/成本严格从策略首个执行日开始；若整个可见历史仍不足 20/200 条则持有现金。Sharpe/Sortino 使用日频已含现金与成本的组合收益，不另减无风险利率；无负收益或零波动时相应比率返回 null。没有独立交易所 calendar，仍由 SPX 实际行定义 session。
