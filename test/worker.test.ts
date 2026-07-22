@@ -24,13 +24,14 @@ const dbState = vi.hoisted(() => ({
   meta: {} as Record<string, string>,
   activeSnapshotState: 'FAILED' as 'PENDING' | 'SUCCEEDED' | 'FAILED',
   eventInputs: {
-    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
+    asOfCutoff: '2024-01-10T01:00:00.001Z',
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
     prices: [
-      { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500' },
-      { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500' },
+      { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
+      { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
     ],
-    vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
-    cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR' }],
+    vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
+    cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
   } as any,
 }));
 
@@ -63,6 +64,7 @@ vi.mock('../src/db', () => ({
 
 import worker from '../src/worker';
 import { runIngest } from '../src/service';
+import { loadEventBacktestInputs } from '../src/db';
 
 const env = {
   DB: {} as D1Database,
@@ -90,13 +92,14 @@ beforeEach(() => {
   dbState.meta = {};
   dbState.activeSnapshotState = 'FAILED';
   dbState.eventInputs = {
-    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
+    asOfCutoff: '2024-01-10T01:00:00.001Z',
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, recordedAt: '2024-01-09T00:00:00Z', dataRunId: 'run-a' }],
     prices: [
-      { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500' },
-      { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500' },
+      { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
+      { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' },
     ],
-    vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
-    cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR' }],
+    vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
+    cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
   };
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
@@ -163,7 +166,7 @@ describe('/api/admin/refresh contention', () => {
 
 describe('/api/backtest event-time performance', () => {
   it('adds event-time NAV while preserving diagnostics and marks weekly strategy legacy', async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/backtest'), env);
+    const response = await worker.fetch(new Request('https://example.test/api/backtest?as_of=2024-01-10T01%3A00%3A00.001Z'), env);
     const body = await response.json() as any;
     expect(response.status).toBe(200);
     expect(body.event_time.status).toBe('OK');
@@ -171,6 +174,11 @@ describe('/api/backtest event-time performance', () => {
     expect(body.horizons).toBeDefined();
     expect(body.factor_ic_spearman).toBeDefined();
     expect(body.strategy_long_flat.methodology).toBe('LEGACY_WEEKLY');
+    expect(body.event_time.provenance).toMatchObject({
+      revisionPolicy: 'APPEND_ONLY_AS_OF', responseReproducible: true,
+      asOfCutoff: '2024-01-10T01:00:00.001Z',
+    });
+    expect(vi.mocked(loadEventBacktestInputs)).toHaveBeenCalledWith(env.DB, '2024-01-10T01:00:00.001Z');
   });
 
   it('returns typed event-time DATA_INCOMPLETE instead of a 500 or zero return', async () => {
@@ -182,7 +190,16 @@ describe('/api/backtest event-time performance', () => {
     expect(body.event_time.reason).toMatch(/SOFR/i);
     expect(body.event_time.nav).toEqual([]);
     expect(body.event_time.totals).toEqual({ totalReturn: null, tradingCostRate: null, sessions: null });
-    expect(body.event_time.provenance.revisionPolicy).toBe('CURRENT_REVISION_MUTABLE');
+    expect(body.event_time.provenance.revisionPolicy).toBe('APPEND_ONLY_AS_OF');
+  });
+});
+
+describe('/api/robustness legacy methodology', () => {
+  it('marks the robustness strategy and caveat as legacy weekly', async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/robustness'), env);
+    const body = await response.json() as any;
+    expect(body.strategy.methodology).toBe('LEGACY_WEEKLY');
+    expect(body.caveats.join(' ')).toMatch(/LEGACY_WEEKLY/);
   });
 });
 

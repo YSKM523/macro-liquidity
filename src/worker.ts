@@ -199,10 +199,21 @@ export default {
       return json(await fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }));
     }
     if (p === '/api/backtest') {
-      const [rows, eventInputs] = await Promise.all([
-        loadBacktestRows(env.DB),
-        loadEventBacktestInputs(env.DB),
-      ]);
+      const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
+      let rows: any[];
+      let eventInputs: Awaited<ReturnType<typeof loadEventBacktestInputs>>;
+      try {
+        [rows, eventInputs] = await Promise.all([
+          loadBacktestRows(env.DB),
+          loadEventBacktestInputs(env.DB, requestedAsOf),
+        ]);
+      } catch (error) {
+        const message = String((error as any)?.message ?? error);
+        if (/^(?:invalid|future) backtest as_of$/i.test(message)) {
+          return json({ error: 'invalid_as_of', message }, 400);
+        }
+        throw error;
+      }
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));

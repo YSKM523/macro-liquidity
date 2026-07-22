@@ -77,7 +77,9 @@ export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade 
 export const EVENT_BACKTEST_ASSUMPTIONS = {
   executionPrice: 'FRED_SP500_INDEX_CLOSE',
   adjustedCloseSemantics: 'INDEX_CLOSE_NO_DIVIDENDS',
-  executionCloseUtc: '23:59:59Z',
+  earliestUsCloseEligibilityUtc: '17:00:00Z',
+  accountingCloseUtc: '23:59:59Z',
+  accountingTimestampSemantics: 'DAILY_ACCOUNTING_MARKER_NOT_EXCHANGE_TIMESTAMP',
   cashRate: 'SOFR',
   cashDayCount: 'ACT/360',
   cashFixingAvailability: 'PRIOR_DATE_ONLY',

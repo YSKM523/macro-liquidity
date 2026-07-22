@@ -408,9 +408,21 @@ export async function activateIngestRun(
            )
        ) THEN 1 ELSE json('active observation/latest PIT vintage mismatch') END AS pit_active_match`
     ),
+    // A single database clock value identifies the atomic revision set. D1
+    // exposes db.batch() transactionally, so readers observe either none or all
+    // rows carrying this instant; no application clock participates.
+    db.prepare(
+      `UPDATE ingest_runs
+       SET activated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE run_id=? AND state='RUNNING'
+         AND EXISTS (SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name='fred_ingest' AND lease.owner_run_id=?
+             AND unixepoch(lease.expires_at)>unixepoch('now'))`
+    ).bind(runId, runId),
     db.prepare(
       `INSERT INTO market_prices_daily
-         (symbol,date,close,adjusted_close,source,fetched_at,data_run_id)
+         (symbol,date,close,adjusted_close,source,fetched_at,data_run_id,
+          activation_run_id,activated_at,provenance_status)
        SELECT CASE active.series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END,
               active.date,active.value,active.value,
               COALESCE(provenance.source,'FRED:' || active.series_id),
@@ -418,8 +430,14 @@ export async function activateIngestRun(
                 (SELECT attempt.completed_at FROM ingest_series_attempts attempt
                  WHERE attempt.run_id=? AND attempt.series_id=active.series_id
                    AND attempt.status='SUCCEEDED'),?),
-              COALESCE(provenance.data_run_id,?)
+              provenance.data_run_id,target.run_id,target.activated_at,
+              CASE WHEN provenance.series_id IS NULL THEN 'LEGACY_NO_PIT'
+                   ELSE 'PIT_RAW' END
        FROM observations active
+       JOIN staging_observations staged
+         ON staged.run_id=? AND staged.series_id=active.series_id AND staged.date=active.date
+       JOIN ingest_runs target
+         ON target.run_id=? AND target.state='RUNNING' AND target.activated_at IS NOT NULL
        LEFT JOIN observations_pit provenance
          ON provenance.series_id=active.series_id
         AND provenance.observation_date=active.date
@@ -428,42 +446,51 @@ export async function activateIngestRun(
           SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
           WHERE candidate.series_id=active.series_id
             AND candidate.observation_date=active.date
-        )
+       )
        WHERE active.series_id IN ('SP500','VIXCLS')
-         AND EXISTS (SELECT 1 FROM ingest_runs target
-           WHERE target.run_id=? AND target.state='RUNNING')
          AND EXISTS (SELECT 1 FROM ingest_lock lease
            WHERE lease.lock_name='fred_ingest' AND lease.owner_run_id=?
              AND unixepoch(lease.expires_at)>unixepoch('now'))
-       ON CONFLICT(symbol,date) DO UPDATE SET
-         close=excluded.close,adjusted_close=excluded.adjusted_close,
-         source=excluded.source,fetched_at=excluded.fetched_at,data_run_id=excluded.data_run_id
-       WHERE market_prices_daily.close<>excluded.close
-          OR market_prices_daily.adjusted_close<>excluded.adjusted_close
-          OR (market_prices_daily.data_run_id='MIGRATION_0009_BACKFILL'
-            AND EXISTS (
-              SELECT 1 FROM observations_pit real
-              WHERE real.series_id=CASE excluded.symbol
-                    WHEN 'SPX' THEN 'SP500' ELSE 'VIXCLS' END
-                AND real.observation_date=excluded.date
-                AND real.value=excluded.close
-                AND real.vintage_date=(
-                  SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
-                  WHERE candidate.series_id=real.series_id
-                    AND candidate.observation_date=real.observation_date
-                )
-            ))`
+         AND NOT EXISTS (
+           SELECT 1 FROM market_prices_daily prior
+           WHERE prior.symbol=CASE active.series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END
+             AND prior.date=active.date
+             AND NOT EXISTS (
+               SELECT 1 FROM market_prices_daily newer
+               WHERE newer.symbol=prior.symbol AND newer.date=prior.date
+                 AND (julianday(newer.activated_at)>julianday(prior.activated_at)
+                   OR (julianday(newer.activated_at)=julianday(prior.activated_at)
+                     AND newer.activation_run_id>prior.activation_run_id))
+             )
+             AND prior.close=active.value AND prior.adjusted_close=active.value
+             AND prior.provenance_status=CASE WHEN provenance.series_id IS NULL
+                   THEN 'LEGACY_NO_PIT' ELSE 'PIT_RAW' END
+             AND (provenance.series_id IS NULL OR (
+               prior.source=provenance.source
+               AND julianday(prior.fetched_at)=julianday(provenance.fetched_at)
+               AND prior.data_run_id IS provenance.data_run_id
+             ))
+         )
+       ON CONFLICT(symbol,date,activation_run_id) DO NOTHING`
     ).bind(runId, completedAt, runId, runId, runId),
     db.prepare(
-      `INSERT INTO cash_rates_daily (rate_id,date,rate,source,fetched_at,data_run_id)
+      `INSERT INTO cash_rates_daily
+         (rate_id,date,rate,source,fetched_at,data_run_id,
+          activation_run_id,activated_at,provenance_status)
        SELECT 'SOFR',active.date,active.value,
               COALESCE(provenance.source,'FRED:SOFR'),
               COALESCE(provenance.fetched_at,
                 (SELECT attempt.completed_at FROM ingest_series_attempts attempt
                  WHERE attempt.run_id=? AND attempt.series_id=active.series_id
                    AND attempt.status='SUCCEEDED'),?),
-              COALESCE(provenance.data_run_id,?)
+              provenance.data_run_id,target.run_id,target.activated_at,
+              CASE WHEN provenance.series_id IS NULL THEN 'LEGACY_NO_PIT'
+                   ELSE 'PIT_RAW' END
        FROM observations active
+       JOIN staging_observations staged
+         ON staged.run_id=? AND staged.series_id=active.series_id AND staged.date=active.date
+       JOIN ingest_runs target
+         ON target.run_id=? AND target.state='RUNNING' AND target.activated_at IS NOT NULL
        LEFT JOIN observations_pit provenance
          ON provenance.series_id=active.series_id
         AND provenance.observation_date=active.date
@@ -472,29 +499,31 @@ export async function activateIngestRun(
           SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
           WHERE candidate.series_id=active.series_id
             AND candidate.observation_date=active.date
-        )
+       )
        WHERE active.series_id='SOFR'
-         AND EXISTS (SELECT 1 FROM ingest_runs target
-           WHERE target.run_id=? AND target.state='RUNNING')
          AND EXISTS (SELECT 1 FROM ingest_lock lease
            WHERE lease.lock_name='fred_ingest' AND lease.owner_run_id=?
              AND unixepoch(lease.expires_at)>unixepoch('now'))
-       ON CONFLICT(rate_id,date) DO UPDATE SET
-         rate=excluded.rate,source=excluded.source,
-         fetched_at=excluded.fetched_at,data_run_id=excluded.data_run_id
-       WHERE cash_rates_daily.rate<>excluded.rate
-          OR (cash_rates_daily.data_run_id='MIGRATION_0009_BACKFILL'
-            AND EXISTS (
-              SELECT 1 FROM observations_pit real
-              WHERE real.series_id='SOFR'
-                AND real.observation_date=excluded.date
-                AND real.value=excluded.rate
-                AND real.vintage_date=(
-                  SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
-                  WHERE candidate.series_id=real.series_id
-                    AND candidate.observation_date=real.observation_date
-                )
-            ))`
+         AND NOT EXISTS (
+           SELECT 1 FROM cash_rates_daily prior
+           WHERE prior.rate_id='SOFR' AND prior.date=active.date
+             AND NOT EXISTS (
+               SELECT 1 FROM cash_rates_daily newer
+               WHERE newer.rate_id=prior.rate_id AND newer.date=prior.date
+                 AND (julianday(newer.activated_at)>julianday(prior.activated_at)
+                   OR (julianday(newer.activated_at)=julianday(prior.activated_at)
+                     AND newer.activation_run_id>prior.activation_run_id))
+             )
+             AND prior.rate=active.value
+             AND prior.provenance_status=CASE WHEN provenance.series_id IS NULL
+                   THEN 'LEGACY_NO_PIT' ELSE 'PIT_RAW' END
+             AND (provenance.series_id IS NULL OR (
+               prior.source=provenance.source
+               AND julianday(prior.fetched_at)=julianday(provenance.fetched_at)
+               AND prior.data_run_id IS provenance.data_run_id
+             ))
+         )
+       ON CONFLICT(rate_id,date,activation_run_id) DO NOTHING`
     ).bind(runId, completedAt, runId, runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET state = 'SUPERSEDED'
@@ -542,7 +571,7 @@ export async function activateIngestRun(
       `ingest run ${runId} activation lease/state fence rejected; target must be RUNNING: ${String((error as any)?.message ?? error)}`,
     );
   });
-  if (Number((results[7]?.meta as any)?.changes ?? 0) !== 1) {
+  if (Number((results[8]?.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest run ${runId} must be RUNNING before activation`);
   }
 }
@@ -874,14 +903,15 @@ export async function upsertOfficialSnapshot(
     const placeholders = Array.from({ length: 34 }, () => '?').join(',');
     const statements: D1PreparedStatement[] = [db.prepare(
       `INSERT INTO model_snapshot_weekly
-       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status)
-       SELECT ${placeholders}
+       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,recorded_at)
+       SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
        WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
          AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
        ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,${SNAPSHOT_UPDATE},
          data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
          decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,
-         release_resolution_at=excluded.release_resolution_at,pit_status='PIT'
+         release_resolution_at=excluded.release_resolution_at,pit_status='PIT',
+         recorded_at=excluded.recorded_at
        WHERE model_snapshot_weekly.pit_status='LEGACY_NON_PIT'`,
     ).bind(
       s.date, week, ...snapshotValues(s, spx), provenance.dataRunId, provenance.dataCutoff,
@@ -927,15 +957,15 @@ export async function upsertOfficialSnapshot(
   }
   const placeholders = Array.from({ length: 28 }, () => '?').join(',');
   const result = await db.prepare(
-    `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS})
-     SELECT ${placeholders}
+    `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS}, recorded_at)
+     SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE EXISTS (
        SELECT 1 FROM ingest_lock lease
        WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
          AND unixepoch(lease.expires_at) > unixepoch('now')
      )
      ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,
-       ${SNAPSHOT_UPDATE}`
+       ${SNAPSHOT_UPDATE},recorded_at=excluded.recorded_at`
   ).bind(s.date, decisionWeek(s.date), ...snapshotValues(s, spx), runId).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest lease fence rejected official snapshot write for run ${runId}`);
@@ -1041,44 +1071,105 @@ export async function loadBacktestRows(db: D1Database): Promise<any[]> {
   return rs.results ?? [];
 }
 
-export async function loadEventBacktestInputs(db: D1Database): Promise<EventBacktestInputs> {
+export async function loadEventBacktestInputs(
+  db: D1Database,
+  requestedAsOf?: string,
+): Promise<EventBacktestInputs> {
+  const clock = await db.prepare(
+    `WITH clock AS (SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now') AS db_now)
+     SELECT db_now,CASE WHEN ? IS NULL THEN db_now ELSE ? END AS cutoff FROM clock`,
+  ).bind(requestedAsOf ?? null, requestedAsOf ?? null)
+    .first<{ db_now: string; cutoff: string }>();
+  if (!clock) throw new Error('backtest database clock unavailable');
+  requireIsoTimestamp(clock.db_now, 'backtest database now');
+  try {
+    requireIsoTimestamp(clock.cutoff, 'backtest as_of');
+  } catch {
+    throw new Error('invalid backtest as_of');
+  }
+  if (compareIsoTimestamps(clock.cutoff, clock.db_now) > 0) {
+    throw new Error('future backtest as_of');
+  }
+  const cutoff = clock.cutoff;
   const [signalRows, marketRows, cashRows] = await Promise.all([
     db.prepare(
-      `SELECT date AS signal_date,decision_at,tradable_at,score
+      `SELECT date AS signal_date,decision_at,tradable_at,score,recorded_at,data_run_id
        FROM model_snapshot_weekly
        WHERE decision_status='OK' AND pit_status='PIT'
          AND decision_at IS NOT NULL AND tradable_at IS NOT NULL AND score IS NOT NULL
+         AND recorded_at IS NOT NULL AND julianday(recorded_at)<julianday(?)
        ORDER BY julianday(decision_at),date`,
-    ).all<{ signal_date: string; decision_at: string; tradable_at: string; score: number }>(),
+    ).bind(cutoff).all<{
+      signal_date: string; decision_at: string; tradable_at: string; score: number;
+      recorded_at: string; data_run_id: string | null;
+    }>(),
     db.prepare(
-      `SELECT symbol,date,adjusted_close,source,fetched_at,data_run_id
-       FROM market_prices_daily WHERE symbol IN ('SPX','VIX')
-       ORDER BY date,symbol`,
-    ).all<{ symbol: 'SPX' | 'VIX'; date: string; adjusted_close: number; source: string; fetched_at: string; data_run_id: string }>(),
+      `WITH eligible AS (
+         SELECT symbol,date,adjusted_close,source,fetched_at,data_run_id,
+                activation_run_id,activated_at,provenance_status,
+                ROW_NUMBER() OVER (
+                  PARTITION BY symbol,date
+                  ORDER BY julianday(activated_at) DESC,activation_run_id DESC
+                ) AS revision_rank
+         FROM market_prices_daily
+         WHERE symbol IN ('SPX','VIX') AND julianday(activated_at)<julianday(?)
+       )
+       SELECT symbol,date,adjusted_close,source,fetched_at,data_run_id,
+              activation_run_id,activated_at,provenance_status
+       FROM eligible WHERE revision_rank=1 ORDER BY date,symbol`,
+    ).bind(cutoff).all<{
+      symbol: 'SPX' | 'VIX'; date: string; adjusted_close: number; source: string;
+      fetched_at: string; data_run_id: string | null; activation_run_id: string;
+      activated_at: string; provenance_status: 'PIT_RAW' | 'SYNTHETIC_BACKFILL' | 'LEGACY_NO_PIT';
+    }>(),
     db.prepare(
-      `SELECT date,rate,source,fetched_at,data_run_id FROM cash_rates_daily
-       WHERE rate_id='SOFR' ORDER BY date`,
-    ).all<{ date: string; rate: number; source: string; fetched_at: string; data_run_id: string }>(),
+      `WITH eligible AS (
+         SELECT date,rate,source,fetched_at,data_run_id,activation_run_id,
+                activated_at,provenance_status,
+                ROW_NUMBER() OVER (
+                  PARTITION BY rate_id,date
+                  ORDER BY julianday(activated_at) DESC,activation_run_id DESC
+                ) AS revision_rank
+         FROM cash_rates_daily
+         WHERE rate_id='SOFR' AND julianday(activated_at)<julianday(?)
+       )
+       SELECT date,rate,source,fetched_at,data_run_id,activation_run_id,
+              activated_at,provenance_status
+       FROM eligible WHERE revision_rank=1 ORDER BY date`,
+    ).bind(cutoff).all<{
+      date: string; rate: number; source: string; fetched_at: string;
+      data_run_id: string | null; activation_run_id: string; activated_at: string;
+      provenance_status: 'PIT_RAW' | 'SYNTHETIC_BACKFILL' | 'LEGACY_NO_PIT';
+    }>(),
   ]);
   const markets = marketRows.results ?? [];
   return {
+    asOfCutoff: cutoff,
     signals: (signalRows.results ?? []).map(row => ({
       signalDate: row.signal_date,
       decisionAt: row.decision_at,
       tradableAt: row.tradable_at,
       score: row.score,
+      recordedAt: row.recorded_at,
+      dataRunId: row.data_run_id ?? undefined,
     })),
     prices: markets.filter(row => row.symbol === 'SPX').map(row => ({
       date: row.date, adjustedClose: row.adjusted_close, source: row.source,
-      fetchedAt: row.fetched_at, dataRunId: row.data_run_id,
+      fetchedAt: row.fetched_at, dataRunId: row.data_run_id ?? undefined,
+      activationRunId: row.activation_run_id, activatedAt: row.activated_at,
+      provenanceStatus: row.provenance_status,
     })),
     vix: markets.filter(row => row.symbol === 'VIX').map(row => ({
       date: row.date, value: row.adjusted_close, source: row.source,
-      fetchedAt: row.fetched_at, dataRunId: row.data_run_id,
+      fetchedAt: row.fetched_at, dataRunId: row.data_run_id ?? undefined,
+      activationRunId: row.activation_run_id, activatedAt: row.activated_at,
+      provenanceStatus: row.provenance_status,
     })),
     cashRates: (cashRows.results ?? []).map(row => ({
       date: row.date, rate: row.rate, source: row.source,
-      fetchedAt: row.fetched_at, dataRunId: row.data_run_id,
+      fetchedAt: row.fetched_at, dataRunId: row.data_run_id ?? undefined,
+      activationRunId: row.activation_run_id, activatedAt: row.activated_at,
+      provenanceStatus: row.provenance_status,
     })),
   };
 }

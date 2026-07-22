@@ -6,13 +6,15 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ### PR-09 — Event-time daily backtest
 
-- Added `market_prices_daily` and `cash_rates_daily` with strict source/fetch/run provenance, an explicitly synthetic auditable local backfill from existing SP500/VIXCLS/SOFR observations, and correction-aware materialization from the latest matching PIT vintage inside the ingest activation fence.
-- Scheduled frozen official `OK`/`PIT` signals at the first observed SPX close strictly after `tradable_at`; same-close events collapse to the latest `decision_at`, and late signals remain explicitly unexecuted.
+- Added append-only revisioned `market_prices_daily` and `cash_rates_daily` with strict source/fetch/run/activation provenance, update/delete guards, an explicitly synthetic auditable local backfill, and correction-aware materialization from the latest matching PIT vintage inside the ingest activation fence. Activation touches only the current staging scope; unchanged inclusive replays do not duplicate history.
+- Added D1 `recorded_at` for official signals and one D1 `activated_at` shared by every revision in an atomic activation. `/api/backtest?as_of=` resolves signals and SPX/VIX/SOFR with one canonical strict-visibility cutoff; equal-millisecond rows are conservatively deferred.
+- Scheduled frozen official `OK`/`PIT` signals against a conservative `17:00:00Z` earliest-US-close eligibility bound. `23:59:59Z` remains only a daily accounting marker, not an exchange timestamp; same-close events collapse to the latest `decision_at`, and late signals remain explicitly unexecuted.
 - Added daily close-to-close NAV with SOFR ACT/360 carry, 1 bp commission, 2 bps base slippage, conservative 3 bps high/stale/missing-VIX slippage, and SOFR plus 100 bps financing support above 100% exposure.
 - Made missing/stale SOFR and insufficient sessions return typed `DATA_INCOMPLETE` with null total performance, while retaining the old weekly long/flat output as `LEGACY_WEEKLY` diagnostics.
 - Exposed event-time assumptions and incomplete-data reasons in `/api/backtest` and the dashboard without changing Champion formulas, weights, thresholds, hysteresis, or snapshot channels.
 - Made `DATA_INCOMPLETE` erase all partial NAV/cost/session performance, added same-close superseded-signal audit rows, and rejected active/latest-PIT value mismatches inside the activation transaction.
-- Labeled event-time inputs `CURRENT_REVISION_MUTABLE` with a compact source/run/synthetic/max-fetch cutoff summary and `responseReproducible=false`; future FRED corrections can change historical results because the response payload is not frozen.
+- Labeled formal inputs `APPEND_ONLY_AS_OF` with `responseReproducible=true`, `asOfCutoff`, max fetch time, source/source-run/activation-run counts, and fail-closed `DATA_INCOMPLETE` handling for synthetic, legacy/no-PIT, missing activation, or missing provenance rows.
+- Added `methodology: LEGACY_WEEKLY` to the robustness strategy object and caveats, matching the existing weekly backtest compatibility label.
 - Added local-only migration `0009_event_time_backtest.sql`; no deploy, remote D1 access, benchmark, exposure-tier, or tail-metric work was performed.
 
 ### PR-08 — Point-in-time observation storage

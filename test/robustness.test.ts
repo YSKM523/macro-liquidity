@@ -120,11 +120,13 @@ describe('runRobustness', () => {
     expect(r.ic.bootstrap.iters).toBe(200);
   });
   it('strategy stats present and in range', () => {
+    expect(r.strategy.methodology).toBe('LEGACY_WEEKLY');
     expect(r.strategy.max_drawdown).toBeGreaterThanOrEqual(0);
     expect(r.strategy.max_drawdown).toBeLessThanOrEqual(1);
     expect(r.strategy.turnover_per_period).toBeGreaterThanOrEqual(0);
     expect(r.strategy.turnover_per_period).toBeLessThanOrEqual(1);
     expect(r.strategy.sharpe.ci_lo).toBeLessThanOrEqual(r.strategy.sharpe.ci_hi);
+    expect(r.caveats.join(' ')).toContain('LEGACY_WEEKLY');
   });
   it('reproducible (fixed default seed)', () => {
     expect(runRobustness(bigSnaps(300), { iters: 200 })).toEqual(r);

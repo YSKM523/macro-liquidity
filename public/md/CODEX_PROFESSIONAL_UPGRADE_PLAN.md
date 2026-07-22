@@ -18,7 +18,7 @@
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
-| PR-09 | 已完成（本地） | `0764210`–`8d38e5b` | event-time 首个可交易日收盘、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 504 tests |
+| PR-09 | 待复审（本地候选） | `0764210`–`HEAD` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 517 tests + TypeScript strict 已通过，final rereview 待候选提交 |
 | PR-10～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1794,18 +1794,20 @@ refactor: event-time backtest engine
 
 内容：
 
-- [x] BT-01：正式 PIT 信号按 `tradable_at` 后首个实际日收盘执行；同收盘取最新 decision，末端信号显式未执行
-- [x] BT-02：SPX/VIX 日频表、SOFR 现金表、既有 observations 可审计 backfill 与 ingest activation 原子物化
+- [x] BT-01：正式 PIT 信号按 `17:00Z` 保守最早收盘 eligibility 选择同日/下一实际 SPX 行；`23:59:59Z` 仅为 accounting marker；同执行日取最新 decision，末端信号显式未执行
+- [x] BT-02：SPX/VIX 日频表、SOFR 现金表、既有 observations 可审计 synthetic backfill、append-only revisions 与 scoped ingest activation 原子物化
 - [x] BT-04：日频净值、SOFR ACT/360、手续费/滑点、高波动额外滑点与 >100% 融资支持
-- [x] `/api/backtest` 提供正式 `event_time` 与 typed `DATA_INCOMPLETE`；旧周频策略标记 `LEGACY_WEEKLY`
-- [x] 页面披露执行时间、现金、成本、VIX 保守政策与 legacy/event-time 区别
-- [x] fresh 0001–0009 migration 与二次 no-op、29 files / 504 tests、TypeScript strict、diff-check
+- [x] `/api/backtest?as_of=` 使用同一个 D1 strict-visibility cutoff 提供 `APPEND_ONLY_AS_OF` 正式 `event_time` 与 typed `DATA_INCOMPLETE`；旧周频与 robustness strategy 均标记 `LEGACY_WEEKLY`
+- [x] 页面披露 eligibility/accounting 区别、strict cutoff、source/run provenance、现金、成本、VIX 保守政策与 legacy/event-time 区别
+- [x] 当前候选 head 的 29 files / 517 tests、TypeScript strict 与 diff-check
+- [x] fresh local 0001–0009 migration 首次全部成功，紧接二次返回 `No migrations to apply!`
+- [ ] 当前候选提交的 review package 与 final rereview
 - [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）
 - [ ] BT-05：公平基准与尾部指标（PR-10）
 
-PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，NAV 为空且全部绩效 totals 为 null。API 明确标记 `CURRENT_REVISION_MUTABLE` / `responseReproducible=false`：未来 FRED correction 会改变既往回测；raw PIT 可审计重建，但当前 payload 未冻结完整输入。
+PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。全年统一 `17:00Z` 只是不会晚于任何正常/early-close session 的保守 eligibility lower bound，并非真实交易所收盘时间。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，NAV 为空且全部绩效 totals 为 null。Synthetic migration backfill 与 legacy/no-PIT rows 仅供审计，formal gate 会保持 `DATA_INCOMPLETE`，直到对应日期取得真实 PIT provenance；append-only correction 可通过相同 `as_of` cutoff 重放旧结果。
 
-PR-09 回滚：完整本地代码可从 PR-09 base `37fd6c4` 对后续提交做单独 revert；0009 仅在本地临时数据库验证且未部署。若未来已应用到共享数据库，不应直接删除新增表，应先停止依赖写入并用向前 migration 迁移/停用；本地验证库可丢弃对应临时 `--persist-to` 目录后从 0001 重建。
+PR-09 回滚：完整本地代码可从 PR-09 base `37fd6c4` 对 reviewed head 做单独 revert；0009 仅在本地临时数据库验证且未部署。若未来已应用到共享数据库，不应删除/更新 append-only revision 表或绕过 triggers；应先停止依赖写入/读取，再以向前 migration 停用或迁移结构。本地验证库可丢弃对应临时 `--persist-to` 目录后从 0001 重建。
 
 ---
 

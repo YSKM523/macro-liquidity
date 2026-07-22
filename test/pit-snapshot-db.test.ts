@@ -55,9 +55,10 @@ describe('official PIT snapshot persistence', () => {
     };
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, provenance)).resolves.toBe('INSERTED');
     expect(await db.prepare('SELECT COUNT(*) AS n FROM snapshot_inputs').first()).toEqual({ n: SERIES_IDS.length });
-    expect(await db.prepare('SELECT data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status FROM model_snapshot_weekly').first())
-      .toEqual({ data_run_id: 'run-1', data_cutoff: provenance.dataCutoff, decision_at: provenance.decisionAt,
-        tradable_at: provenance.tradableAt, release_resolution_at: provenance.releaseResolutionAt, pit_status: 'PIT' });
+    const stored = await db.prepare('SELECT data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,recorded_at FROM model_snapshot_weekly').first<any>();
+    expect(stored).toMatchObject({ data_run_id: 'run-1', data_cutoff: provenance.dataCutoff, decision_at: provenance.decisionAt,
+      tradable_at: provenance.tradableAt, release_resolution_at: provenance.releaseResolutionAt, pit_status: 'PIT' });
+    expect(stored.recorded_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/);
 
     await expect(upsertOfficialSnapshot(db, 'run-1', { ...snapshot, score: 1 }, 1, {
       ...provenance, dataCutoff: '2024-01-09T00:00:00Z',

@@ -163,8 +163,12 @@ describe('static UI assets', () => {
     expect(js).toContain("event.status === 'DATA_INCOMPLETE'");
     expect(js).toContain('数据不完整，不展示绩效');
     expect(js).toContain('revisionPolicy');
+    expect(js).toContain('APPEND_ONLY_AS_OF');
+    expect(js).toContain('asOfCutoff');
     expect(js).toContain('maxFetchedAt');
-    expect(js).toContain('当前响应不可独立复现');
+    expect(js).toContain('响应可按同一 cutoff 重放');
+    expect(js).toContain('17:00:00Z');
+    expect(js).not.toContain('当前响应不可独立复现');
     expect(js).toContain('执行 / 同收盘替换 / 末端未执行');
     expect(js).not.toMatch(/assumptions\.[A-Za-z]+\s*\?\?\s*\d/);
   });

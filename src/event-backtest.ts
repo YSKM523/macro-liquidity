@@ -7,6 +7,8 @@ export interface EventSignal {
   tradableAt: string;
   score: number;
   targetExposure?: number;
+  recordedAt?: string;
+  dataRunId?: string;
 }
 
 export interface DailyMarketPrice {
@@ -15,10 +17,16 @@ export interface DailyMarketPrice {
   source: string;
   fetchedAt?: string;
   dataRunId?: string;
+  activationRunId?: string;
+  activatedAt?: string;
+  provenanceStatus?: DailyInputProvenanceStatus;
 }
+
+export type DailyInputProvenanceStatus = 'PIT_RAW' | 'SYNTHETIC_BACKFILL' | 'LEGACY_NO_PIT';
 
 export interface ScheduledExecution extends EventSignal {
   executionDate: string;
+  eligibilityAt: string;
   executionAt: string;
   price: number;
   oldExposure: number;
@@ -42,6 +50,9 @@ export interface DailyVix {
   source: string;
   fetchedAt?: string;
   dataRunId?: string;
+  activationRunId?: string;
+  activatedAt?: string;
+  provenanceStatus?: DailyInputProvenanceStatus;
 }
 
 export interface DailyCashRate {
@@ -50,9 +61,13 @@ export interface DailyCashRate {
   source: string;
   fetchedAt?: string;
   dataRunId?: string;
+  activationRunId?: string;
+  activatedAt?: string;
+  provenanceStatus?: DailyInputProvenanceStatus;
 }
 
 export interface EventBacktestInputs {
+  asOfCutoff?: string;
   signals: EventSignal[];
   prices: DailyMarketPrice[];
   vix: DailyVix[];
@@ -83,11 +98,13 @@ export interface EventBacktestResult {
 }
 
 export interface InputProvenance {
-  revisionPolicy: 'CURRENT_REVISION_MUTABLE';
-  responseReproducible: false;
+  revisionPolicy: 'APPEND_ONLY_AS_OF';
+  responseReproducible: boolean;
+  asOfCutoff: string | null;
   maxFetchedAt: string | null;
   sourceLabels: string[];
   dataRunCount: number;
+  revisionRunCount: number;
   containsSynthetic: boolean;
 }
 
@@ -107,8 +124,13 @@ export function scheduleExecutions(
     requireDate(row.date, 'market date');
     if (!Number.isFinite(row.adjustedClose) || row.adjustedClose <= 0) throw new Error('invalid market price');
     if (!row.source) throw new Error('missing market source');
-    const executionAt = `${row.date}T23:59:59Z`;
-    return { ...row, executionAt, executionMs: isoTimestampMs(executionAt, 'executionAt') };
+    const eligibilityAt = `${row.date}T${EVENT_BACKTEST_ASSUMPTIONS.earliestUsCloseEligibilityUtc}`;
+    const executionAt = `${row.date}T${EVENT_BACKTEST_ASSUMPTIONS.accountingCloseUtc}`;
+    return {
+      ...row, eligibilityAt, executionAt,
+      eligibilityMs: isoTimestampMs(eligibilityAt, 'eligibilityAt'),
+      executionMs: isoTimestampMs(executionAt, 'executionAt'),
+    };
   }).sort((a, b) => a.executionMs - b.executionMs);
   for (let index = 1; index < prices.length; index++) {
     if (prices[index - 1].date === prices[index].date) throw new Error('duplicate market session');
@@ -130,7 +152,7 @@ export function scheduleExecutions(
   const unexecuted: UnexecutedSignal[] = [];
   const superseded: ExecutionSchedule['superseded'] = [];
   for (const candidate of validated) {
-    const price = prices.find(row => row.executionMs > candidate.tradableMs);
+    const price = prices.find(row => row.eligibilityMs > candidate.tradableMs);
     if (!price) {
       unexecuted.push({ ...candidate.signal, reason: 'NO_CLOSE_AFTER_TRADABLE_AT' });
       continue;
@@ -154,6 +176,7 @@ export function scheduleExecutions(
     executions.push({
       ...candidate.signal,
       executionDate: price.date,
+      eligibilityAt: price.eligibilityAt,
       executionAt: price.executionAt,
       price: price.adjustedClose,
       oldExposure: exposure,
@@ -229,13 +252,42 @@ function inputProvenance(inputs: EventBacktestInputs): InputProvenance {
     const ms = isoTimestampMs(row.fetchedAt, 'backtest input fetchedAt');
     if (ms > maxMs) { maxMs = ms; maxFetchedAt = row.fetchedAt; }
   }
-  const runIds = new Set(rows.map(row => row.dataRunId).filter((value): value is string => Boolean(value)));
+  const runIds = new Set([
+    ...rows.map(row => row.dataRunId), ...inputs.signals.map(signal => signal.dataRunId),
+  ].filter((value): value is string => Boolean(value)));
+  const revisionRunIds = new Set(rows.map(row => row.activationRunId)
+    .filter((value): value is string => Boolean(value)));
+  let asOfCutoff = inputs.asOfCutoff ?? null;
+  if (asOfCutoff) isoTimestampMs(asOfCutoff, 'backtest asOfCutoff');
   return {
-    revisionPolicy: 'CURRENT_REVISION_MUTABLE', responseReproducible: false, maxFetchedAt,
+    revisionPolicy: 'APPEND_ONLY_AS_OF', responseReproducible: false, asOfCutoff, maxFetchedAt,
     sourceLabels: [...new Set(rows.map(row => row.source))].sort(),
     dataRunCount: runIds.size,
-    containsSynthetic: runIds.has('MIGRATION_0009_BACKFILL'),
+    revisionRunCount: revisionRunIds.size,
+    containsSynthetic: rows.some(row => row.provenanceStatus === 'SYNTHETIC_BACKFILL'),
   };
+}
+
+function formalProvenanceIssue(inputs: EventBacktestInputs, provenance: InputProvenance): string | null {
+  if (!provenance.asOfCutoff) return 'missing as-of cutoff provenance';
+  const cutoffMs = isoTimestampMs(provenance.asOfCutoff, 'backtest asOfCutoff');
+  for (const signal of inputs.signals) {
+    if (!signal.recordedAt || !signal.dataRunId) return 'missing official signal provenance';
+    if (isoTimestampMs(signal.recordedAt, 'signal recordedAt') >= cutoffMs) {
+      return 'signal not visible strictly before as-of cutoff';
+    }
+  }
+  for (const row of [...inputs.prices, ...inputs.vix, ...inputs.cashRates]) {
+    if (!row.fetchedAt || !row.dataRunId || !row.activationRunId) return 'missing daily input provenance';
+    if (!row.activatedAt) return 'missing daily input activation time';
+    if (isoTimestampMs(row.activatedAt, 'daily input activatedAt') >= cutoffMs) {
+      return 'daily input not visible strictly before as-of cutoff';
+    }
+    if (row.provenanceStatus === 'SYNTHETIC_BACKFILL') return 'synthetic backfill is not formal input';
+    if (row.provenanceStatus === 'LEGACY_NO_PIT') return 'legacy input without PIT provenance';
+    if (row.provenanceStatus !== 'PIT_RAW') return 'missing daily input provenance status';
+  }
+  return null;
 }
 
 export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktestResult {
@@ -245,6 +297,9 @@ export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktest
   const vix = validateDatedSeries(inputs.vix, row => row.value, 'VIX');
   if (vix.some(row => row.value < 0)) throw new Error('invalid VIX value');
   const cashRates = validateDatedSeries(inputs.cashRates, row => row.rate, 'SOFR');
+  const provenanceIssue = formalProvenanceIssue(inputs, provenance);
+  if (provenanceIssue) return incomplete(provenanceIssue, schedule, provenance);
+  provenance.responseReproducible = true;
   if (schedule.executions.length === 0) return incomplete('no executable PIT signal', schedule, provenance);
 
   const executionByDate = new Map(schedule.executions.map(execution => [execution.executionDate, execution]));

@@ -679,10 +679,18 @@ function renderEventBacktest(result) {
   const provenance = event.provenance || {};
   const assumption = (value) => value == null ? '—' : value;
   const disclosure = `<div class="rb-sub">正式绩效 · event-time</div>`
-    + `<p class="rb-note">日频收盘执行：tradable_at 之后首个 SPX 23:59:59Z 收盘；周频信号不等于执行日。</p>`
+    + `<p class="rb-note">日频收盘执行：只有 tradable_at 严格早于当日 17:00:00Z 保守最早美股收盘界线，才使用该日实际 SPX 日线；等于或晚于界线则等待下一条实际日线。23:59:59Z 只是日频记账标记，不是交易所实际收盘时间戳。</p>`
     + `<p class="rb-note">现金：SOFR ACT/360（仅使用区间起点之前日期的已知 fixing）· 手续费 ${assumption(assumptions.commissionBps)}bp · 基础滑点 ${assumption(assumptions.baseSlippageBps)}bp · 高波动额外滑点 ${assumption(assumptions.highVolExtraSlippageBps)}bp（VIX≥${assumption(assumptions.vixStressLevel)}，陈旧/缺失同样保守计入）。</p>`
     + `<p class="rb-note">超过 100% 敞口：SOFR + ${assumption(assumptions.financingSpreadBps)}bp 融资；SPX adjusted_close 为 FRED 指数收盘，不含股息。</p>`;
-  const provenanceNote = `<p class="rb-note">输入版本：${rbEsc(provenance.revisionPolicy || '—')} · cutoff ${rbEsc(provenance.maxFetchedAt || '—')} · 当前响应不可独立复现（未来 FRED correction 会改变历史结果）。</p>`;
+  const reproducible = provenance.revisionPolicy === 'APPEND_ONLY_AS_OF'
+    && provenance.responseReproducible === true;
+  const provenanceNote = `<p class="rb-note">输入版本：${rbEsc(provenance.revisionPolicy || '—')}`
+    + ` · as_of cutoff ${rbEsc(provenance.asOfCutoff || '—')}`
+    + ` · max fetched ${rbEsc(provenance.maxFetchedAt || '—')}`
+    + ` · sources ${rbEsc((provenance.sourceLabels || []).join(', ') || '—')}`
+    + ` · source runs ${assumption(provenance.dataRunCount)}`
+    + ` · activation runs ${assumption(provenance.revisionRunCount)}`
+    + ` · ${reproducible ? '响应可按同一 cutoff 重放' : 'provenance 不完整，正式绩效关闭'}。</p>`;
   const legacy = result.strategy_long_flat && result.strategy_long_flat.methodology === 'LEGACY_WEEKLY'
     ? '<p class="rb-note">旧 weekly long/flat 仅保留为 LEGACY_WEEKLY 诊断，不代表正式绩效。</p>'
     : '';

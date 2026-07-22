@@ -124,7 +124,7 @@ describe('official and nowcast snapshot channels', () => {
     });
     const db = await mf.getD1Database('DB') as unknown as D1Database;
     const extraColumn = channel === 'official'
-      ? 'decision_week TEXT UNIQUE'
+      ? 'decision_week TEXT UNIQUE, recorded_at TEXT'
       : 'channel_status TEXT';
     const table = channel === 'official' ? 'model_snapshot_weekly' : 'nowcast_snapshot_daily';
     await db.batch([
@@ -223,33 +223,41 @@ describe('event-time backtest repository', () => {
   it('loads only official OK PIT signals and ordered SPX/VIX/SOFR inputs', async () => {
     const queries: string[] = [];
     const results = [
-      [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T20:00:00Z', score: 60 }],
+      [{ db_now: '2024-01-20T00:00:00Z', cutoff: '2024-01-15T00:00:00Z' }],
+      [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T16:00:00Z', score: 60, recorded_at: '2024-01-06T00:00:00Z', data_run_id: 'signal-a' }],
       [
-        { symbol: 'SPX', date: '2024-01-05', adjusted_close: 100, source: 'FRED:SP500', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a' },
-        { symbol: 'VIX', date: '2024-01-05', adjusted_close: 20, source: 'FRED:VIXCLS', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a' },
+        { symbol: 'SPX', date: '2024-01-05', adjusted_close: 100, source: 'FRED:SP500', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a', activation_run_id: 'activation-a', activated_at: '2024-01-07T00:00:00Z', provenance_status: 'PIT_RAW' },
+        { symbol: 'VIX', date: '2024-01-05', adjusted_close: 20, source: 'FRED:VIXCLS', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a', activation_run_id: 'activation-a', activated_at: '2024-01-07T00:00:00Z', provenance_status: 'PIT_RAW' },
       ],
-      [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-b' }],
+      [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-b', activation_run_id: 'activation-a', activated_at: '2024-01-07T00:00:00Z', provenance_status: 'PIT_RAW' }],
     ];
     const db = {
       prepare(sql: string) {
         queries.push(sql);
         const rows = results[queries.length - 1];
-        return { all: vi.fn(async () => ({ results: rows })) };
+        const statement: any = {
+          bind: vi.fn(() => statement),
+          all: vi.fn(async () => ({ results: rows })),
+          first: vi.fn(async () => rows[0]),
+        };
+        return statement;
       },
     } as unknown as D1Database;
 
-    const loaded = await loadEventBacktestInputs(db);
+    const loaded = await loadEventBacktestInputs(db, '2024-01-15T00:00:00Z');
 
-    expect(queries[0]).toMatch(/model_snapshot_weekly[\s\S]*decision_status='OK'[\s\S]*pit_status='PIT'/i);
-    expect(queries[0]).toMatch(/decision_at IS NOT NULL[\s\S]*tradable_at IS NOT NULL/i);
-    expect(queries[0]).toMatch(/ORDER BY[\s\S]*julianday\(decision_at\)/i);
-    expect(queries[1]).toMatch(/market_prices_daily[\s\S]*ORDER BY date/i);
-    expect(queries[2]).toMatch(/cash_rates_daily[\s\S]*ORDER BY date/i);
+    expect(queries[0]).toMatch(/strftime[\s\S]*now[\s\S]*cutoff/i);
+    expect(queries[1]).toMatch(/model_snapshot_weekly[\s\S]*decision_status='OK'[\s\S]*pit_status='PIT'/i);
+    expect(queries[1]).toMatch(/recorded_at[\s\S]*julianday\(recorded_at\).*julianday\(\?\)/i);
+    expect(queries[1]).toMatch(/ORDER BY[\s\S]*julianday\(decision_at\)/i);
+    expect(queries[2]).toMatch(/ROW_NUMBER\(\)[\s\S]*market_prices_daily[\s\S]*activated_at/i);
+    expect(queries[3]).toMatch(/ROW_NUMBER\(\)[\s\S]*cash_rates_daily[\s\S]*activated_at/i);
     expect(loaded).toEqual({
-      signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
-      prices: [{ date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a' }],
-      vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a' }],
-      cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-b' }],
+      asOfCutoff: '2024-01-15T00:00:00Z',
+      signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, recordedAt: '2024-01-06T00:00:00Z', dataRunId: 'signal-a' }],
+      prices: [{ date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],
+      vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],
+      cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-b', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],
     });
   });
 });

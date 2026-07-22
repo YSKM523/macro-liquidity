@@ -162,6 +162,7 @@ export interface RobustnessResult {
     bootstrap: BootStat;
   };
   strategy: {
+    methodology: 'LEGACY_WEEKLY';
     ann_return: number; buyhold_ann: number; n_periods: number;
     sharpe: BootStat;
     max_drawdown: number;
@@ -232,6 +233,7 @@ export function runRobustness(
     horizon_weeks: horizon,
     ic: { overlapping, non_overlapping, bootstrap },
     strategy: {
+      methodology: 'LEGACY_WEEKLY',
       ann_return, buyhold_ann, n_periods,
       sharpe, max_drawdown: maxDrawdown(stratRets),
       turnover_per_period: tpp, turnover_annual: fin(tpp * ppy),
@@ -240,7 +242,7 @@ export function runRobustness(
     caveats: [
       'block bootstrap (seed-fixed) — CI/p quantify overlap autocorrelation; non-overlapping n is the honest independent count',
       'regime splits are descriptive (in-sample) — small-n buckets (esp. post-QT) are noisy',
-      'long-flat (score>55) is a coarse proxy; turnover ignores trading costs',
+      'LEGACY_WEEKLY long-flat (score>55) is a coarse proxy; turnover ignores trading costs',
     ],
   };
 }
