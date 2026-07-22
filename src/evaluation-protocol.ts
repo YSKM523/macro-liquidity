@@ -34,11 +34,19 @@ export const VALIDATION_PROTOCOL = Object.freeze({
   protocol: 'PURGED_VALIDATION_V1' as const,
   horizonWeeks: 13,
   embargoDays: 91,
+  initialTrain: 200,
+  testN: 52,
+  outcomeToleranceDays: 14,
   holdoutFrom: '2026-07-23',
   purgeRule: 'OUTCOME_ON_OR_AFTER_TEST_FROM',
   independentRule: 'GREEDY_INTERVAL_NON_OVERLAP',
-  tailRule: 'TRAIN_ONLY_Q10',
+  tailRule: 'TRAIN_ONLY_Q10_LINEAR_TYPE7',
+  diagnosticWeightRule: 'MAX_POSITIVE_TRAIN_SPEARMAN_NORMALIZED_ELSE_EQUAL',
+  directionRule: 'SCORE_VS_50_ZERO_ABSTAINS',
+  formalVerdictRule: 'PERSISTED_VERDICT_NEUTRAL_ABSTAINS',
+  riskRule: 'EXISTING_TARGET_EXPOSURE_LTE_0_50',
   minimumRateN: 5,
+  minimumIcN: 3,
   minimumTailCalibrationN: 20,
   minimumTestTailEvents: 3,
 });
@@ -82,7 +90,7 @@ export function buildForwardPairs(snaps: ValidationSnap[], horizonWeeks: number 
     const endIdx = snaps.findIndex((snap, index) => index > startIdx && snap.date >= target);
     if (endIdx < 0) continue;
     const lag = (dateMs(snaps[endIdx].date) - dateMs(target)) / 86_400_000;
-    if (lag > 14) continue;
+    if (lag > VALIDATION_PROTOCOL.outcomeToleranceDays) continue;
     pairs.push({
       startIdx, endIdx,
       signalDate: snaps[startIdx].date,
@@ -165,8 +173,8 @@ export function buildPurgedFolds(
   opts: { initialTrain?: number; testN?: number; horizonWeeks?: number; embargoDays?: number } = {},
 ): PurgedFold[] {
   assertChronological(snaps);
-  const initialTrain = opts.initialTrain ?? 200;
-  const testN = opts.testN ?? 52;
+  const initialTrain = opts.initialTrain ?? VALIDATION_PROTOCOL.initialTrain;
+  const testN = opts.testN ?? VALIDATION_PROTOCOL.testN;
   const horizonWeeks = opts.horizonWeeks ?? VALIDATION_PROTOCOL.horizonWeeks;
   const embargoDays = opts.embargoDays ?? VALIDATION_PROTOCOL.embargoDays;
   const allPairs = buildForwardPairs(snaps, horizonWeeks);
