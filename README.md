@@ -175,7 +175,7 @@ migrations/       D1 schema（ingest runs/staging + observations + official week
 | `GET /api/snapshot` | 显式 `official` 正式信号 + `nowcast` 周中预估(`PROVISIONAL`) + guidance + live_stress + ACTIVE/最近 FAILED ingest run（含 snapshot outcome） |
 | `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 与 `PENDING`/`SUCCEEDED`/`FAILED` snapshot 状态；ACTIVE snapshot 非 `SUCCEEDED`（包括 `PENDING`）返回 503 和显式原因 |
 | `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
-| `GET /api/prices` | 兼容数字字段 + 每个行情的 `sourceTimestamp` / `fetchedAt` / provider / market state / delay / fallback / quality status；`asof` 明确只代表 `FETCH_TIME` |
+| `GET /api/prices` | 兼容数字字段 + 每个行情的 `sourceTimestamp` / `fetchedAt` / provider / market state / delay / fallback / quality status；`asof` 明确只代表 `FETCH_TIME`。FRED 官方 fallback 显式标记 `OFFICIAL`/延迟：SP500、VIXCLS、DGS10 最长 4 个工作日，DTWEXBGS 最长 7 个工作日 |
 | `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |
 | `GET /api/walkforward` | 样本外三臂裁决 |
 | `POST /api/admin/refresh` | 回填(Bearer `ADMIN_TOKEN`;`?all=1` 全量)；已有有效 ingest 租约时返回 `409` |

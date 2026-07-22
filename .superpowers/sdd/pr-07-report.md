@@ -142,7 +142,8 @@ No schema or migration file was added. Local migration execution is therefore no
 - Stooq was retained as an optional typed source, but review-supplied public read-only evidence observed a quote 404 and a JavaScript challenge on history from a Worker-like path. Official FRED is therefore the usable final fallback for every symbol. Upstream behavior may still change.
 - Stooq daily data and FRED official observations are intentionally marked delayed. Their validity is controlled by business-day freshness limits; exchange-holiday calendars are not modeled separately. `DTWEXBGS` specifically allows its configured seven-business-day release lag.
 - Quote divergence is evaluated only when primary and secondary timestamps share the same UTC market date. Different-date quotes remain auditable but are not treated as directly comparable.
-- History divergence requires at least two exact shared dates. With insufficient overlap the system does not claim a comparison; it still enforces each source's freshness and structural validity.
+- History divergence requires one exact shared observation for VIX and six exact shared observations for the SPX/DXY five-day return or 10Y five-day percentage-point change. With insufficient overlap the system does not claim a comparison; it still enforces each source's freshness and structural validity.
+- FRED quote fallback intentionally inherits official-history freshness: SP500/VIXCLS/DGS10 allow up to four business days and DTWEXBGS up to seven, rather than the two-business-day live-quote window. Every such value remains labeled `OFFICIAL`, delayed, and carries its actual observation timestamp and instrument.
 - DXY may fall back to the different broad-dollar `DTWEXBGS` instrument. The API/UI identify it explicitly; it is never compared at level with ICE DXY. Shared-date returns may be compared, and the existing splice keeps the official series scale.
 - Provider observations are returned live through the API and are not persisted. PR-08 remains responsible for durable PIT/vintage observation storage.
 
@@ -157,7 +158,7 @@ env -u NODE_OPTIONS npm test
 env -u NODE_OPTIONS npx tsc --noEmit
 ```
 
-The substantive reverse order at report time is the current report-only HEAD, then `9dec8fb`, `099c579`, and `28af59c`; the base-to-HEAD range avoids an unstable placeholder for the commit that contains this report itself.
+At the final reviewed HEAD, the substantive reverse order is the report-only HEAD, `0c19c12`, `ba29492`, `9dec8fb`, `099c579`, then `28af59c`; the base-to-HEAD range is the authoritative rollback scope and avoids a self-referential hash for this report commit.
 
 Reverting restores the pre-PR-07 Yahoo/Stooq numeric API behavior. No database cleanup or data restoration is needed because PR-07 writes no provider data and adds no migration.
 
