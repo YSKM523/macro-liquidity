@@ -72,6 +72,23 @@ export const STRESS = {
 } as const;
 export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade (strong regime beats short noise)
 
+// Event-time backtest execution/accounting assumptions. These do not alter
+// Champion scoring, verdict bands, hysteresis, or dashboard exposure guidance.
+export const EVENT_BACKTEST_ASSUMPTIONS = {
+  executionPrice: 'FRED_SP500_INDEX_CLOSE',
+  adjustedCloseSemantics: 'INDEX_CLOSE_NO_DIVIDENDS',
+  executionCloseUtc: '23:59:59Z',
+  cashRate: 'SOFR',
+  cashDayCount: 'ACT/360',
+  cashRateMaxStaleCalendarDays: 4,
+  commissionBps: 1,
+  baseSlippageBps: 2,
+  highVolExtraSlippageBps: 3,
+  vixStressLevel: STRESS.vix,
+  vixMaxStaleCalendarDays: 4,
+  financingSpreadBps: 100,
+} as const;
+
 // Market-data quality gates only. These tolerances decide whether two providers
 // agree and whether a source observation is usable; they do not affect Champion
 // factor scores, verdict bands, exposure tiers, or the stress trigger levels.
