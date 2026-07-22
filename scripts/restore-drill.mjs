@@ -6,6 +6,8 @@ import { Miniflare } from 'miniflare';
 const migrationFiles = readdirSync('migrations')
   .filter(name => /^\d{4}_.+\.sql$/.test(name))
   .sort();
+const corruptionMode = process.argv.find(arg => arg.startsWith('--corrupt-after-restore='))
+  ?.slice('--corrupt-after-restore='.length);
 
 // Split only on SQL statement boundaries. Unlike the old drill, this preserves
 // every byte inside quoted values (including repeated spaces and newlines).
@@ -170,7 +172,8 @@ async function exportSql(db) {
   for (const table of tables) {
     const columns = await db.prepare(`PRAGMA table_info(${identifier(table.name)})`).all();
     const names = columns.results.map(column => column.name);
-    const rows = await db.prepare(`SELECT * FROM ${identifier(table.name)}`).all();
+    const order = names.length > 0 ? ` ORDER BY ${names.map(identifier).join(',')}` : '';
+    const rows = await db.prepare(`SELECT * FROM ${identifier(table.name)}${order}`).all();
     for (const row of rows.results) {
       inserts.push(`INSERT INTO ${identifier(table.name)} (${names.map(identifier).join(',')}) VALUES (${names.map(name => sqlValue(row[name])).join(',')});`);
     }
@@ -181,10 +184,8 @@ async function exportSql(db) {
       - ({ index: 0, view: 1, trigger: 2 }[b.type] ?? 9) || a.name.localeCompare(b.name))
     .map(row => `${row.sql};`)
     .join('\n');
-  return {
-    sql: `${createTables}\n${inserts.join('\n')}\n${deferredSchema}\n`,
-    contentHash: createHash('sha256').update(`${createTables}\n${inserts.join('\n')}\n${deferredSchema}\n`).digest('hex'),
-  };
+  const sql = `${createTables}\n${inserts.join('\n')}\n${deferredSchema}\n`;
+  return { sql, contentHash: createHash('sha256').update(sql).digest('hex') };
 }
 
 async function inspect(db) {
@@ -222,6 +223,16 @@ try {
   await seedRepresentativeData(source.db);
   const exported = await exportSql(source.db);
   await executeSql(restored.db, exported.sql);
+  if (corruptionMode === 'release-calendar-source-url') {
+    await restored.db.prepare(`UPDATE release_calendar
+      SET source_url=source_url || '#corrupted' WHERE series_id='WALCL'`).run();
+  } else if (corruptionMode != null) {
+    throw new Error(`unsupported restore corruption mode: ${corruptionMode}`);
+  }
+  const restoredExport = await exportSql(restored.db);
+  if (restoredExport.contentHash !== exported.contentHash) {
+    throw new Error('restored export content hash mismatch');
+  }
   const first = await inspect(source.db);
   const second = await inspect(restored.db);
   if (JSON.stringify(first) !== JSON.stringify(second)) throw new Error('restored schema/data metadata mismatch');
@@ -232,6 +243,7 @@ try {
   }
   process.stdout.write(JSON.stringify({
     status: 'PASS', remoteAccess: false, contentHash: exported.contentHash,
+    restoredContentHash: restoredExport.contentHash,
     migrations: { first: first.migrations, restored: second.migrations },
     tables: second.tables, indexes: second.indexes, triggers: second.triggers,
     rowCounts: second.rowCounts, latestSnapshot: second.latestSnapshot,

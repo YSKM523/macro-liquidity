@@ -84,5 +84,14 @@ else if (args.includes('export')) fs.writeFileSync(args[args.indexOf('--output')
     expect(result.latestSnapshot).toMatchObject({ model_version: 'champion-v1.0.0' });
     expect(result.applicationQueries).toEqual({ latestSnapshot: true, backtestRows: true });
     expect(result.whitespaceValue).toBe('alpha  beta\n gamma');
+    expect(result.restoredContentHash).toBe(result.contentHash);
   });
+
+  it('fails the drill when a non-sampled restored column differs from the source export', () => {
+    const corrupted = spawnSync(process.execPath, [
+      'scripts/restore-drill.mjs', '--corrupt-after-restore=release-calendar-source-url',
+    ], { encoding: 'utf8' });
+    expect(corrupted.status).not.toBe(0);
+    expect(corrupted.stderr).toMatch(/restored export content hash mismatch/i);
+  }, 30_000);
 });
