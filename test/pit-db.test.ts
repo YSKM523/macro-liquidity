@@ -58,6 +58,12 @@ describe('point-in-time schema', () => {
       .rejects.toThrow(/append-only/i);
     await expect(db.prepare('DELETE FROM release_calendar_overrides').run())
       .rejects.toThrow(/append-only/i);
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at) VALUES
+      ('WALCL','2024-01-05','2024-01-05T20:00:00Z','2024-01-08T14:30:00Z','same instant a','2024-01-07T00:00:00Z'),
+      ('WALCL','2024-01-05','2024-01-05T21:00:00Z','2024-01-08T14:30:00Z','same instant b','2024-01-07T00:00:00.000Z')`).run();
+    await expect(loadPitObservations(db, '2024-01-10T00:00:00Z'))
+      .rejects.toThrow(/duplicate override createdAt/i);
 
     const seeded = await db.prepare('SELECT series_id FROM release_calendar ORDER BY series_id').all<{series_id:string}>();
     expect(seeded.results?.map(row => row.series_id)).toEqual([...SERIES_IDS].sort());
@@ -84,6 +90,66 @@ describe('PIT activation repository', () => {
       VALUES ('WALCL','2024-01-04','2024-01-04T20:00:00Z','2024-01-05T14:30:00Z','bad clock','not-an-iso-time')`).run();
     await expect(loadPitObservations(db, 'not-an-iso-time')).rejects.toThrow(/resolution/i);
     await expect(loadPitObservations(db, '2024-01-11T00:00:00Z')).rejects.toThrow(/created/i);
+    await mf.dispose();
+  }, 30_000);
+
+  it('excludes late backfills from old resolution cutoffs and rejects malformed raw fetch clocks', async () => {
+    const { mf, db } = await migratedDb();
+    await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('backfill','ACTIVE','FULL','2024-01-01T00:00:00Z')").run();
+    const insert = `INSERT INTO observations_pit
+      (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,
+       checksum,data_run_id,release_time_status,value)
+      VALUES ('WALCL',?,?,?,?,?,'ALFRED',?,'backfill','CONSERVATIVE_DATE_END',?)`;
+    await db.prepare(insert).bind(
+      '2023-12-27', '2024-01-04', '2024-01-04T23:59:59Z',
+      '2024-01-12T00:00:00Z', '2024-01-05T14:30:00Z', 'late', 5800,
+    ).run();
+    expect(await loadPitObservations(db, '2024-01-10T00:00:00Z')).toEqual([]);
+    expect(await loadPitObservations(db, '2024-01-12T00:00:00Z')).toEqual([
+      expect.objectContaining({ checksum: 'late' }),
+    ]);
+    await db.prepare(insert).bind(
+      '2024-01-03', '2024-01-05', '2024-01-05T23:59:59Z',
+      'not-an-iso-time', '2024-01-08T14:30:00Z', 'bad-fetch', 5900,
+    ).run();
+    await expect(loadPitObservations(db, '2024-01-12T00:00:00Z')).rejects.toThrow(/fetched/i);
+    await mf.dispose();
+  }, 30_000);
+
+  it.each([
+    ['not-an-iso-time', '2024-01-08T14:30:00Z', /released/i],
+    ['2024-01-05T12:00:00.500Z', '2024-01-05T12:00:00Z', /precedes/i],
+  ] as const)('fails closed on invalid raw release timing %s / %s', async (releasedAt, tradableAt, error) => {
+    const { mf, db } = await migratedDb();
+    await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('bad-raw','ACTIVE','FULL','2024-01-01T00:00:00Z')").run();
+    await db.prepare(`INSERT INTO observations_pit
+      (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,
+       checksum,data_run_id,release_time_status,value)
+      VALUES ('WALCL','2024-01-03','2024-01-04',?,'2024-01-09T00:00:00Z',?,
+       'ALFRED','bad-raw','bad-raw','CONSERVATIVE_DATE_END',5800)`)
+      .bind(releasedAt, tradableAt).run();
+    await expect(officialPitDecisionEvents(db, '2024-01-10T00:00:00Z')).rejects.toThrow(error);
+    await mf.dispose();
+  }, 30_000);
+
+  it('does not emit an official event whose resolved release is after the resolution cutoff', async () => {
+    const { mf, db } = await migratedDb();
+    await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('future-event','ACTIVE','FULL','2024-01-01T00:00:00Z')").run();
+    await db.prepare(`INSERT INTO observations_pit
+      (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,
+       checksum,data_run_id,release_time_status,value)
+      VALUES ('WALCL','2024-01-03','2024-01-04','2024-01-04T23:59:59Z',
+       '2024-01-09T00:00:00Z','2024-01-05T14:30:00Z','ALFRED','future-event','future-event',
+       'CONSERVATIVE_DATE_END',5800)`).run();
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL','2024-01-04','2024-01-10T00:00:00.500Z','2024-01-10T14:30:00Z',
+       'future resolved event','2024-01-09T12:00:00Z')`).run();
+    expect(await officialPitDecisionEvents(db, '2024-01-10T00:00:00Z')).toEqual([]);
+    expect(await officialPitDecisionEvents(db, '2024-01-10T00:00:00.500Z')).toEqual([{
+      modelDate: '2024-01-03', decisionAt: '2024-01-10T00:00:00.500Z',
+      tradableAt: '2024-01-10T14:30:00Z',
+    }]);
     await mf.dispose();
   }, 30_000);
 
@@ -129,7 +195,7 @@ describe('PIT activation repository', () => {
     ]);
     const base = {
       seriesId: 'WALCL', observationDate: '2023-12-27', vintageDate: '2024-01-04',
-      releasedAt: '2024-01-04T23:59:59Z', fetchedAt: '2024-01-10T12:00:00Z',
+      releasedAt: '2024-01-04T23:59:59Z', fetchedAt: '2024-01-08T12:00:00Z',
       tradableAt: '2024-01-05T14:30:00Z', source: 'ALFRED' as const, checksum: 'c1',
       releaseTimeStatus: 'CONSERVATIVE_DATE_END' as const, value: 5800,
     };
@@ -142,6 +208,10 @@ describe('PIT activation repository', () => {
     await db.prepare(`INSERT INTO release_calendar_overrides
       (series_id,vintage_date,released_at,tradable_at,reason,created_at)
       VALUES ('WALCL','2024-01-04','2024-01-08T15:00:00Z','2024-01-09T14:30:00Z','verified release','2024-01-10T00:00:00Z')`).run();
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL','2024-01-04','2024-01-09T15:00:00Z','2024-01-10T14:30:00Z',
+       'fractional version','2024-01-10T12:00:00.500Z')`).run();
     expect(await loadPitObservations(db, '2024-01-09T12:00:00Z')).toEqual([expect.objectContaining({
       releasedAt: '2024-01-07T15:00:00Z', tradableAt: '2024-01-08T14:30:00Z',
       releaseTimeStatus: 'OVERRIDE',
@@ -149,6 +219,9 @@ describe('PIT activation repository', () => {
     expect(await loadPitObservations(db, '2024-01-10T12:00:00Z')).toEqual([expect.objectContaining({
       releasedAt: '2024-01-08T15:00:00Z', tradableAt: '2024-01-09T14:30:00Z',
       releaseTimeStatus: 'OVERRIDE',
+    })]);
+    expect(await loadPitObservations(db, '2024-01-10T12:00:00.500Z')).toEqual([expect.objectContaining({
+      releasedAt: '2024-01-09T15:00:00Z', tradableAt: '2024-01-10T14:30:00Z',
     })]);
     expect(await db.prepare('SELECT released_at,tradable_at,release_time_status FROM observations_pit').first())
       .toEqual({

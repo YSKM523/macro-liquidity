@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Node test runtime Web Crypto shim.
 import { webcrypto } from 'node:crypto';
-import { availableForExecution, buildPitFrames, deriveReleaseTiming, iteratePitFrames, pitChecksum } from '../src/pit';
+import {
+  availableForExecution, buildPitFrames, deriveReleaseTiming, isoTimestampMs,
+  iteratePitFrames, pitChecksum,
+} from '../src/pit';
 import { SERIES_IDS } from '../src/config';
 import type { PitObservation } from '../src/pit';
 
@@ -22,12 +25,22 @@ describe('PIT release timing', () => {
       releasedAt: '2024-01-04T13:00:00Z', tradableAt: '2024-01-04T14:30:00Z',
     }).releaseTimeStatus).toBe('OVERRIDE');
     expect(() => deriveReleaseTiming('not-date', '2024-01-05T18:00:00Z', '23:59:59')).toThrow(/date/i);
+    expect(() => deriveReleaseTiming('2024-01-04', '2024-01-05T18:00:00Z', '12:00:00', {
+      releasedAt: '2024-01-04T13:00:00.500Z', tradableAt: '2024-01-04T13:00:00Z',
+    })).toThrow(/precedes/i);
   });
 
   it('hashes a canonical vintage identity', async () => {
     const first = await pitChecksum('WALCL', '2024-01-03', '2024-01-04', 5800);
     expect(first).toMatch(/^[0-9a-f]{64}$/);
     expect(await pitChecksum('WALCL', '2024-01-03', '2024-01-04', 5800)).toBe(first);
+  });
+
+  it('rejects timestamps whose calendar date does not round-trip canonically', () => {
+    expect(() => isoTimestampMs('2024-02-30T12:00:00Z', 'test timestamp')).toThrow(/invalid/i);
+    expect(() => deriveReleaseTiming('2024-02-29', '2024-02-30T12:00:00Z', '23:59:59'))
+      .toThrow(/fetchedAt/i);
+    expect(isoTimestampMs('2024-02-29T12:00:00.500Z')).toBe(Date.parse('2024-02-29T12:00:00.500Z'));
   });
 });
 
@@ -42,7 +55,8 @@ describe('PIT timeline', () => {
   it('never exposes future releases or future revisions and materializes a complete manifest', () => {
     const rows = [
       row({}),
-      row({ vintageDate: '2024-01-08', releasedAt: '2024-01-08T23:59:59Z', checksum: 'b', value: 5900 }),
+      row({ vintageDate: '2024-01-08', releasedAt: '2024-01-08T23:59:59Z',
+        tradableAt: '2024-01-09T14:30:00Z', checksum: 'b', value: 5900 }),
       row({ seriesId: 'SP500', observationDate: '2024-01-05', vintageDate: '2024-01-06',
         releasedAt: '2024-01-06T23:59:59Z', tradableAt: '2024-01-08T14:30:00Z', checksum: 's', value: 4700 }),
     ];
@@ -67,6 +81,10 @@ describe('PIT timeline', () => {
   it('requires both release and tradability for execution', () => {
     expect(availableForExecution(row({}), '2024-01-05T00:00:00Z', '2024-01-05T14:29:59Z')).toBe(false);
     expect(availableForExecution(row({}), '2024-01-05T00:00:00Z', '2024-01-05T14:30:00Z')).toBe(true);
+    expect(availableForExecution(
+      row({ releasedAt: '2024-01-05T12:00:00.500Z', tradableAt: '2024-01-05T12:00:00.500Z' }),
+      '2024-01-05T12:00:00Z', '2024-01-05T12:00:00Z',
+    )).toBe(false);
   });
 
   it('lifts the frame tradable time to the latest tradability of every row used by scoring history', () => {
@@ -81,13 +99,29 @@ describe('PIT timeline', () => {
 
   it('computes dataCutoff from every scoring-history row, including a late revision of an older observation', () => {
     const frame = buildPitFrames([
-      row({ observationDate: '2023-12-27', vintageDate: '2024-01-09', releasedAt: '2024-01-09T23:59:59Z' }),
+      row({ observationDate: '2023-12-27', vintageDate: '2024-01-09',
+        releasedAt: '2024-01-09T23:59:59Z', tradableAt: '2024-01-10T14:30:00Z' }),
       row({ observationDate: '2024-01-03', vintageDate: '2024-01-04', releasedAt: '2024-01-04T23:59:59Z', checksum: 'newer-endpoint' }),
     ], [{ modelDate: '2024-01-03', decisionAt: '2024-01-10T00:00:00Z', tradableAt: '2024-01-10T14:30:00Z' }])[0];
     expect(frame.inputs.find(input => input.seriesId === 'WALCL')).toMatchObject({
       observationDate: '2024-01-03', releasedAt: '2024-01-04T23:59:59Z',
     });
     expect(frame.dataCutoff).toBe('2024-01-09T23:59:59Z');
+  });
+
+  it('orders release, decision, and prefix maxima by epoch across mixed ISO precision', () => {
+    const rows = [
+      row({ observationDate: '2024-01-01', releasedAt: '2024-01-05T12:00:00Z', checksum: 'whole' }),
+      row({ observationDate: '2024-01-02', releasedAt: '2024-01-05T12:00:00.500Z', checksum: 'fraction' }),
+    ];
+    const frames = buildPitFrames(rows, [
+      { modelDate: '2024-01-02', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T12:00:00Z' },
+      { modelDate: '2024-01-02', decisionAt: '2024-01-05T12:00:00.500Z', tradableAt: '2024-01-05T12:00:00.500Z' },
+    ]);
+    expect(frames[0].seriesMap.WALCL.map(value => value.date)).toEqual(['2024-01-01']);
+    expect(frames[0].dataCutoff).toBe('2024-01-05T12:00:00Z');
+    expect(frames[1].seriesMap.WALCL.map(value => value.date)).toEqual(['2024-01-01', '2024-01-02']);
+    expect(frames[1].dataCutoff).toBe('2024-01-05T12:00:00.500Z');
   });
 
   it('iterates production-scale frames lazily within a bounded budget', () => {

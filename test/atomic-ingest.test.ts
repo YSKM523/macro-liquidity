@@ -19,6 +19,10 @@ const state = vi.hoisted(() => ({
   staged: [] as Array<{ seriesId: string; rows: Obs[] }>,
   pitStaged: [] as string[],
   fetchArgs: [] as Array<{ seriesId: string; observationStart: string; realtimeStart: string }>,
+  fetchObservedAts: [] as string[],
+  rowResolutionAts: [] as string[],
+  eventResolutionAts: [] as string[],
+  snapshotResolutionAts: [] as string[],
   attemptFailures: [] as Array<{ seriesId: string; error: string; completedAt: string }>,
   snapshotFailures: [] as Array<{ step: string; error: string; completedAt: string }>,
   successPublications: [] as Array<{ count: number; completedAt: string; meta: Array<[string, string]> }>,
@@ -34,10 +38,15 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/fred', () => ({
-  fetchFredSeriesPit: vi.fn(async (seriesId: string, observationStart: string, realtimeStart: string) => {
+  fetchFredSeriesPit: vi.fn(async (
+    seriesId: string, observationStart: string, realtimeStart: string,
+    _fetchedAt: string, _apiKey: string, _rules: unknown, _overrides: unknown,
+    observedAt: () => string,
+  ) => {
     state.events.push(`fetch:${seriesId}`);
     state.fetchArgs.push({ seriesId, observationStart, realtimeStart });
     if (seriesId === state.fetchFailureSeries) throw new Error(`fetch failed: ${seriesId}`);
+    state.fetchObservedAts.push(observedAt());
     const latestRows = seriesId === state.invalidSeries ? [{ date: 'not-a-date', value: 1 }]
       : seriesId === 'WALCL' ? [] : [{ date: '2024-01-03', value: 1 }];
     return { latestRows, vintages: [] };
@@ -110,7 +119,8 @@ vi.mock('../src/db', async importOriginal => {
       state.failed.push(failure);
       state.events.push(`failed:${failure.step}`);
     }),
-    loadPitObservations: vi.fn(async () => {
+    loadPitObservations: vi.fn(async (_db: unknown, releaseResolutionAt: string) => {
+      state.rowResolutionAts.push(releaseResolutionAt);
       state.events.push('load-active');
       return Object.entries(state.seriesMap).flatMap(([seriesId, rows]) => rows.map(row => ({
         seriesId, observationDate: row.date, vintageDate: row.date, releasedAt: `${row.date}T00:00:00Z`,
@@ -118,11 +128,24 @@ vi.mock('../src/db', async importOriginal => {
         checksum: `${seriesId}-${row.date}`, releaseTimeStatus: 'OBSERVED_AT_FETCH', value: row.value,
       })));
     }),
-    officialPitDecisionEvents: vi.fn(async () => (state.seriesMap.WALCL ?? []).map(row => ({
-      modelDate: row.date, decisionAt: `${row.date}T00:00:00Z`, tradableAt: `${row.date}T14:30:00Z`,
-    }))),
-    upsertOfficialSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => { state.events.push(`official:${snapshot.date}`); }),
-    upsertNowcastSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
+    officialPitDecisionEvents: vi.fn(async (_db: unknown, releaseResolutionAt: string) => {
+      state.eventResolutionAts.push(releaseResolutionAt);
+      return (state.seriesMap.WALCL ?? []).map(row => ({
+        modelDate: row.date, decisionAt: `${row.date}T00:00:00Z`, tradableAt: `${row.date}T14:30:00Z`,
+      }));
+    }),
+    upsertOfficialSnapshot: vi.fn(async (
+      _db: unknown, _runId: string, snapshot: Snapshot, _spx: number,
+      provenance: { releaseResolutionAt?: string },
+    ) => {
+      if (provenance?.releaseResolutionAt) state.snapshotResolutionAts.push(provenance.releaseResolutionAt);
+      state.events.push(`official:${snapshot.date}`);
+    }),
+    upsertNowcastSnapshot: vi.fn(async (
+      _db: unknown, _runId: string, snapshot: Snapshot, _spx: number,
+      provenance: { releaseResolutionAt?: string },
+    ) => {
+      if (provenance?.releaseResolutionAt) state.snapshotResolutionAts.push(provenance.releaseResolutionAt);
       state.events.push(`nowcast:${snapshot.date}`);
       if (state.snapshotWriteFailure) throw new Error('snapshot write failed');
     }),
@@ -196,6 +219,10 @@ beforeEach(() => {
   state.staged = [];
   state.pitStaged = [];
   state.fetchArgs = [];
+  state.fetchObservedAts = [];
+  state.rowResolutionAts = [];
+  state.eventResolutionAts = [];
+  state.snapshotResolutionAts = [];
   state.attemptFailures = [];
   state.snapshotFailures = [];
   state.successPublications = [];
@@ -320,6 +347,22 @@ describe('atomic ingest orchestration', () => {
     expect(state.events.some(event => event.startsWith('snapshots-succeeded:'))).toBe(true);
     expect(state.activationCompletedAt).not.toBe('2024-01-10T12:00:00.000Z');
     expect(result).toEqual(expect.objectContaining({ status: 'active', runId: expect.any(String) }));
+  });
+
+  it('freezes one post-fetch resolution cutoff and uses it for rows, events, and snapshots', async () => {
+    let clockCalls = 0;
+    const clock = () => ++clockCalls <= SERIES_IDS.length
+      ? '2024-01-10T12:00:00.500Z'
+      : '2024-01-10T12:00:00.900Z';
+
+    await runIngest(env, true, new Date('2024-01-10T12:00:00Z'), clock);
+
+    expect(state.fetchObservedAts).toEqual(
+      Array.from({ length: SERIES_IDS.length }, () => '2024-01-10T12:00:00.500Z'),
+    );
+    expect(state.rowResolutionAts).toEqual(['2024-01-10T12:00:00.900Z']);
+    expect(state.eventResolutionAts).toEqual(['2024-01-10T12:00:00.900Z']);
+    expect(new Set(state.snapshotResolutionAts)).toEqual(new Set(['2024-01-10T12:00:00.900Z']));
   });
 
   it('starts each attempt before PIT metadata reads and uses an inclusive incremental checkpoint', async () => {

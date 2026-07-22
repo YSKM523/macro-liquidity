@@ -30,7 +30,6 @@ import {
   IngestSeriesValidationError,
   maxPitVintageDate,
   loadReleaseRules,
-  loadReleaseOverrides,
   stagePitObservations,
   loadPitObservations,
   officialPitDecisionEvents,
@@ -39,7 +38,7 @@ import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
 import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
 import { spliceSeries, fetchDxyDaily } from './prices';
-import { iteratePitFrames } from './pit';
+import { compareIsoTimestamps, isoTimestampMs, iteratePitFrames } from './pit';
 
 export interface Env {
   DB: D1Database; ASSETS: Fetcher;
@@ -87,6 +86,7 @@ export async function runIngest(
   env: Env,
   rebuildAll = false,
   now = new Date(),
+  clock: () => string = () => new Date().toISOString(),
 ): Promise<IngestResult> {
   const runId = newRunId(now);
   const nowIso = now.toISOString();
@@ -112,6 +112,7 @@ export async function runIngest(
 
     // 1) Fetch and stage every configured series without touching production.
     let updated = 0;
+    let latestObservedFetchAt = nowIso;
     for (const id of SERIES_IDS) {
       failedSeries = id;
       failedStep = 'lock';
@@ -127,13 +128,19 @@ export async function runIngest(
         if (releaseRule == null || releaseRule.length === 0) {
           throw new Error(`${id} has no release calendar rule`);
         }
-        const overrides = await loadReleaseOverrides(env.DB, id, realtimeStart, nowIso);
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);
         failedStep = 'fetch';
         const fetched = await fetchFredSeriesPit(
-          id, env.START_DATE, realtimeStart, nowIso, env.FRED_API_KEY, releaseRule, overrides,
-          () => new Date().toISOString(),
+          id, env.START_DATE, realtimeStart, nowIso, env.FRED_API_KEY, releaseRule, new Map(),
+          () => {
+            const observedAt = clock();
+            isoTimestampMs(observedAt, 'observed fetch time');
+            if (compareIsoTimestamps(observedAt, latestObservedFetchAt) > 0) {
+              latestObservedFetchAt = observedAt;
+            }
+            return observedAt;
+          },
         );
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);
@@ -184,9 +191,15 @@ export async function runIngest(
     await activateIngestRun(env.DB, runId, new Date().toISOString());
     activated = true;
 
+    const releaseResolutionAt = clock();
+    isoTimestampMs(releaseResolutionAt, 'release resolutionAt');
+    if (compareIsoTimestamps(releaseResolutionAt, latestObservedFetchAt) < 0) {
+      throw new Error('release resolutionAt precedes an observed fetch time');
+    }
+
     // 3) Rebuild snapshots only from the newly activated production view.
     failedStep = 'snapshot-read';
-    const pitRows = await loadPitObservations(env.DB, nowIso);
+    const pitRows = await loadPitObservations(env.DB, releaseResolutionAt);
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     // DTWEXBGS 官方发布滞后约一周;用 DXY 日线按比例链到末端参与打分(仅内存,行情失败则跳过)。
@@ -195,18 +208,20 @@ export async function runIngest(
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     const currentAsOf = now.toISOString().slice(0, 10);
-    const rawOfficialEvents = rebuildAll ? await officialPitDecisionEvents(env.DB, nowIso) : [];
+    const rawOfficialEvents = rebuildAll
+      ? await officialPitDecisionEvents(env.DB, releaseResolutionAt) : [];
     const officialDates = new Set(oneDecisionPerWeek(rawOfficialEvents.map(event => event.modelDate)));
     const events = rebuildAll
       ? rawOfficialEvents.filter(event => officialDates.has(event.modelDate))
       : eachDay(addDays(currentAsOf, -14), currentAsOf).map(modelDate => {
           const modelDateEnd = `${modelDate}T23:59:59Z`;
-          const decisionAt = modelDateEnd < nowIso ? modelDateEnd : nowIso;
+          const decisionAt = compareIsoTimestamps(modelDateEnd, releaseResolutionAt) < 0
+            ? modelDateEnd : releaseResolutionAt;
           return { modelDate, decisionAt, tradableAt: decisionAt };
         });
     if (events.length > 0) {
       const dates = events.slice()
-        .sort((a, b) => a.decisionAt.localeCompare(b.decisionAt))
+        .sort((a, b) => compareIsoTimestamps(a.decisionAt, b.decisionAt))
         .map(event => event.modelDate);
       let prev: Verdict | undefined;
       let officialAnchors = new Map<string, Verdict>();
@@ -238,11 +253,14 @@ export async function runIngest(
             dataCutoff: frame.dataCutoff,
             decisionAt: frame.event.decisionAt,
             tradableAt: frame.event.tradableAt,
-            releaseResolutionAt: nowIso,
+            releaseResolutionAt,
             inputs: frame.inputs,
           });
           if (outcome === 'FROZEN') {
-            const frozen = await officialVerdictAnchors(env.DB, date, date);
+            const frozenWeek = decisionWeek(date);
+            const frozen = await officialVerdictAnchors(
+              env.DB, frozenWeek, addDays(frozenWeek, 6),
+            );
             prev = frozen[0]?.verdict ?? prev;
             snapshots++;
             continue;
@@ -253,7 +271,7 @@ export async function runIngest(
             dataCutoff: frame.dataCutoff,
             decisionAt: frame.event.decisionAt,
             tradableAt: frame.event.tradableAt,
-            releaseResolutionAt: nowIso,
+            releaseResolutionAt,
           });
         }
         if (snap.verdict != null) prev = snap.verdict;

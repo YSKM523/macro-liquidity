@@ -53,7 +53,12 @@ vi.mock('../src/db', () => ({
   }))),
   upsertOfficialSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.officialWrites.push(snapshot.date);
-    if (state.frozenAnchors.has(snapshot.date)) return 'FROZEN';
+    const week = (date: string) => {
+      const d = new Date(`${date}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+      return d.toISOString().slice(0, 10);
+    };
+    if ([...state.frozenAnchors].some(([date]) => week(date) === week(snapshot.date))) return 'FROZEN';
     state.official.set(snapshot.date, structuredClone(snapshot));
     return 'INSERTED';
   }),
@@ -142,6 +147,19 @@ describe('runIngest snapshot channel routing', () => {
     expect(state.official.get('2024-01-10')?.verdict).toBe('BEARISH');
   });
 
+  it('anchors from the frozen decision week when its stored date differs from the rebuilt date', async () => {
+    state.frozenAnchors.set('2024-01-03', 'BEARISH');
+    await runIngest(env, true, new Date('2024-01-10T12:00:00.000Z'));
+    expect(state.official.get('2024-01-10')?.verdict).toBe('BEARISH');
+  });
+
+  it('anchors from a later stored date in the same frozen decision week', async () => {
+    state.seriesMap.WALCL = state.seriesMap.WALCL?.filter(row => row.date !== '2024-01-05');
+    state.frozenAnchors.set('2024-01-05', 'BEARISH');
+    await runIngest(env, true, new Date('2024-01-10T12:00:00.000Z'));
+    expect(state.official.get('2024-01-10')?.verdict).toBe('BEARISH');
+  });
+
   it('resolves each incremental date at its own cutoff so later revisions cannot alter earlier frames', async () => {
     const base = {
       seriesId: 'WALCL', observationDate: '2024-01-03', fetchedAt: '2024-01-10T12:00:00Z',
@@ -150,7 +168,8 @@ describe('runIngest snapshot channel routing', () => {
     };
     state.pitRowsOverride = [
       { ...base, vintageDate: '2024-01-04', releasedAt: '2024-01-04T23:59:59Z', checksum: 'a', value: 5800 },
-      { ...base, vintageDate: '2024-01-08', releasedAt: '2024-01-08T23:59:59Z', checksum: 'b', value: 5900 },
+      { ...base, vintageDate: '2024-01-08', releasedAt: '2024-01-08T23:59:59Z',
+        tradableAt: '2024-01-09T14:30:00Z', checksum: 'b', value: 5900 },
     ];
     await runIngest(env, false, new Date('2024-01-10T12:00:00.000Z'));
     expect(state.computedWalcl.get('2024-01-05')).toBe(5800);

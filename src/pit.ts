@@ -53,14 +53,28 @@ function validDate(value: string): boolean {
   return new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
+export function isoTimestampMs(value: string, field = 'timestamp'): number {
+  if (!ISO_RE.test(value)) throw new Error(`invalid ${field}`);
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) throw new Error(`invalid ${field}`);
+  const canonical = new Date(milliseconds).toISOString();
+  const expected = value.includes('.') ? canonical : canonical.replace('.000Z', 'Z');
+  if (value !== expected) throw new Error(`invalid ${field}`);
+  return milliseconds;
+}
+
 function requireIso(value: string, field: string): void {
-  if (!ISO_RE.test(value) || !Number.isFinite(Date.parse(value))) throw new Error(`invalid ${field}`);
+  isoTimestampMs(value, field);
+}
+
+export function compareIsoTimestamps(left: string, right: string): number {
+  return isoTimestampMs(left) - isoTimestampMs(right);
 }
 
 export function validateReleaseOverride(override: ReleaseOverride): void {
   requireIso(override.releasedAt, 'override releasedAt');
   requireIso(override.tradableAt, 'override tradableAt');
-  if (override.tradableAt < override.releasedAt) {
+  if (compareIsoTimestamps(override.tradableAt, override.releasedAt) < 0) {
     throw new Error('override tradableAt precedes releasedAt');
   }
 }
@@ -114,7 +128,8 @@ export function availableForExecution(
   decisionAt: string,
   executionAt: string,
 ): boolean {
-  return row.releasedAt <= decisionAt && row.tradableAt <= executionAt;
+  return compareIsoTimestamps(row.releasedAt, decisionAt) <= 0
+    && compareIsoTimestamps(row.tradableAt, executionAt) <= 0;
 }
 
 interface ActiveSeries {
@@ -123,6 +138,8 @@ interface ActiveSeries {
   releasedAtMax: string[];
   tradableAtMax: string[];
 }
+
+type TimestampResolver = (value: string) => number;
 
 function lowerBoundObservation(rows: PitObservation[], observationDate: string): number {
   let low = 0;
@@ -146,7 +163,11 @@ function upperBoundObservation(rows: PitObservation[], modelDate: string): numbe
   return low;
 }
 
-function activateRow(active: Map<string, ActiveSeries>, row: PitObservation): void {
+function activateRow(
+  active: Map<string, ActiveSeries>,
+  row: PitObservation,
+  timestampMs: TimestampResolver,
+): void {
   const series = active.get(row.seriesId) ?? {
     rows: [], observations: [], releasedAtMax: [], tradableAtMax: [],
   };
@@ -166,15 +187,21 @@ function activateRow(active: Map<string, ActiveSeries>, row: PitObservation): vo
     const current = series.rows[cursor];
     const previousReleasedAt = cursor === 0 ? null : series.releasedAtMax[cursor - 1];
     const previousTradableAt = cursor === 0 ? null : series.tradableAtMax[cursor - 1];
-    series.releasedAtMax[cursor] = previousReleasedAt != null && previousReleasedAt > current.releasedAt
+    series.releasedAtMax[cursor] = previousReleasedAt != null
+      && timestampMs(previousReleasedAt) > timestampMs(current.releasedAt)
       ? previousReleasedAt : current.releasedAt;
-    series.tradableAtMax[cursor] = previousTradableAt != null && previousTradableAt > current.tradableAt
+    series.tradableAtMax[cursor] = previousTradableAt != null
+      && timestampMs(previousTradableAt) > timestampMs(current.tradableAt)
       ? previousTradableAt : current.tradableAt;
   }
   active.set(row.seriesId, series);
 }
 
-function frameFromActive(active: Map<string, ActiveSeries>, event: PitDecisionEvent): PitFrame {
+function frameFromActive(
+  active: Map<string, ActiveSeries>,
+  event: PitDecisionEvent,
+  timestampMs: TimestampResolver,
+): PitFrame {
   const seriesMap: SeriesMap = {};
   const inputs: SnapshotInput[] = [];
   let dataCutoff: string | null = null;
@@ -186,8 +213,13 @@ function frameFromActive(active: Map<string, ActiveSeries>, event: PitDecisionEv
     seriesMap[seriesId] = series?.observations.slice(0, end) ?? [];
     const releasedAt = end === 0 ? null : series!.releasedAtMax[end - 1];
     const tradableAt = end === 0 ? null : series!.tradableAtMax[end - 1];
-    if (tradableAt != null && tradableAt > frameTradableAt) frameTradableAt = tradableAt;
-    if (releasedAt != null && (dataCutoff == null || releasedAt > dataCutoff)) dataCutoff = releasedAt;
+    if (tradableAt != null && timestampMs(tradableAt) > timestampMs(frameTradableAt)) {
+      frameTradableAt = tradableAt;
+    }
+    if (releasedAt != null && (dataCutoff == null
+      || timestampMs(releasedAt) > timestampMs(dataCutoff))) {
+      dataCutoff = releasedAt;
+    }
     const latest = rows.at(-1);
     if (latest) {
       inputs.push({ ...latest, inputStatus: 'AVAILABLE' });
@@ -211,19 +243,39 @@ export function* iteratePitFrames(
   rows: PitObservation[],
   events: PitDecisionEvent[],
 ): Generator<PitFrame, void, undefined> {
+  const timestampCache = new Map<string, number>();
+  const timestampMs = (value: string): number => {
+    const cached = timestampCache.get(value);
+    if (cached != null) return cached;
+    const parsed = isoTimestampMs(value);
+    timestampCache.set(value, parsed);
+    return parsed;
+  };
+  for (const row of rows) {
+    if (timestampMs(row.tradableAt) < timestampMs(row.releasedAt)) {
+      throw new Error(`PIT row tradableAt precedes releasedAt: ${row.seriesId}`);
+    }
+  }
+  for (const event of events) {
+    if (timestampMs(event.tradableAt) < timestampMs(event.decisionAt)) {
+      throw new Error(`PIT event tradableAt precedes decisionAt: ${event.modelDate}`);
+    }
+  }
   const releases = rows.slice().sort((a, b) =>
-    a.releasedAt.localeCompare(b.releasedAt)
+    timestampMs(a.releasedAt) - timestampMs(b.releasedAt)
     || a.seriesId.localeCompare(b.seriesId)
     || a.observationDate.localeCompare(b.observationDate)
     || a.vintageDate.localeCompare(b.vintageDate));
-  const orderedEvents = events.slice().sort((a, b) => a.decisionAt.localeCompare(b.decisionAt));
+  const orderedEvents = events.slice().sort((a, b) =>
+    timestampMs(a.decisionAt) - timestampMs(b.decisionAt));
   const active = new Map<string, ActiveSeries>();
   let cursor = 0;
   for (const event of orderedEvents) {
-    while (cursor < releases.length && releases[cursor].releasedAt <= event.decisionAt) {
-      activateRow(active, releases[cursor++]);
+    while (cursor < releases.length
+      && timestampMs(releases[cursor].releasedAt) <= timestampMs(event.decisionAt)) {
+      activateRow(active, releases[cursor++], timestampMs);
     }
-    yield frameFromActive(active, event);
+    yield frameFromActive(active, event, timestampMs);
   }
 }
 

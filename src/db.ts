@@ -1,18 +1,40 @@
 import type { Obs, SeriesMap, Snapshot, Verdict } from './metrics';
 import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
-import { validateReleaseOverride } from './pit';
-
-const STRICT_ISO_RE = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{3})?Z$/;
+import { compareIsoTimestamps, isoTimestampMs, validateReleaseOverride } from './pit';
 
 function requireIsoTimestamp(value: string, field: string): void {
-  if (!STRICT_ISO_RE.test(value) || !Number.isFinite(Date.parse(value))) throw new Error(`invalid ${field}`);
+  isoTimestampMs(value, field);
 }
 
-async function validateOverrideCreationTimes(db: D1Database): Promise<void> {
-  const rows = await db.prepare('SELECT created_at FROM release_calendar_overrides')
-    .all<{ created_at: string }>();
-  for (const row of rows.results ?? []) requireIsoTimestamp(row.created_at, 'override createdAt');
+async function validateOverrideTimings(db: D1Database, releaseResolutionAt: string): Promise<void> {
+  const releaseResolutionMs = isoTimestampMs(releaseResolutionAt, 'release resolutionAt');
+  const rows = await db.prepare(
+    'SELECT series_id,vintage_date,created_at,released_at,tradable_at FROM release_calendar_overrides',
+  ).all<{
+    series_id: string; vintage_date: string; created_at: string;
+    released_at: string; tradable_at: string;
+  }>();
+  const versions = new Set<string>();
+  for (const row of rows.results ?? []) {
+    const createdAtMs = isoTimestampMs(row.created_at, 'override createdAt');
+    const version = `${row.series_id}|${row.vintage_date}|${createdAtMs}`;
+    if (versions.has(version)) throw new Error('duplicate override createdAt instant');
+    versions.add(version);
+    if (createdAtMs <= releaseResolutionMs) {
+      validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
+    }
+  }
+}
+
+async function validatePitTimings(db: D1Database): Promise<void> {
+  const rows = await db.prepare('SELECT fetched_at,released_at,tradable_at FROM observations_pit')
+    .all<{ fetched_at: string; released_at: string; tradable_at: string }>();
+  for (const row of rows.results ?? []) {
+    const fetchedAtMs = isoTimestampMs(row.fetched_at, 'raw fetchedAt');
+    if (!Number.isFinite(fetchedAtMs)) throw new Error('invalid raw fetchedAt');
+    validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
+  }
 }
 
 export async function maxObsDate(db: D1Database, seriesId: string): Promise<string | null> {
@@ -55,16 +77,30 @@ export async function loadReleaseOverrides(
   const rows = await db.prepare(
     `SELECT vintage_date, released_at, tradable_at, created_at FROM release_calendar_overrides
      WHERE series_id = ? AND vintage_date >= ?
-     ORDER BY vintage_date, created_at`,
+     ORDER BY vintage_date`,
   ).bind(seriesId, fromVintage)
     .all<{ vintage_date: string; released_at: string; tradable_at: string; created_at: string }>();
   const eligible = (rows.results ?? []).filter(row => {
     requireIsoTimestamp(row.created_at, 'override createdAt');
-    return row.created_at <= releaseResolutionAt;
+    if (compareIsoTimestamps(row.created_at, releaseResolutionAt) > 0) return false;
+    validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
+    return true;
   });
-  return new Map(eligible.map(row => [row.vintage_date, {
-    releasedAt: row.released_at, tradableAt: row.tradable_at,
-  }]));
+  const selected = new Map<string, { createdAt: string; override: ReleaseOverride }>();
+  const versions = new Set<string>();
+  for (const row of eligible) {
+    const version = `${row.vintage_date}|${isoTimestampMs(row.created_at)}`;
+    if (versions.has(version)) throw new Error('duplicate override createdAt instant');
+    versions.add(version);
+    const previous = selected.get(row.vintage_date);
+    if (previous == null || compareIsoTimestamps(row.created_at, previous.createdAt) > 0) {
+      selected.set(row.vintage_date, {
+        createdAt: row.created_at,
+        override: { releasedAt: row.released_at, tradableAt: row.tradable_at },
+      });
+    }
+  }
+  return new Map([...selected].map(([vintageDate, value]) => [vintageDate, value.override]));
 }
 
 export async function stagePitObservations(
@@ -385,7 +421,8 @@ export async function loadPitObservations(
   releaseResolutionAt: string,
 ): Promise<PitObservation[]> {
   requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
-  await validateOverrideCreationTimes(db);
+  await validateOverrideTimings(db, releaseResolutionAt);
+  await validatePitTimings(db);
   const rows = await db.prepare(
     `SELECT raw.series_id,raw.observation_date,raw.vintage_date,
             COALESCE(overrides.released_at,raw.released_at) AS released_at,
@@ -401,12 +438,15 @@ export async function loadPitObservations(
      LEFT JOIN release_calendar_overrides overrides
        ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
       AND overrides.created_at=(
-        SELECT MAX(candidate.created_at) FROM release_calendar_overrides candidate
+        SELECT candidate.created_at FROM release_calendar_overrides candidate
         WHERE candidate.series_id=raw.series_id AND candidate.vintage_date=raw.vintage_date
-          AND candidate.created_at<=?
+          AND julianday(candidate.created_at)<=julianday(?)
+        ORDER BY julianday(candidate.created_at) DESC LIMIT 1
       )
-     ORDER BY released_at,raw.series_id,raw.observation_date,raw.vintage_date`,
-  ).bind(releaseResolutionAt).all<any>();
+     WHERE julianday(raw.fetched_at)<=julianday(?)
+     ORDER BY julianday(COALESCE(overrides.released_at,raw.released_at)),
+              raw.series_id,raw.observation_date,raw.vintage_date`,
+  ).bind(releaseResolutionAt, releaseResolutionAt).all<any>();
   return (rows.results ?? []).map(row => {
     if (row.override_released_at != null || row.override_tradable_at != null) {
       validateReleaseOverride({
@@ -428,7 +468,8 @@ export async function officialPitDecisionEvents(
   releaseResolutionAt: string,
 ): Promise<PitDecisionEvent[]> {
   requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
-  await validateOverrideCreationTimes(db);
+  await validateOverrideTimings(db, releaseResolutionAt);
+  await validatePitTimings(db);
   const rows = await db.prepare(
     `WITH ranked AS (
        SELECT raw.observation_date,
@@ -437,21 +478,25 @@ export async function officialPitDecisionEvents(
               overrides.released_at AS override_released_at,
               overrides.tradable_at AS override_tradable_at,
               ROW_NUMBER() OVER (
-                PARTITION BY raw.observation_date ORDER BY raw.vintage_date,raw.released_at
+                PARTITION BY raw.observation_date
+                ORDER BY raw.vintage_date,julianday(COALESCE(overrides.released_at,raw.released_at))
               ) AS n
        FROM observations_pit raw
        LEFT JOIN release_calendar_overrides overrides
          ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
         AND overrides.created_at=(
-          SELECT MAX(candidate.created_at) FROM release_calendar_overrides candidate
+          SELECT candidate.created_at FROM release_calendar_overrides candidate
           WHERE candidate.series_id=raw.series_id AND candidate.vintage_date=raw.vintage_date
-            AND candidate.created_at<=?
+            AND julianday(candidate.created_at)<=julianday(?)
+          ORDER BY julianday(candidate.created_at) DESC LIMIT 1
         )
        WHERE raw.series_id='WALCL'
+         AND julianday(raw.fetched_at)<=julianday(?)
      )
      SELECT observation_date,released_at,tradable_at,override_released_at,override_tradable_at
-     FROM ranked WHERE n=1 ORDER BY released_at`,
-  ).bind(releaseResolutionAt).all<{
+     FROM ranked WHERE n=1 AND julianday(released_at)<=julianday(?)
+     ORDER BY julianday(released_at)`,
+  ).bind(releaseResolutionAt, releaseResolutionAt, releaseResolutionAt).all<{
     observation_date: string; released_at: string; tradable_at: string;
     override_released_at: string | null; override_tradable_at: string | null;
   }>();
@@ -661,13 +706,15 @@ function validateSnapshotInputs(
     throw new Error('official PIT manifest must contain every configured series exactly once');
   }
   for (const input of inputs) {
-    if (input.inputStatus === 'AVAILABLE' && input.releasedAt > decisionAt) {
+    if (input.inputStatus === 'AVAILABLE'
+      && compareIsoTimestamps(input.releasedAt, decisionAt) > 0) {
       throw new Error(`future PIT vintage in official manifest: ${input.seriesId}`);
     }
     if (input.inputStatus === 'AVAILABLE' && input.observationDate > snapshotDate) {
       throw new Error(`future observation date in official manifest: ${input.seriesId}`);
     }
-    if (input.inputStatus === 'AVAILABLE' && input.tradableAt > provenanceTradableAt) {
+    if (input.inputStatus === 'AVAILABLE'
+      && compareIsoTimestamps(input.tradableAt, provenanceTradableAt) > 0) {
       throw new Error(`PIT input is not tradable by official snapshot time: ${input.seriesId}`);
     }
   }
