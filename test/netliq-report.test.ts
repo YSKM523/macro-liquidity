@@ -14,6 +14,14 @@ describe('net-liquidity challenger report renderer', () => {
       quintiles: [{ quintile: 1, count: 20, mean: 0.01, median: 0.02, negativeProbability: 0.4, tail10: -0.1 }],
     };
     const markdown = renderNetLiquidityReport({
+      schemaVersion: 2,
+      methodologyVersion: 'PR11_RESEARCH_V2_REVIEW_AMENDED',
+      preregistrationStatus: 'AMENDED_AFTER_REVIEW',
+      amendments: [
+        { id: 'A-001', kind: 'REVIEW_CORRECTNESS', implementationCommit: '30f2ef9', change: 'Wed+7 availability', chronology: 'after initial review' },
+        { id: 'A-002', kind: 'POST_FETCH_DATA_HYGIENE', implementationCommit: '47e2358', change: '7-day gap cap', chronology: 'after fetch before initial report' },
+        { id: 'A-003', kind: 'REVIEW_TRUST_BOUNDARY', implementationCommit: '0fff138', change: 'schema-v2 provenance', chronology: 'after initial review' },
+      ],
       snapshotId: 'snapshot-1', snapshotSha256: 'abc', retrievedAt: '2026-07-22T00:00:00Z',
       evidenceClass: 'RESEARCH_CURRENT_VINTAGE', replacementEligible: false,
       sample: { weeklyPointCount: 100, firstWeeklyDate: '2003-01-01', lastWeeklyDate: '2026-01-01', rawScoredCount: 80, smoothScoredCount: 80, highAgreementCount: 60, lowAgreementCount: 20 },
@@ -32,5 +40,11 @@ describe('net-liquidity challenger report renderer', () => {
     expect(markdown).toContain('DROP_RESEARCH');
     expect(markdown).toContain('Champion');
     expect(markdown).toContain('无需数据库回滚');
+    expect(markdown).toContain('Corrected');
+    expect(markdown).toContain('INVALIDATED_BY_REVIEW');
+    expect(markdown).toContain('Wed+7');
+    expect(markdown).toContain('POST_FETCH_DATA_HYGIENE');
+    expect(markdown).toContain('schema-v2');
+    expect(markdown).not.toContain('No formula, window, direction, fold, or gate was changed after observing results.');
   });
 });

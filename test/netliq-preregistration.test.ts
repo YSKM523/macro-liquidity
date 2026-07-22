@@ -31,6 +31,7 @@ describe('net-liquidity challenger preregistration', () => {
       expect.objectContaining({ id: 'A-003', kind: 'REVIEW_TRUST_BOUNDARY', implementationCommit: '0fff138' }),
     ]));
     expect(PREREGISTRATION.initialReport).toMatchObject({ status: 'INVALIDATED_BY_REVIEW', publicationCommit: '47e2358' });
+    expect(PREREGISTRATION.correctedReport).toMatchObject({ status: 'GENERATED_ONCE_AFTER_REVIEW', snapshotSchemaVersion: 2 });
     expect(PREREGISTRATION.formulaAmended).toBe(false);
   });
 });

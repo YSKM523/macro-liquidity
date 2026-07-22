@@ -9,6 +9,8 @@ describe('PR-11 research documentation contract', () => {
     for (const phrase of [
       '连续净流动性 Challenger', 'RESEARCH_CURRENT_VINTAGE', 'Raw', 'Smooth',
       '0.45', '0.35', '0.20', 'DROP_RESEARCH', 'replacementEligible=false',
+      'PR11_RESEARCH_V2_REVIEW_AMENDED', 'Wed+7', 'POST_FETCH_DATA_HYGIENE',
+      'INVALIDATED_BY_REVIEW', '0.2655', '0.2201', '0.2959', '0.1559',
     ]) expect(algorithm).toContain(phrase);
   });
 
@@ -19,6 +21,11 @@ describe('PR-11 research documentation contract', () => {
       expect(content).toContain('PR-11');
       expect(content).toContain('DROP_RESEARCH');
       expect(content).toContain('RESEARCH_CURRENT_VINTAGE');
+      expect(content).toContain('Wed+7');
+      expect(content).toContain('schema-v2');
+      expect(content).toContain('INVALIDATED_BY_REVIEW');
+      expect(content).toContain('0.2655');
+      expect(content).toContain('0.2959');
     }
     expect(files[2]).toContain('PR-11 | 已完成（本地候选）');
   });

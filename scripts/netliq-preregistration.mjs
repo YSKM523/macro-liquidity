@@ -75,7 +75,7 @@ export const PREREGISTRATION = Object.freeze({
     reason: 'Holiday-week timing could use a pre-release Friday.',
   },
   correctedReport: {
-    status: 'REQUIRED_AFTER_REVIEW',
+    status: 'GENERATED_ONCE_AFTER_REVIEW',
     snapshotSchemaVersion: 2,
   },
   replacementEligible: false,

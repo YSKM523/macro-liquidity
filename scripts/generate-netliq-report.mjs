@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { renderNetLiquidityReport } from './netliq-report.mjs';
 import { runNetLiquidityResearch } from './run-netliq-research.mjs';
 
-const snapshotId = 'netliq-current-vintage-2026-07-22';
+const snapshotId = 'netliq-current-vintage-2026-07-22-corrected-v2';
 const snapshotPath = resolve(`scripts/data/${snapshotId}.json`);
 const manifestPath = resolve(`scripts/data/${snapshotId}.manifest.json`);
 const snapshotText = await readFile(snapshotPath, 'utf8');

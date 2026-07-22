@@ -117,7 +117,7 @@ flowchart TD
 - **`/api/walkforward`** —— 扩窗 train → embargo → OOS test 滚动,三臂对比(WF 自动拟合 / 等权 / 当前手调)。**裁决:自动调权过拟合;等权 ≈ 手调;edge 在因子选择不在精确权重。**
 - **综合 IC@13w 轨迹**:`0.127 → 0.195 → 0.208 → 0.227 → 0.255`；`Sharpe 0.83 → 1.10` 仅为 **`LEGACY_WEEKLY`** 历史诊断。
 - **负结果归档(`docs/ALGORITHM.md` §10)**:测过「全球央行流动性(Fed+ECB+BOJ)领先美股」—— 24 年两种构造都**弱、regime 不稳、不比 Fed-only 强 → 不采用**。离线研究脚本见 [`scripts/`](scripts/)。
-- **PR-11 连续净流动性 Challenger** —— 预注册 Raw/Smooth、strict prior-only MAD、13 周 overlapping/non-overlapping IC、固定日历 folds 与 bootstrap；当前版本 FRED 数据仅属 `RESEARCH_CURRENT_VINTAGE`。尽管 headline IC 为正，固定 gate 只得到 3 个正 fold，结论 `INCONCLUSIVE`、决策 `DROP_RESEARCH`、`replacementEligible=false`；Champion 完全不变。完整报告见 [`docs/research/NETLIQ_CHALLENGER_OOS_REPORT.md`](docs/research/NETLIQ_CHALLENGER_OOS_REPORT.md)。
+- **PR-11 连续净流动性 Challenger** —— 审计版本 `PR11_RESEARCH_V2_REVIEW_AMENDED`使用 schema-v2 快照。独立复审发现原 Wed+2 在节假日周可早于数据发布，故改为保守 `Wed+7`；初版报告标记 `INVALIDATED_BY_REVIEW`，7 日 SPX 缺口上限明确记为 `POST_FETCH_DATA_HYGIENE`。corrected Raw overlap/non-overlap IC 为 0.2655/0.2201，agreement-confirmed 为 0.2959/0.1559；仍只有 3 个正 fold，结论 `INCONCLUSIVE`、决策 `DROP_RESEARCH`、`RESEARCH_CURRENT_VINTAGE`、`replacementEligible=false`，Champion 完全不变。完整报告见 [`docs/research/NETLIQ_CHALLENGER_OOS_REPORT.md`](docs/research/NETLIQ_CHALLENGER_OOS_REPORT.md)。
 
 ---
 

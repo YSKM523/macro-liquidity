@@ -1845,16 +1845,18 @@ research: continuous net liquidity challenger
 内容：
 
 - [x] gap13 / impulse4 / impulse13，严格 prior-only 156 周 MAD、至少 52 周历史
-- [x] Raw/Smooth 双轨、周三 observation / 周五 availability 与 HIGH/LOW/TRANSITION agreement
+- [x] Raw/Smooth 双轨、周三 observation / 审计后保守 `Wed+7` availability 与 HIGH/LOW/TRANSITION agreement
 - [x] overlapping/non-overlapping IC、seeded moving-block bootstrap、固定六个日历 fold、quintile 与 disagreement diagnostics
-- [x] 主 FRED CSV 当前版本 snapshot + manifest + exact URL/date range/SHA-256
-- [x] 抓取前预注册并一次性生成 OOS 研究报告
+- [x] 主 FRED CSV 当前版本 schema-v2 snapshot + manifest + exact id/cosd/coed URL/date range/SHA-256
+- [x] 保留抓取前原预注册；初版报告标记 `INVALIDATED_BY_REVIEW`，corrected 报告一次性生成
 - [x] 冻结结论 `INCONCLUSIVE`、决策 `DROP_RESEARCH`、`RESEARCH_CURRENT_VINTAGE`、replacementEligible=false
 - [x] Shadow only；未修改 Champion、正式 API/快照、仓位或数据库
 
-PR-11 实证摘要：Raw overlapping/non-overlapping IC 为 0.2389/0.0362（n=510/39），Smooth 为 0.2555/0.2526（n=510/39），agreement-confirmed 为 0.2637/0.2030（n=465/39），bootstrap 95% CI [0.0666, 0.4224]、p=0.0045，agreement rate 91.18%。固定六 fold 中两个因 FRED SP500 仅覆盖 2016-07 起而为空，2013–2016 可评估尾段为负，其余三个为正；空 fold 未动态重分，正 fold 数 3 未达到预注册的至少 4 个门槛。
+PR-11 审计版本 `PR11_RESEARCH_V2_REVIEW_AMENDED`明确记录三项修订：节假日发布正确性使 availability 从 Wed+2 变为 `Wed+7`；7 日 SPX 行匹配上限属 `POST_FETCH_DATA_HYGIENE`而非原预注册；快照改为严格验证的 schema-v2 provenance。公式、权重、prior-only MAD、horizon、folds、bootstrap 与 gate 均未调参。
 
-PR-11 已知限制：本地 artifact 是 2026-07-22 抓取的 FRED 当前版本，不是 ALFRED/PIT，无法证明历史时点可见值；SP500 是不含股息的价格指数且只有约 10 年；名义 Thursday-release/Friday-tradable lag 不能修复 revision bias；本研究只报告 IC/排序，不是可交易组合回测。
+PR-11 corrected 实证摘要：Raw overlapping/non-overlapping IC 为 0.2655/0.2201（n=509/40），Smooth 为 0.2846/0.3229（n=509/40），agreement-confirmed 为 0.2959/0.1559（n=465/39），bootstrap 95% CI [0.1019, 0.4455]、p=0.0015，agreement rate 91.36%。固定六 fold 中两个因 FRED SP500 仅覆盖 2016-07 起而为空，2013–2016 可评估尾段为负，其余三个为正；空 fold 未动态重分，正 fold 数 3 未达到至少 4 个的未改变门槛。
+
+PR-11 已知限制：本地 artifact 是 2026-07-22 抓取的 FRED 当前版本，不是 ALFRED/PIT，无法证明历史时点可见值；SP500 是不含股息的价格指数且只有约 10 年；`Wed+7` 保守 lag 只修复节假日周时序，不能修复 revision bias；本研究只报告 IC/排序，不是可交易组合回测。
 
 PR-11 回滚：回退 base `f803705` 后的 PR-11 commits 即可；本 PR 无 migration、无生产/远程数据库写入，不需要删除或恢复任何数据库数据。
 

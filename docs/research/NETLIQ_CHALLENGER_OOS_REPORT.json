@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 2,
+  "preregistrationStatus": "AMENDED_AFTER_REVIEW",
+  "methodologyVersion": "PR11_RESEARCH_V2_REVIEW_AMENDED",
+  "amendments": [
+    {
+      "id": "A-001",
+      "kind": "REVIEW_CORRECTNESS",
+      "implementationCommit": "30f2ef9",
+      "chronology": "Added after initial report review; invalidates the initial report because Wed+2 could execute before delayed holiday publication.",
+      "change": "Availability bound changed from observation Wednesday +2 to +7 calendar days.",
+      "tuning": false
+    },
+    {
+      "id": "A-002",
+      "kind": "POST_FETCH_DATA_HYGIENE",
+      "implementationCommit": "47e2358",
+      "chronology": "Added after frozen-data commit 8180851 and before the initial formal report command/publication commit 47e2358.",
+      "change": "Reject SPX start/end matches more than 7 calendar days beyond their requested bound.",
+      "preregistered": false,
+      "tuning": false
+    },
+    {
+      "id": "A-003",
+      "kind": "REVIEW_TRUST_BOUNDARY",
+      "implementationCommit": "0fff138",
+      "chronology": "Added after initial report review before corrected report generation.",
+      "change": "Canonical schema-v2 snapshot/manifest validation and exact id/cosd/coed URL binding.",
+      "tuning": false
+    }
+  ],
+  "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+  "snapshotId": "netliq-current-vintage-2026-07-22-corrected-v2",
+  "snapshotSha256": "e535e6cd7cd3e08795e22687cc97a82674cc0207c8b966bac8472e59d6680254",
+  "retrievedAt": "2026-07-22T15:35:56.987Z",
+  "sample": {
+    "weeklyPointCount": 1205,
+    "firstWeeklyDate": "2003-06-18",
+    "lastWeeklyDate": "2026-07-15",
+    "rawScoredCount": 1140,
+    "smoothScoredCount": 1140,
+    "highAgreementCount": 1058,
+    "lowAgreementCount": 82
+  },
+  "replacementEligible": false,
+  "decision": {
+    "evidenceConclusion": "INCONCLUSIVE",
+    "decision": "DROP_RESEARCH",
+    "replacementEligible": false
+  },
+  "oos": {
+    "evidenceClass": "RESEARCH_CURRENT_VINTAGE",
+    "methodology": {
+      "version": "PR11_RESEARCH_V2_REVIEW_AMENDED",
+      "direction": "POSITIVE",
+      "horizonWeeks": 13,
+      "normalizationCapWeeks": 156,
+      "minimumPriorWeeks": 52,
+      "foldCount": 6,
+      "bootstrapSeed": 11011,
+      "bootstrapBlockLength": 13,
+      "effectiveAvailabilityLagDays": 7,
+      "maxStartGapDays": 7,
+      "maxEndGapDays": 7,
+      "amendments": [
+        "A-001",
+        "A-002",
+        "A-003"
+      ],
+      "fittedParameters": false
+    },
+    "raw": {
+      "overlapping": {
+        "ic": 0.26547717736600385,
+        "n": 509
+      },
+      "nonOverlapping": {
+        "ic": 0.2200750469043152,
+        "n": 40
+      },
+      "bootstrap": {
+        "ciLow": 0.08256871050357466,
+        "ciHigh": 0.41645644858692366,
+        "pValue": 0.0025,
+        "iterations": 2000,
+        "seed": 11011,
+        "blockLength": 13
+      },
+      "folds": [
+        {
+          "fold": 1,
+          "trainN": 0,
+          "evaluationN": 0,
+          "evaluationStart": "2005-01-01",
+          "evaluationEndExclusive": "2009-01-01",
+          "ic": null
+        },
+        {
+          "fold": 2,
+          "trainN": 0,
+          "evaluationN": 0,
+          "evaluationStart": "2009-01-01",
+          "evaluationEndExclusive": "2013-01-01",
+          "ic": null
+        },
+        {
+          "fold": 3,
+          "trainN": 0,
+          "evaluationN": 24,
+          "evaluationStart": "2013-01-01",
+          "evaluationEndExclusive": "2017-01-01",
+          "ic": -0.4026086956521739
+        },
+        {
+          "fold": 4,
+          "trainN": 11,
+          "evaluationN": 209,
+          "evaluationStart": "2017-01-01",
+          "evaluationEndExclusive": "2021-01-01",
+          "ic": 0.2094537041905463
+        },
+        {
+          "fold": 5,
+          "trainN": 220,
+          "evaluationN": 156,
+          "evaluationStart": "2021-01-01",
+          "evaluationEndExclusive": "2024-01-01",
+          "ic": 0.4158492832419276
+        },
+        {
+          "fold": 6,
+          "trainN": 376,
+          "evaluationN": 120,
+          "evaluationStart": "2024-01-01",
+          "evaluationEndExclusive": "2100-01-01",
+          "ic": 0.22273074519063824
+        }
+      ],
+      "positiveFoldCount": 3,
+      "signStability": 0.75,
+      "quintiles": [
+        {
+          "quintile": 1,
+          "count": 101,
+          "mean": 0.02412551477915773,
+          "median": 0.027849879324779225,
+          "negativeProbability": 0.25742574257425743,
+          "tail10": -0.058400189326706875
+        },
+        {
+          "quintile": 2,
+          "count": 102,
+          "mean": 0.02584971786908551,
+          "median": 0.03688909654758987,
+          "negativeProbability": 0.29411764705882354,
+          "tail10": -0.05904774501580223
+        },
+        {
+          "quintile": 3,
+          "count": 102,
+          "mean": 0.02702711487467319,
+          "median": 0.03692741087191631,
+          "negativeProbability": 0.24509803921568626,
+          "tail10": -0.04895919688784108
+        },
+        {
+          "quintile": 4,
+          "count": 102,
+          "mean": 0.029706887231054236,
+          "median": 0.03965689663350558,
+          "negativeProbability": 0.29411764705882354,
+          "tail10": -0.0746373031048815
+        },
+        {
+          "quintile": 5,
+          "count": 102,
+          "mean": 0.06485204741055331,
+          "median": 0.06646231892186505,
+          "negativeProbability": 0.08823529411764706,
+          "tail10": 0.005680452623269284
+        }
+      ]
+    },
+    "smooth": {
+      "overlapping": {
+        "ic": 0.2846253313447341,
+        "n": 509
+      },
+      "nonOverlapping": {
+        "ic": 0.32288930581613506,
+        "n": 40
+      },
+      "bootstrap": {
+        "ciLow": 0.09679139320883727,
+        "ciHigh": 0.42978782927826303,
+        "pValue": 0.0015,
+        "iterations": 2000,
+        "seed": 11011,
+        "blockLength": 13
+      },
+      "folds": [
+        {
+          "fold": 1,
+          "trainN": 0,
+          "evaluationN": 0,
+          "evaluationStart": "2005-01-01",
+          "evaluationEndExclusive": "2009-01-01",
+          "ic": null
+        },
+        {
+          "fold": 2,
+          "trainN": 0,
+          "evaluationN": 0,
+          "evaluationStart": "2009-01-01",
+          "evaluationEndExclusive": "2013-01-01",
+          "ic": null
+        },
+        {
+          "fold": 3,
+          "trainN": 0,
+          "evaluationN": 24,
+          "evaluationStart": "2013-01-01",
+          "evaluationEndExclusive": "2017-01-01",
+          "ic": -0.4078260869565217
+        },
+        {
+          "fold": 4,
+          "trainN": 11,
+          "evaluationN": 209,
+          "evaluationStart": "2017-01-01",
+          "evaluationEndExclusive": "2021-01-01",
+          "ic": 0.2479481045270519
+        },
+        {
+          "fold": 5,
+          "trainN": 220,
+          "evaluationN": 156,
+          "evaluationStart": "2021-01-01",
+          "evaluationEndExclusive": "2024-01-01",
+          "ic": 0.4088950704114049
+        },
+        {
+          "fold": 6,
+          "trainN": 376,
+          "evaluationN": 120,
+          "evaluationStart": "2024-01-01",
+          "evaluationEndExclusive": "2100-01-01",
+          "ic": 0.2626918536009445
+        }
+      ],
+      "positiveFoldCount": 3,
+      "signStability": 0.75,
+      "quintiles": [
+        {
+          "quintile": 1,
+          "count": 101,
+          "mean": 0.023687117859426673,
+          "median": 0.030593498936413166,
+          "negativeProbability": 0.25742574257425743,
+          "tail10": -0.05500118272693022
+        },
+        {
+          "quintile": 2,
+          "count": 102,
+          "mean": 0.02015302667376292,
+          "median": 0.031058868580329135,
+          "negativeProbability": 0.35294117647058826,
+          "tail10": -0.06612861094772828
+        },
+        {
+          "quintile": 3,
+          "count": 102,
+          "mean": 0.026396495800198466,
+          "median": 0.03710638651258935,
+          "negativeProbability": 0.2549019607843137,
+          "tail10": -0.06476060219543994
+        },
+        {
+          "quintile": 4,
+          "count": 102,
+          "mean": 0.031981572820404855,
+          "median": 0.040926930225154035,
+          "negativeProbability": 0.23529411764705882,
+          "tail10": -0.0746373031048815
+        },
+        {
+          "quintile": 5,
+          "count": 102,
+          "mean": 0.0693387710017141,
+          "median": 0.06832047679972864,
+          "negativeProbability": 0.0784313725490196,
+          "tail10": 0.018041771541395576
+        }
+      ]
+    },
+    "agreementConfirmed": {
+      "overlapping": {
+        "ic": 0.2958923123928829,
+        "n": 465
+      },
+      "nonOverlapping": {
+        "ic": 0.15587044534412955,
+        "n": 39
+      },
+      "bootstrap": {
+        "ciLow": 0.10193608777310169,
+        "ciHigh": 0.4454641058913597,
+        "pValue": 0.0015,
+        "iterations": 2000,
+        "seed": 11011,
+        "blockLength": 13
+      },
+      "folds": [
+        {
+          "fold": 1,
+          "trainN": 0,
+          "evaluationN": 0,
+          "evaluationStart": "2005-01-01",
+          "evaluationEndExclusive": "2009-01-01",
+          "ic": null
+        },
+        {
+          "fold": 2,
+          "trainN": 0,
+          "evaluationN": 0,
+          "evaluationStart": "2009-01-01",
+          "evaluationEndExclusive": "2013-01-01",
+          "ic": null
+        },
+        {
+          "fold": 3,
+          "trainN": 0,
+          "evaluationN": 21,
+          "evaluationStart": "2013-01-01",
+          "evaluationEndExclusive": "2017-01-01",
+          "ic": -0.45714285714285713
+        },
+        {
+          "fold": 4,
+          "trainN": 10,
+          "evaluationN": 194,
+          "evaluationStart": "2017-01-01",
+          "evaluationEndExclusive": "2021-01-01",
+          "ic": 0.2311193106877098
+        },
+        {
+          "fold": 5,
+          "trainN": 203,
+          "evaluationN": 149,
+          "evaluationStart": "2021-01-01",
+          "evaluationEndExclusive": "2024-01-01",
+          "ic": 0.44337384364230004
+        },
+        {
+          "fold": 6,
+          "trainN": 352,
+          "evaluationN": 101,
+          "evaluationStart": "2024-01-01",
+          "evaluationEndExclusive": "2100-01-01",
+          "ic": 0.3041933605125218
+        }
+      ],
+      "positiveFoldCount": 3,
+      "signStability": 0.75,
+      "quintiles": [
+        {
+          "quintile": 1,
+          "count": 93,
+          "mean": 0.023482317393105034,
+          "median": 0.027849879324779225,
+          "negativeProbability": 0.26881720430107525,
+          "tail10": -0.05605644613138495
+        },
+        {
+          "quintile": 2,
+          "count": 93,
+          "mean": 0.02182121817919545,
+          "median": 0.031534716884447755,
+          "negativeProbability": 0.3118279569892473,
+          "tail10": -0.06052260026831264
+        },
+        {
+          "quintile": 3,
+          "count": 93,
+          "mean": 0.01759890388182672,
+          "median": 0.02895068006688617,
+          "negativeProbability": 0.2903225806451613,
+          "tail10": -0.06921210893961517
+        },
+        {
+          "quintile": 4,
+          "count": 93,
+          "mean": 0.03896198706322812,
+          "median": 0.053545340317758816,
+          "negativeProbability": 0.23655913978494625,
+          "tail10": -0.07453974204211425
+        },
+        {
+          "quintile": 5,
+          "count": 93,
+          "mean": 0.06898538270005765,
+          "median": 0.0665172788067645,
+          "negativeProbability": 0.06451612903225806,
+          "tail10": 0.018490158906256365
+        }
+      ]
+    },
+    "agreement": {
+      "comparableCount": 509,
+      "confirmedCount": 465,
+      "disagreementCount": 44,
+      "rate": 0.9135559921414538
+    },
+    "disagreement": {
+      "count": 44,
+      "meanForwardReturn": 0.03604756838142915,
+      "medianForwardReturn": 0.03872771484981563,
+      "negativeProbability": 0.25
+    },
+    "decision": {
+      "evidenceConclusion": "INCONCLUSIVE",
+      "decision": "DROP_RESEARCH",
+      "replacementEligible": false
+    }
+  }
+}

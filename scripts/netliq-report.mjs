@@ -34,13 +34,19 @@ ${quintiles}`;
 }
 
 export function renderNetLiquidityReport(report) {
-  return `# Continuous Net Liquidity Challenger — OOS Research Report
+  const amendmentRows = (report.amendments ?? []).map(amendment =>
+    `| ${amendment.id} | ${amendment.kind} | ${amendment.implementationCommit} | ${amendment.change} |`,
+  ).join('\n');
+  return `# Continuous Net Liquidity Challenger — Corrected OOS Research Report
 
-> This report was generated once from the frozen preregistration and immutable normalized snapshot. No formula, window, direction, fold, or gate was changed after observing results.
+> This corrected report was generated once from the canonical schema-v2 snapshot after independent review amendments. The formula, 0.45/0.35/0.20 weights, prior-only MAD, fixed folds, target horizon, bootstrap, and decision gate were not tuned. Timing and artifact provenance were corrected and are disclosed below; the initial report is \`INVALIDATED_BY_REVIEW\`.
 
 ## Status and evidence
 
 - Evidence class: \`${report.evidenceClass}\`
+- Methodology version: \`${report.methodologyVersion}\`
+- Contract status: \`${report.preregistrationStatus}\`
+- Snapshot schema: \`${report.schemaVersion}\`
 - Snapshot: \`${report.snapshotId}\`
 - Snapshot SHA-256: \`${report.snapshotSha256}\`
 - Retrieved at: \`${report.retrievedAt}\`
@@ -50,6 +56,17 @@ export function renderNetLiquidityReport(report) {
 - Production Champion: unchanged
 
 This is current-vintage FRED research, not ALFRED/PIT evidence. Historical revisions may be present. Therefore even favorable diagnostics cannot replace the Champion in this PR.
+
+## Amendment disclosure
+
+| ID | Kind | Implementation commit | Change |
+|---|---|---|---|
+${amendmentRows}
+
+- A-001 is a review-triggered correctness amendment: the conservative availability bound is now **Wed+7** calendar days before selecting the first eligible SPX close.
+- A-002 is \`POST_FETCH_DATA_HYGIENE\`: the seven-day SPX start/end gap cap was added after the initial data fetch but before the initial formal report; it was not preregistered.
+- A-003 is the review-triggered schema-v2 trust boundary and exact id/cosd/coed provenance validation.
+- The initial JSON/Markdown remain audit-only under \`*_INITIAL_INVALIDATED.*\`; this corrected output is the canonical PR-11 report.
 
 ## Sample
 
@@ -62,7 +79,7 @@ This is current-vintage FRED research, not ALFRED/PIT evidence. Historical revis
 | HIGH agreement | ${report.sample.highAgreementCount} |
 | LOW agreement | ${report.sample.lowAgreementCount} |
 
-SPX current-vintage coverage determines the evaluable target window. Signals use WALCL Wednesday data, become nominally available Friday, and start at the first SPX close within seven calendar days; the target ends at the first close within seven days after 91 calendar days. Long missing-price gaps are never bridged.
+SPX current-vintage coverage determines the evaluable target window. Signals use WALCL Wednesday data, reach the conservative availability bound seven calendar days later, and start at the first SPX close within seven calendar days after that bound; the target ends at the first close within seven days after 91 calendar days. Long missing-price gaps are never bridged.
 
 ## OOS diagnostics
 
@@ -84,15 +101,15 @@ ${diagnosticSection('Agreement-confirmed', report.oos.agreementConfirmed)}
 | Disagreement median forward return | ${percent(report.oos.disagreement.medianForwardReturn)} |
 | Disagreement negative probability | ${percent(report.oos.disagreement.negativeProbability)} |
 
-## Frozen decision interpretation
+## Unchanged decision-gate interpretation
 
-The preregistered gate uses the agreement-confirmed non-overlapping IC, positive-fold count, bootstrap p-value, independent count, and agreement rate. The observed conclusion is **${report.decision.evidenceConclusion}** and the only allowed action selected by the gate is **${report.decision.decision}**. \`REPLACE_CHAMPION\` is not an available outcome.
+The original unchanged gate uses the agreement-confirmed non-overlapping IC, positive-fold count, bootstrap p-value, independent count, and agreement rate. The corrected observed conclusion is **${report.decision.evidenceConclusion}** and the only allowed action selected by the gate is **${report.decision.decision}**. \`REPLACE_CHAMPION\` is not an available outcome.
 
 ## Known limitations
 
 - FRED CSV is a current-vintage snapshot; it does not reconstruct historically visible releases or revisions.
 - FRED SP500 coverage is shorter than the balance-sheet series, so early fixed folds can be empty. They are reported and never redistributed.
-- The nominal Thursday-release/Friday-tradable lag is conservative research timing, but does not repair vintage bias.
+- The review-amended Wed+7 bound is deliberately conservative and avoids the demonstrated holiday-release error, but it is not a historical release calendar and does not repair vintage bias.
 - SP500 is a price index without dividends. This is an IC study, not a tradable portfolio backtest or Sharpe comparison.
 - Overlapping 13-week observations are dependent; the non-overlapping sample and moving-block bootstrap are the more conservative diagnostics.
 - Raw/Smooth agreement is a preregistered direction filter, not a fitted confidence calibration.

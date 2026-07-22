@@ -44,5 +44,5 @@ This ledger separates the original preregistration from later correctness and tr
 ## Report status
 
 - `NETLIQ_CHALLENGER_OOS_REPORT_INITIAL_INVALIDATED.json` and `.md`: audit-only initial output from `47e2358`; status `INVALIDATED_BY_REVIEW`.
-- Corrected schema-v2 report: pending one-time regeneration after these amendments are committed and tested.
+- `NETLIQ_CHALLENGER_OOS_REPORT.json` and `.md`: canonical corrected schema-v2 report generated exactly once after focused amendment and renderer tests passed. Raw overlap/non-overlap IC is 0.2655/0.2201; agreement-confirmed is 0.2959/0.1559; the decision remains `INCONCLUSIVE` / `DROP_RESEARCH`.
 - Both report generations remain `RESEARCH_CURRENT_VINTAGE`; neither is production PIT proof, and `replacementEligible=false` remains mandatory.

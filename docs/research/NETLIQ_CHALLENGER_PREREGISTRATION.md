@@ -2,6 +2,8 @@
 
 Status: `PREREGISTERED_BEFORE_FETCH`
 
+> Audit notice: this is the preserved original contract, not the effective corrected methodology. Independent review invalidated its Wed+2/Friday timing. The effective `PR11_RESEARCH_V2_REVIEW_AMENDED` rule is `Wed+7`; the initial report is `INVALIDATED_BY_REVIEW`, and the non-preregistered SPX gap cap is recorded as `POST_FETCH_DATA_HYGIENE`. See `NETLIQ_CHALLENGER_AMENDMENTS.md`.
+
 Evidence class: `RESEARCH_CURRENT_VINTAGE`
 
 Production status: shadow research only
@@ -13,7 +15,7 @@ This contract was committed before the PR-11 FRED snapshot was fetched. After th
 
 Primary FRED CSV series: `WALCL`, `WDTGAL`, `WTREGEN`, `RRPONTSYD`, and `SP500`. The committed artifact is a dated current-vintage snapshot, not ALFRED/PIT history. It cannot prove what values were visible in the past and therefore cannot qualify a production replacement.
 
-Weekly observations anchor on each WALCL Wednesday. A signal is nominally available on Friday, after the normal Thursday H.4.1 publication. The 13-week SPX target starts at the first SPX close on or after that Friday and ends at the first close on or after 91 calendar days. A pre-Friday close is never used.
+Original historical rule (superseded): weekly observations anchor on each WALCL Wednesday. A signal was nominally available on Friday, after the normal Thursday H.4.1 publication. The 13-week SPX target started at the first SPX close on or after that Friday and ended at the first close on or after 91 calendar days. This rule is retained only as audit history; the corrected report uses the ledgered `Wed+7` rule and canonical schema-v2 artifact.
 
 All source series must be strictly increasing by date, duplicate-free, and finite. A required missing component removes that weekly point; zero is never imputed.
 

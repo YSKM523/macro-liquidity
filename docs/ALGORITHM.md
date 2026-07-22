@@ -158,17 +158,17 @@ latent = 0.45*gap13 + 0.35*impulse4 + 0.20*impulse13
 score = 100/(1+exp(-latent))
 ```
 
-三个分母均为至多 156 周、严格不含当前周的 rolling MAD；至少需要 52 个 prior valid observations，MAD 为零或非有限时不产生分数。Raw/Smooth 同为非平坦同方向才是 HIGH agreement，反向为 LOW，缺失/平坦为 TRANSITION。WALCL 周三信号名义上到周五才可交易，13 周收益从周五后七日内第一条 SP500 收盘起算；长缺口不会被跨越。
+三个分母均为至多 156 周、严格不含当前周的 rolling MAD；至少需要 52 个 prior valid observations，MAD 为零或非有限时不产生分数。Raw/Smooth 同为非平坦同方向才是 HIGH agreement，反向为 LOW，缺失/平坦为 TRANSITION。审计版本 `PR11_RESEARCH_V2_REVIEW_AMENDED` 以 WALCL 周三后 `Wed+7` 个日历日为保守可用下界，再取七日内第一条 SP500 收盘；长缺口不会被跨越。原 Wed+2 可在节假日周早于发布，故初版报告已标记 `INVALIDATED_BY_REVIEW`；7 日缺口上限记为 `POST_FETCH_DATA_HYGIENE`，公式、权重、MAD、horizon、folds、bootstrap 与 gate 均未调参。
 
-研究数据是 2026-07-22 固化的 FRED CSV 当前版本快照，证据等级为 `RESEARCH_CURRENT_VINTAGE`，不是 ALFRED/PIT，因此 `replacementEligible=false`。快照 SHA-256 为 `ffce5c984d606bac259adb8920f18b02e9a68d8e78bacaee521cf19178a36101`。
+研究数据是 2026-07-22 固化的 FRED CSV 当前版本 schema-v2 快照，证据等级为 `RESEARCH_CURRENT_VINTAGE`，不是 ALFRED/PIT，因此 `replacementEligible=false`。快照 SHA-256 为 `e535e6cd7cd3e08795e22687cc97a82674cc0207c8b966bac8472e59d6680254`。
 
 | Track | overlapping IC / n | non-overlapping IC / n | positive fixed folds |
 |---|---:|---:|---:|
-| Raw | 0.2389 / 510 | 0.0362 / 39 | 3 |
-| Smooth | 0.2555 / 510 | 0.2526 / 39 | 3 |
-| Agreement-confirmed | 0.2637 / 465 | 0.2030 / 39 | 3 |
+| Raw | 0.2655 / 509 | 0.2201 / 40 | 3 |
+| Smooth | 0.2846 / 509 | 0.3229 / 40 | 3 |
+| Agreement-confirmed | 0.2959 / 465 | 0.1559 / 39 | 3 |
 
-Agreement-confirmed moving-block bootstrap 95% CI 为 [0.0666, 0.4224]、p=0.0045，Raw/Smooth agreement rate 为 91.18%。但是固定的六个日历 fold 中，2005–2008 与 2009–2012 因 FRED SP500 覆盖不足为空，2013–2016 可评估尾段为负；按抓取前已提交的 gate，positive fold 必须至少 4 个，空 fold 不得动态重分。因此结论是 `INCONCLUSIVE`，决策是 `DROP_RESEARCH`，不能替换或接入 Champion。完整预注册、JSON 和报告见 `docs/research/`。
+Agreement-confirmed moving-block bootstrap 95% CI 为 [0.1019, 0.4455]、p=0.0015，Raw/Smooth agreement rate 为 91.36%。但是固定的六个日历 fold 中，2005–2008 与 2009–2012 因 FRED SP500 覆盖不足为空，2013–2016 可评估尾段为负；未改变的 gate 要求 positive fold 至少 4 个，空 fold 不得动态重分。因此结论是 `INCONCLUSIVE`，决策是 `DROP_RESEARCH`，不能替换或接入 Champion。完整的原始预注册、修订账本、JSON 和 corrected 报告见 `docs/research/`。
 
 ## 7. 数据流水线 + 可信度
 

@@ -6,11 +6,12 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ### PR-11 — Continuous net-liquidity challenger research
 
-- Preregistered a shadow-only Raw/Smooth continuous net-liquidity formula before fetching data: exact 0.45/0.35/0.20 weights, strict prior-only 156-week MAD normalization, 52-week minimum history, Friday availability, 13-week SPX target, seeded bootstrap, fixed calendar folds, and an immutable decision gate.
+- Preregistered a shadow-only Raw/Smooth continuous net-liquidity formula before fetching data: exact 0.45/0.35/0.20 weights, strict prior-only 156-week MAD normalization, 52-week minimum history, original Friday availability, 13-week SPX target, seeded bootstrap, fixed calendar folds, and an immutable decision gate.
 - Added chronological pure builders that reject missing, stale-week substitution, unsorted, duplicate, and non-finite inputs; both tracks emit level/change/impulse/trend/gap/acceleration, normalized dimensions, latent score, direction, and agreement confidence.
 - Added overlapping and interval-non-overlapping Spearman IC, seeded 13-observation moving-block bootstrap, six fixed expanding-prefix evaluation folds, quintile diagnostics, and Raw/Smooth disagreement statistics.
-- Froze a normalized primary-FRED current-vintage snapshot and manifest for WALCL, WDTGAL, WTREGEN, RRPONTSYD, and SP500 with exact URLs, retrieval time, date ranges, per-series SHA-256, and snapshot SHA-256 `ffce5c984d606bac259adb8920f18b02e9a68d8e78bacaee521cf19178a36101`.
-- Generated the preregistered report once. Agreement-confirmed overlapping IC was 0.2637 (n=465), non-overlapping IC 0.2030 (n=39), bootstrap 95% CI [0.0666, 0.4224], and agreement rate 91.18%, but only 3 fixed folds were positive; two early folds were empty because FRED SP500 begins in 2016 and the evaluable part of the 2013–2016 fold was negative.
+- Preserved the initial report as `INVALIDATED_BY_REVIEW` after review proved that Wed+2 could precede a delayed holiday release. Methodology `PR11_RESEARCH_V2_REVIEW_AMENDED` now uses conservative `Wed+7`; the seven-day SPX match cap is disclosed as non-preregistered `POST_FETCH_DATA_HYGIENE`. Formula, weights, MAD, horizon, folds, bootstrap, and gate were not tuned.
+- Froze and strictly verifies a canonical schema-v2 current-vintage snapshot/manifest for the exact five FRED series and exact `id`/`cosd`/`coed` URLs; snapshot SHA-256 is `e535e6cd7cd3e08795e22687cc97a82674cc0207c8b966bac8472e59d6680254`.
+- Generated the corrected report exactly once. Raw overlapping/non-overlapping IC was 0.2655/0.2201 (n=509/40); agreement-confirmed was 0.2959/0.1559 (n=465/39), bootstrap 95% CI [0.1019, 0.4455], p=0.0015, and agreement rate 91.36%. Only 3 fixed folds were positive.
 - Recorded the frozen outcome as `INCONCLUSIVE` / `DROP_RESEARCH`. Evidence remains `RESEARCH_CURRENT_VINTAGE`, `replacementEligible=false`; no Champion score, weight, threshold, verdict, hysteresis, portfolio target, official snapshot, API, migration, deploy, or database was changed.
 
 ### PR-10 — Dashboard-aligned portfolio backtest
