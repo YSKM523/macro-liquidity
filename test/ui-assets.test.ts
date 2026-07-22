@@ -195,6 +195,18 @@ describe('static UI assets', () => {
     }
   });
 
+  it('renders the additive purged-validation taxonomy and guards every typed-null rate', () => {
+    const html = read('public/index.html');
+    const js = read('public/app.js');
+    expect(html).toContain('PURGED_VALIDATION_V1');
+    expect(js).toContain('renderPurgedValidation');
+    expect(js).toContain("metric.value == null ? '—'");
+    expect(js).toContain('PENDING_MATURITY');
+    expect(js).toContain('正式 verdict');
+    expect(js).toContain('下行召回');
+    expect(js).toContain('尾部风险');
+  });
+
   it('escapes adversarial provider provenance before inserting it as HTML', () => {
     const js = read('public/app.js');
     const source = js.match(/function escapeHtml\(value\)\s*\{[^}]+\}/s)?.[0];

@@ -159,6 +159,8 @@ describe('historical snapshot consumers', () => {
 
     const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(sql).toContain("decision_status = 'OK'");
+    expect(sql).toContain('pit_status');
+    expect(sql).toContain('netliq_dir');
   });
 
   it('exposes decision status while masking official score and verdict for non-OK history rows', async () => {

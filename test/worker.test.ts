@@ -445,6 +445,42 @@ describe('/api/robustness legacy methodology', () => {
     expect(body.strategy.methodology).toBe('LEGACY_WEEKLY');
     expect(body.caveats.join(' ')).toMatch(/LEGACY_WEEKLY/);
   });
+
+  it('adds purged validation using persisted verdicts and the existing portfolio target mapping', async () => {
+    dbState.backtestRows = Array.from({ length: 100 }, (_, index) => ({
+      date: new Date(Date.UTC(2023, 0, 2 + index * 7)).toISOString().slice(0, 10),
+      score: index % 2 ? 60 : 40,
+      spx: 100 + index,
+      verdict: index % 2 ? 'BEARISH' : 'BULLISH',
+      netliq_dir: index % 2 ? 'UP' : 'DOWN',
+      vix_eod: 20,
+      factors_json: JSON.stringify({ netliqTrend: index }),
+      pit_status: 'PIT',
+      model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64),
+      code_commit_sha: '0123456789abcdef0123456789abcdef01234567', data_run_id: `run-${index}`,
+      data_cutoff: '2026-07-15T23:59:59Z', decision_at: '2026-07-16T00:00:00Z', created_at: '2026-07-16T00:00:01Z',
+    }));
+
+    const response = await worker.fetch(new Request('https://example.test/api/robustness'), env);
+    const body = await response.json() as any;
+
+    expect(body.validation).toMatchObject({ status: 'OK', protocol: { protocol: 'PURGED_VALIDATION_V1', embargoDays: 91 } });
+    expect(body.validation.folds[0].metrics.formalVerdict.n).toBeGreaterThan(0);
+    expect(body.validation.folds[0].metrics.risk.precision.n).toBeGreaterThan(0);
+    expect(body.validation.holdout).toMatchObject({ status: 'PENDING_MATURITY', frozen: { holdoutFrom: '2026-07-23' } });
+  });
+
+  it('fails the additive validation closed without altering legacy robustness fields', async () => {
+    dbState.backtestRows = [{
+      date: '2024-01-01', score: 60, spx: 100, verdict: 'BULLISH', netliq_dir: 'UP', vix_eod: 20,
+      factors_json: '{}', pit_status: 'LEGACY_NON_PIT', model_version: 'LEGACY_UNVERSIONED',
+      config_hash: 'LEGACY_UNVERSIONED', code_commit_sha: 'LEGACY_UNVERSIONED',
+    }];
+    const response = await worker.fetch(new Request('https://example.test/api/robustness'), env);
+    const body = await response.json() as any;
+    expect(body.strategy.methodology).toBe('LEGACY_WEEKLY');
+    expect(body.validation).toMatchObject({ status: 'DATA_INCOMPLETE', folds: [], aggregateMetrics: null });
+  });
 });
 
 afterEach(() => {
