@@ -229,9 +229,26 @@ export async function runIngest(
         await renewOwnedLease(env.DB, runId);
         failedStep = 'snapshot';
         if (rebuildAll) {
-          await upsertOfficialSnapshot(env.DB, runId, snap, asOf(m.SP500 ?? [], date));
+          const outcome = await upsertOfficialSnapshot(env.DB, runId, snap, asOf(m.SP500 ?? [], date), {
+            dataRunId: runId,
+            dataCutoff: frame.dataCutoff,
+            decisionAt: frame.event.decisionAt,
+            tradableAt: frame.event.tradableAt,
+            inputs: frame.inputs,
+          });
+          if (outcome === 'FROZEN') {
+            const frozen = await officialVerdictAnchors(env.DB, date, date);
+            prev = frozen[0]?.verdict ?? prev;
+            snapshots++;
+            continue;
+          }
         } else {
-          await upsertNowcastSnapshot(env.DB, runId, snap, asOf(m.SP500 ?? [], date));
+          await upsertNowcastSnapshot(env.DB, runId, snap, asOf(m.SP500 ?? [], date), {
+            dataRunId: runId,
+            dataCutoff: frame.dataCutoff,
+            decisionAt: frame.event.decisionAt,
+            tradableAt: frame.event.tradableAt,
+          });
         }
         if (snap.verdict != null) prev = snap.verdict;
         snapshots++;

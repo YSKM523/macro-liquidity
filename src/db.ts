@@ -556,12 +556,96 @@ export function decisionWeek(date: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+export interface SnapshotProvenance {
+  dataRunId: string;
+  dataCutoff: string | null;
+  decisionAt: string;
+  tradableAt: string;
+  inputs: SnapshotInput[];
+}
+
+function validateSnapshotInputs(inputs: SnapshotInput[], decisionAt: string, snapshotDate: string): void {
+  if (inputs.length !== SERIES_IDS.length) throw new Error('official PIT manifest is incomplete');
+  const bySeries = new Map(inputs.map(input => [input.seriesId, input]));
+  if (bySeries.size !== SERIES_IDS.length || SERIES_IDS.some(id => !bySeries.has(id))) {
+    throw new Error('official PIT manifest must contain every configured series exactly once');
+  }
+  for (const input of inputs) {
+    if (input.inputStatus === 'AVAILABLE' && input.releasedAt > decisionAt) {
+      throw new Error(`future PIT vintage in official manifest: ${input.seriesId}`);
+    }
+    if (input.inputStatus === 'AVAILABLE' && input.observationDate > snapshotDate) {
+      throw new Error(`future observation date in official manifest: ${input.seriesId}`);
+    }
+  }
+}
+
 export async function upsertOfficialSnapshot(
   db: D1Database,
   runId: string,
   s: Snapshot,
   spx: number | null,
-): Promise<void> {
+  provenance?: SnapshotProvenance,
+): Promise<'INSERTED' | 'UPGRADED_LEGACY' | 'FROZEN' | void> {
+  if (provenance) {
+    if (provenance.dataRunId !== runId) throw new Error('official snapshot provenance run mismatch');
+    validateSnapshotInputs(provenance.inputs, provenance.decisionAt, s.date);
+    const week = decisionWeek(s.date);
+    const existing = await db.prepare(
+      'SELECT pit_status,data_run_id FROM model_snapshot_weekly WHERE decision_week=?',
+    ).bind(week).first<{ pit_status: string; data_run_id: string | null }>();
+    if (existing?.pit_status === 'PIT' && existing.data_run_id != null) return 'FROZEN';
+
+    const placeholders = Array.from({ length: 33 }, () => '?').join(',');
+    const statements: D1PreparedStatement[] = [db.prepare(
+      `INSERT INTO model_snapshot_weekly
+       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,pit_status)
+       SELECT ${placeholders}
+       WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
+         AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
+       ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,${SNAPSHOT_UPDATE},
+         data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
+         decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,pit_status='PIT'
+       WHERE model_snapshot_weekly.pit_status='LEGACY_NON_PIT'
+          OR model_snapshot_weekly.data_run_id IS NULL`,
+    ).bind(
+      s.date, week, ...snapshotValues(s, spx), provenance.dataRunId, provenance.dataCutoff,
+      provenance.decisionAt, provenance.tradableAt, 'PIT', runId,
+    )];
+    for (const input of provenance.inputs) {
+      const available = input.inputStatus === 'AVAILABLE';
+      statements.push(db.prepare(
+        `INSERT INTO snapshot_inputs
+         (snapshot_channel,decision_week,snapshot_date,data_run_id,series_id,input_status,
+          observation_date,vintage_date,released_at,tradable_at,value,source,checksum)
+         SELECT 'OFFICIAL',?,?,?,?,?,?,?,?,?,?,?,?
+         WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
+           AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
+           AND EXISTS (SELECT 1 FROM model_snapshot_weekly snapshot
+             WHERE snapshot.decision_week=? AND snapshot.pit_status='PIT' AND snapshot.data_run_id=?)`,
+      ).bind(
+        week, s.date, provenance.dataRunId, input.seriesId, input.inputStatus,
+        available ? input.observationDate : null, available ? input.vintageDate : null,
+        available ? input.releasedAt : null, available ? input.tradableAt : null,
+        available ? input.value : null, available ? input.source : null,
+        available ? input.checksum : null, runId, week, provenance.dataRunId,
+      ));
+    }
+    statements.push(db.prepare(
+      `SELECT CASE WHEN
+         EXISTS (SELECT 1 FROM model_snapshot_weekly snapshot
+           WHERE snapshot.decision_week=? AND snapshot.pit_status='PIT' AND snapshot.data_run_id=?)
+         AND (SELECT COUNT(*) FROM snapshot_inputs
+              WHERE snapshot_channel='OFFICIAL' AND decision_week=?)=?
+         AND EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
+           AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
+       THEN 1 ELSE json('official PIT snapshot manifest assertion failed') END AS manifest_fence`,
+    ).bind(week, provenance.dataRunId, week, SERIES_IDS.length, runId));
+    await db.batch(statements).catch(error => {
+      throw new Error(`official PIT snapshot atomic write rejected: ${String((error as any)?.message ?? error)}`);
+    });
+    return existing ? 'UPGRADED_LEGACY' : 'INSERTED';
+  }
   const placeholders = Array.from({ length: 28 }, () => '?').join(',');
   const result = await db.prepare(
     `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS})
@@ -584,7 +668,29 @@ export async function upsertNowcastSnapshot(
   runId: string,
   s: Snapshot,
   spx: number | null,
+  provenance?: Omit<SnapshotProvenance, 'inputs'>,
 ): Promise<void> {
+  if (provenance) {
+    if (provenance.dataRunId !== runId) throw new Error('nowcast snapshot provenance run mismatch');
+    const placeholders = Array.from({ length: 33 }, () => '?').join(',');
+    const result = await db.prepare(
+      `INSERT INTO nowcast_snapshot_daily
+       (date,channel_status,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,pit_status)
+       SELECT ${placeholders}
+       WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
+         AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
+       ON CONFLICT(date) DO UPDATE SET channel_status='PROVISIONAL',${SNAPSHOT_UPDATE},
+         data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
+         decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,pit_status='PIT'`,
+    ).bind(
+      s.date, 'PROVISIONAL', ...snapshotValues(s, spx), provenance.dataRunId,
+      provenance.dataCutoff, provenance.decisionAt, provenance.tradableAt, 'PIT', runId,
+    ).run();
+    if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+      throw new Error(`ingest lease fence rejected PIT nowcast snapshot write for run ${runId}`);
+    }
+    return;
+  }
   const placeholders = Array.from({ length: 28 }, () => '?').join(',');
   const result = await db.prepare(
     `INSERT INTO nowcast_snapshot_daily (date, channel_status, ${SNAPSHOT_COLUMNS})
