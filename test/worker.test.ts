@@ -14,11 +14,16 @@ const dbState = vi.hoisted(() => ({
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
     data_run_id: 'pit-run', data_cutoff: '2026-07-15T23:59:59Z',
     decision_at: '2026-07-16T00:00:00Z', tradable_at: '2026-07-16T14:30:00Z', pit_status: 'PIT',
+    model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64), code_commit_sha: 'LOCAL_UNCONFIGURED',
+    created_at: '2026-07-16T00:00:01Z',
   } as any,
   nowcast: {
     date: '2026-07-21', score: 61, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
     reason: 'provisional macro estimate', coverage: 1, decision_status: 'OK', channel_status: 'PROVISIONAL',
     factor_quality_json: '{}', freshness_json: '{}',
+    model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64), code_commit_sha: 'LOCAL_UNCONFIGURED',
+    data_run_id: 'pit-run', data_cutoff: '2026-07-21T23:59:59Z', decision_at: '2026-07-21T23:59:59Z',
+    created_at: '2026-07-22T00:00:00Z',
   } as any,
   reference: null as any,
   meta: {} as Record<string, string>,
@@ -33,6 +38,7 @@ const dbState = vi.hoisted(() => ({
     vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
     cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
   } as any,
+  exportRows: [] as any[],
 }));
 
 vi.mock('../src/service', () => ({
@@ -48,6 +54,7 @@ vi.mock('../src/db', () => ({
   officialSnapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => []),
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
+  exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
   ingestRunSummary: vi.fn(async () => ({
@@ -82,11 +89,16 @@ beforeEach(() => {
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
     data_run_id: 'pit-run', data_cutoff: '2026-07-15T23:59:59Z',
     decision_at: '2026-07-16T00:00:00Z', tradable_at: '2026-07-16T14:30:00Z', pit_status: 'PIT',
+    model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64), code_commit_sha: 'LOCAL_UNCONFIGURED',
+    created_at: '2026-07-16T00:00:01Z',
   };
   dbState.nowcast = {
     date: '2026-07-21', score: 61, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
     reason: 'provisional macro estimate', coverage: 1, decision_status: 'OK', channel_status: 'PROVISIONAL',
     factor_quality_json: '{}', freshness_json: '{}',
+    model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64), code_commit_sha: 'LOCAL_UNCONFIGURED',
+    data_run_id: 'pit-run', data_cutoff: '2026-07-21T23:59:59Z', decision_at: '2026-07-21T23:59:59Z',
+    created_at: '2026-07-22T00:00:00Z',
   };
   dbState.reference = null;
   dbState.meta = {};
@@ -101,6 +113,7 @@ beforeEach(() => {
     vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
     cashRates: [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' }],
   };
+  dbState.exportRows = [];
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -120,6 +133,48 @@ describe('/api/snapshot explicit channels', () => {
     expect(body.ingest.runs.active).toMatchObject({ run_id: 'active-1', state: 'ACTIVE' });
     expect(body.ingest.runs.active).toMatchObject({ snapshot_state: 'FAILED', snapshot_count: 2 });
     expect(body.ingest.runs.latestFailed).toMatchObject({ run_id: 'failed-1', failed_series: 'SOFR' });
+  });
+});
+
+describe('/api/v1 governance routes', () => {
+  it('returns schema-validated version metadata without changing the legacy route', async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/v1/snapshot'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.api_version).toBe('v1');
+    expect(body.official).toMatchObject({
+      model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64),
+      code_commit_sha: 'LOCAL_UNCONFIGURED', data_run_id: 'pit-run',
+    });
+  });
+
+  it('fails closed when persisted version metadata is malformed', async () => {
+    dbState.row.config_hash = 'bad';
+    const response = await worker.fetch(new Request('https://example.test/api/v1/snapshot'), env);
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ error: 'schema_validation_failed' });
+  });
+
+  it('publishes the frozen model descriptor and deterministic identity', async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/v1/model'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.model).toMatchObject({
+      modelVersion: 'champion-v1.0.0', codeCommitSha: 'LOCAL_UNCONFIGURED',
+    });
+    expect(body.model.configHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('validates export queries and safely emits CSV', async () => {
+    dbState.exportRows = [{
+      ...dbState.row, date: '2026-07-15', verdict: '=FORMULA()', reason: 'quoted, value',
+    }];
+    const invalid = await worker.fetch(new Request('https://example.test/api/v1/snapshots/export?from=bad'), env);
+    expect(invalid.status).toBe(400);
+    const response = await worker.fetch(new Request('https://example.test/api/v1/snapshots/export?format=csv'), env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/csv');
+    expect(await response.text()).toContain("'=FORMULA()");
   });
 });
 

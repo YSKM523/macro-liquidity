@@ -1091,6 +1091,15 @@ export async function officialSnapshotHistory(db: D1Database, from: string, to: 
   return rs.results ?? [];
 }
 
+export async function exportOfficialSnapshots(db: D1Database, from: string, to: string) {
+  const rs = await db.prepare(
+    `SELECT date,score,verdict,decision_status,netliq,spx,reason,
+            model_version,config_hash,code_commit_sha,data_run_id,data_cutoff,decision_at,created_at
+     FROM model_snapshot_weekly WHERE date BETWEEN ? AND ? ORDER BY date`,
+  ).bind(from, to).all<Record<string, unknown>>();
+  return rs.results ?? [];
+}
+
 export async function distinctOfficialSnapshotDates(db: D1Database, lastN: number): Promise<string[]> {
   const rs = await db.prepare('SELECT date FROM model_snapshot_weekly ORDER BY date DESC LIMIT ?')
     .bind(lastN).all<{ date: string }>();

@@ -11,6 +11,7 @@ import {
   loadSeriesMap,
   ingestRunSummary,
   loadEventBacktestInputs,
+  exportOfficialSnapshots,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -23,6 +24,8 @@ import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
+import { assertSnapshotVersionMetadata, parseDateRange, snapshotsToCsv } from './api-schema';
+import { presentModelDescriptor, resolveModelIdentity } from './model-version';
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -119,7 +122,8 @@ export default {
         return json({ ok: false, stale: true, error: 'db_unreachable', message: String((e as any)?.message ?? e) }, 503);
       }
     }
-    if (p === '/api/snapshot') {
+    if (p === '/api/snapshot' || p === '/api/v1/snapshot') {
+      const v1 = p === '/api/v1/snapshot';
       const [officialRow, nowcastRow, live, stress, meta, ingestRuns] = await Promise.all([
         latestOfficialSnapshot(env.DB),
         latestNowcastSnapshot(env.DB),
@@ -139,8 +143,16 @@ export default {
       };
       const official = presentSnapshot(officialRow, stress, 'OFFICIAL');
       const nowcast = presentSnapshot(nowcastRow, stress, 'PROVISIONAL');
+      if (v1) {
+        try {
+          if (officialRow) assertSnapshotVersionMetadata(officialRow);
+          if (nowcastRow) assertSnapshotVersionMetadata(nowcastRow);
+        } catch (error) {
+          return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+        }
+      }
       if (!official && !nowcast) return json({ official: null, nowcast: null, live, ingest, error: 'no_data' });
-      return json({ official, nowcast, live, ingest });
+      return json({ ...(v1 ? { api_version: 'v1' } : {}), official, nowcast, live, ingest });
     }
     if (p === '/api/explain') {
       const wparam = url.searchParams.get('window');
@@ -198,7 +210,8 @@ export default {
     if (p === '/api/prices') {
       return json(await fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }));
     }
-    if (p === '/api/backtest') {
+    if (p === '/api/backtest' || p === '/api/v1/backtest') {
+      const v1 = p === '/api/v1/backtest';
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
       let rows: any[];
       let eventInputs: Awaited<ReturnType<typeof loadEventBacktestInputs>>;
@@ -219,6 +232,7 @@ export default {
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
       const legacy = runBacktest(snaps);
       return json({
+        ...(v1 ? { api_version: 'v1', model: presentModelDescriptor(await resolveModelIdentity(env)) } : {}),
         ...legacy,
         strategy_long_flat: { ...legacy.strategy_long_flat, methodology: 'LEGACY_WEEKLY' },
         event_time: runEventTimeBacktest(eventInputs),
@@ -231,7 +245,8 @@ export default {
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
       return json(runWalkForward(snaps));
     }
-    if (p === '/api/robustness') {
+    if (p === '/api/robustness' || p === '/api/v1/robustness') {
+      const v1 = p === '/api/v1/robustness';
       const rows = await loadBacktestRows(env.DB);
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
@@ -239,7 +254,40 @@ export default {
           date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
-      return json(runRobustness(snaps));
+      const result = runRobustness(snaps);
+      return json(v1
+        ? { api_version: 'v1', model: presentModelDescriptor(await resolveModelIdentity(env)), result }
+        : result);
+    }
+    if (p === '/api/v1/model') {
+      return json({ api_version: 'v1', model: presentModelDescriptor(await resolveModelIdentity(env)) });
+    }
+    if (p === '/api/v1/snapshots/export') {
+      let range: { from: string; to: string };
+      try {
+        range = parseDateRange(url);
+      } catch (error) {
+        return json({ api_version: 'v1', error: 'invalid_query', message: String((error as Error).message) }, 400);
+      }
+      const format = url.searchParams.get('format') ?? 'json';
+      if (format !== 'json' && format !== 'csv') {
+        return json({ api_version: 'v1', error: 'invalid_query', message: 'format must be json or csv' }, 400);
+      }
+      const rows = await exportOfficialSnapshots(env.DB, range.from, range.to);
+      try {
+        for (const row of rows) assertSnapshotVersionMetadata(row);
+      } catch (error) {
+        return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+      }
+      if (format === 'csv') {
+        return new Response(snapshotsToCsv(rows), {
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': 'attachment; filename="official-snapshots.csv"',
+          },
+        });
+      }
+      return json({ api_version: 'v1', range, rows });
     }
     if (p === '/api/global-liquidity') {
       const m = await loadSeriesMap(env.DB);
