@@ -196,7 +196,9 @@ function renderVerdict(res) {
   const live = res.live || {};
   document.getElementById('asof').textContent =
     `SPX ${fmt(live.spx)} · VIX ${fmt(live.vix)} · DXY ${fmt(live.dxy)} · 10Y ${fmt(live.us10y)}%`;
-  const quoteTimes = Object.values(live.quotes || {}).map(q => q && q.sourceTimestamp).filter(Boolean).sort();
+  const quoteTimes = Object.values(live.quotes || {})
+    .filter(q => q && q.status === 'OK' && q.sourceTimestamp)
+    .map(q => q.sourceTimestamp).sort();
   const marketSourceTime = document.getElementById('market-source-time');
   const marketFetchTime = document.getElementById('market-fetch-time');
   if (marketSourceTime) marketSourceTime.textContent = fmtTs(quoteTimes.at(-1));
@@ -301,16 +303,26 @@ function quoteQuality(quote) {
   return quote.status || 'FAILED';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+function quoteStatusClass(status) {
+  return ['OK', 'STALE', 'DIVERGENT', 'FAILED'].includes(status) ? status.toLowerCase() : 'failed';
+}
+
 function quoteRows(live) {
   const labels = { spx: 'SPX', vix: 'VIX', dxy: 'DXY', us10y: '10Y' };
   return Object.entries(labels).map(([key, label]) => {
     const quote = (live.quotes || {})[key] || {};
-    return `<div class="quote-prov"><b>${label}</b>`
-      + `<span>行情时间 ${fmtTs(quote.sourceTimestamp)}</span>`
-      + `<span>抓取时间 ${fmtTs(quote.fetchedAt || live.fetchedAt)}</span>`
-      + `<span>数据源 ${quote.sourceName || '—'}${quote.fallbackUsed ? '（备用源）' : ''}</span>`
-      + `<span>市场状态 ${quote.marketState || 'UNKNOWN'}${quote.isDelayed ? ' · 延迟' : ''}</span>`
-      + `<span class="quote-quality ${String(quote.status || 'FAILED').toLowerCase()}">${quoteQuality(quote)}</span></div>`;
+    const instrument = quote.sourceLabel || quote.sourceSymbol || '—';
+    const symbol = quote.sourceSymbol ? ` (${quote.sourceSymbol})` : '';
+    return `<div class="quote-prov"><b>${escapeHtml(label)}</b>`
+      + `<span>行情时间 ${escapeHtml(fmtTs(quote.sourceTimestamp))}</span>`
+      + `<span>抓取时间 ${escapeHtml(fmtTs(quote.fetchedAt || live.fetchedAt))}</span>`
+      + `<span>数据源 ${escapeHtml(quote.sourceName || '—')} · ${escapeHtml(instrument)}${escapeHtml(symbol)}${quote.fallbackUsed ? '（备用源）' : ''}</span>`
+      + `<span>市场状态 ${escapeHtml(quote.marketState || 'UNKNOWN')}${quote.isDelayed ? ' · 延迟' : ''}</span>`
+      + `<span class="quote-quality ${quoteStatusClass(quote.status)}">${escapeHtml(quoteQuality(quote))}</span></div>`;
   }).join('');
 }
 

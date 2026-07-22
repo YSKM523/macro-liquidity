@@ -76,8 +76,13 @@ export const STRESS_SCORE_CEILING = 65; // macro score >= this → no downgrade 
 // agree and whether a source observation is usable; they do not affect Champion
 // factor scores, verdict bands, exposure tiers, or the stress trigger levels.
 export const MARKET_DATA_QUALITY = {
+  providerTimeoutMs: 4_000,
+  maxFutureSkewMinutes: 5,
   quoteMaxAgeBusinessDays: 2,
   historyMaxAgeBusinessDays: 4,
+  fredMaxAgeBusinessDays: {
+    DTWEXBGS: SERIES.DTWEXBGS.maxStaleBusinessDays,
+  },
   quoteRelativeTolerance: {
     spx: 0.01,
     vix: 0.05,

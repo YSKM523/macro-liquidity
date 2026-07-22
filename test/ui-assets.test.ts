@@ -147,6 +147,29 @@ describe('static UI assets', () => {
     expect(js).not.toContain('行情同次抓取');
   });
 
+  it('escapes adversarial provider provenance before inserting it as HTML', () => {
+    const js = read('public/app.js');
+    const source = js.match(/function escapeHtml\(value\)\s*\{[^}]+\}/s)?.[0];
+
+    expect(source).toBeTruthy();
+    if (!source) return;
+    const escapeHtml = new Function(`${source}; return escapeHtml;`)() as (value: unknown) => string;
+    const payload = `<img src=x onerror="globalThis.pwned=true">'&`;
+
+    expect(escapeHtml(payload)).toBe('&lt;img src=x onerror=&quot;globalThis.pwned=true&quot;&gt;&#39;&amp;');
+    expect(js).toContain('escapeHtml(quote.sourceName');
+    expect(js).toContain('escapeHtml(instrument)');
+    expect(js).toContain('escapeHtml(symbol)');
+    expect(js).toContain('escapeHtml(quote.marketState');
+    expect(js).toContain('escapeHtml(quoteQuality(quote))');
+  });
+
+  it('uses only trusted OK quote timestamps for the aggregate market time', () => {
+    const js = read('public/app.js');
+
+    expect(js).toContain("filter(q => q && q.status === 'OK' && q.sourceTimestamp)");
+  });
+
   it('sizes charts from their rendered container', () => {
     const js = read('public/app.js');
 

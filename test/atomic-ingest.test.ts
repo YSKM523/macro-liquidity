@@ -149,6 +149,7 @@ vi.mock('../src/metrics', async importOriginal => {
 
 import { runIngest, scheduledIngest } from '../src/service';
 import { failIngestRun, failIngestSnapshots, failSeriesAttempt } from '../src/db';
+import { fetchDxyDaily } from '../src/prices';
 
 const env = {
   DB: {} as D1Database,
@@ -290,6 +291,7 @@ describe('atomic ingest orchestration', () => {
   it('stages every attempt, activates exactly once, then rebuilds from the active view', async () => {
     const result = await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
 
+    expect(fetchDxyDaily).toHaveBeenCalledWith({ fredApiKey: 'test' });
     expect(state.staged.map(item => item.seriesId)).toEqual(SERIES_IDS);
     expect(state.events.filter(event => event === 'activate')).toHaveLength(1);
     expect(state.events.indexOf('activate')).toBeLessThan(state.events.indexOf('load-active'));

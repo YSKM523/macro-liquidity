@@ -176,7 +176,7 @@ export async function runIngest(
     await renewOwnedLease(env.DB, runId);
     // DTWEXBGS 官方发布滞后约一周;用 DXY 日线按比例链到末端参与打分(仅内存,行情失败则跳过)。
     failedStep = 'dxy-fetch';
-    const dxy = await fetchDxyDaily();
+    const dxy = await fetchDxyDaily({ fredApiKey: env.FRED_API_KEY });
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], dxy);

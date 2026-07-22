@@ -1,7 +1,8 @@
 import { MARKET_DATA_QUALITY, STRESS } from './config';
 
 export type ProviderStatus = 'OK' | 'STALE' | 'DIVERGENT' | 'FAILED';
-export type ProviderReasonCode = 'SOURCE_DIVERGENCE' | 'HTTP_ERROR' | 'INVALID_TIMESTAMP' | 'NO_DATA';
+export type ProviderReasonCode = 'SOURCE_DIVERGENCE' | 'HTTP_ERROR' | 'INVALID_RESPONSE'
+  | 'INVALID_TIMESTAMP' | 'FUTURE_TIMESTAMP' | 'NO_DATA' | 'TIMEOUT';
 export type MarketSymbol = 'spx' | 'vix' | 'dxy' | 'us10y';
 export interface ObsPoint { date: string; value: number }
 
@@ -11,6 +12,8 @@ export interface ProviderProvenance {
   marketState: string;
   isDelayed: boolean;
   sourceName: string;
+  sourceSymbol: string;
+  sourceLabel: string;
   fallbackUsed: boolean;
   primarySourceName: string;
   status: ProviderStatus;
@@ -70,7 +73,12 @@ export interface LiveStress {
 }
 
 type Fetcher = typeof fetch;
-interface FetchOptions { fetchFn?: Fetcher; fetchedAt?: string; fredApiKey?: string }
+export interface ProviderFetchOptions {
+  fetchFn?: Fetcher;
+  fetchedAt?: string;
+  fredApiKey?: string;
+  providerTimeoutMs?: number;
+}
 
 function validIso(value: string): boolean {
   return Number.isFinite(Date.parse(value));
@@ -85,6 +93,64 @@ function validCalendarDate(value: unknown): value is string {
   return date.getUTCFullYear() === year
     && date.getUTCMonth() === month - 1
     && date.getUTCDate() === day;
+}
+
+function validClockTime(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{2}):(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return false;
+  const hour = Number(match[1]), minute = Number(match[2]), second = Number(match[3]);
+  return hour <= 23 && minute <= 59 && second <= 59;
+}
+
+function isFutureTimestamp(sourceTimestamp: string, fetchedAt: string): boolean {
+  const source = Date.parse(sourceTimestamp), fetched = Date.parse(fetchedAt);
+  if (!Number.isFinite(source) || !Number.isFinite(fetched)) return false;
+  return source > fetched + MARKET_DATA_QUALITY.maxFutureSkewMinutes * 60_000;
+}
+
+const INSTRUMENT_LABELS: Record<string, string> = {
+  '^GSPC': 'S&P 500', '^spx': 'S&P 500', SP500: 'S&P 500',
+  '^VIX': 'CBOE VIX', '^vix': 'CBOE VIX', VIXCLS: 'CBOE VIX',
+  'DX-Y.NYB': 'ICE U.S. Dollar Index', 'dx.f': 'U.S. Dollar Index Futures',
+  DTWEXBGS: 'Broad U.S. Dollar Index',
+  '^TNX': '10-Year Treasury Yield', DGS10: '10-Year Treasury Yield',
+};
+
+function sourceLabel(symbol: string): string {
+  return INSTRUMENT_LABELS[symbol] ?? symbol;
+}
+
+class ProviderTimeoutError extends Error {}
+
+function timedFetcher(fetchFn: Fetcher, timeoutMs: number): Fetcher {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<Response>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(new ProviderTimeoutError(`provider timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        fetchFn(input, { ...init, signal: controller.signal }),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+  }) as Fetcher;
+}
+
+function errorReason(error: unknown): ProviderReasonCode {
+  return error instanceof ProviderTimeoutError ? 'TIMEOUT' : 'HTTP_ERROR';
+}
+
+function knownYahooMarketState(value: unknown): string {
+  return typeof value === 'string' && ['REGULAR', 'PRE', 'PREPRE', 'POST', 'POSTPOST', 'CLOSED'].includes(value)
+    ? value : 'UNKNOWN';
 }
 
 function businessAgeDays(sourceTimestamp: string, fetchedAt: string): number {
@@ -105,17 +171,19 @@ function qualityStatus(sourceTimestamp: string, fetchedAt: string, maxAge: numbe
   return businessAgeDays(sourceTimestamp, fetchedAt) > maxAge ? 'STALE' : 'OK';
 }
 
-function failedQuote(sourceName: string, fetchedAt: string, reasonCode: ProviderReasonCode): QuoteResult {
+function failedQuote(sourceName: string, fetchedAt: string, reasonCode: ProviderReasonCode, symbol = ''): QuoteResult {
   return {
     value: null, sourceTimestamp: null, fetchedAt, marketState: 'UNKNOWN', isDelayed: false,
-    sourceName, fallbackUsed: false, primarySourceName: sourceName, status: 'FAILED', reasonCode,
+    sourceName, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+    fallbackUsed: false, primarySourceName: sourceName, status: 'FAILED', reasonCode,
   };
 }
 
-function failedSeries(sourceName: string, fetchedAt: string, reasonCode: ProviderReasonCode): SeriesResult {
+function failedSeries(sourceName: string, fetchedAt: string, reasonCode: ProviderReasonCode, symbol = ''): SeriesResult {
   return {
     points: [], sourceTimestamp: null, fetchedAt, marketState: 'UNKNOWN', isDelayed: false,
-    sourceName, fallbackUsed: false, primarySourceName: sourceName, status: 'FAILED', reasonCode,
+    sourceName, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+    fallbackUsed: false, primarySourceName: sourceName, status: 'FAILED', reasonCode,
   };
 }
 
@@ -130,7 +198,7 @@ export function parseYahooQuote(json: any, fetchedAt: string): ParsedQuote | nul
     value,
     sourceTimestamp: sourceDate.toISOString(),
     fetchedAt,
-    marketState: typeof meta.marketState === 'string' ? meta.marketState : 'UNKNOWN',
+    marketState: knownYahooMarketState(meta.marketState),
     isDelayed: typeof meta.exchangeDataDelayedBy === 'number' && meta.exchangeDataDelayedBy > 0,
     sourceName: 'Yahoo Finance',
   };
@@ -141,6 +209,7 @@ export function parseStooqCsv(csv: string, fetchedAt: string): ParsedQuote | nul
   if (lines.length < 2) return null;
   const cols = lines[lines.length - 1].split(',');
   const value = Number(cols[6]);
+  if (!validCalendarDate(cols[1]) || !validClockTime(cols[2])) return null;
   const sourceTimestamp = `${cols[1]}T${cols[2]}Z`;
   if (!Number.isFinite(value) || !validIso(sourceTimestamp)) return null;
   return {
@@ -151,6 +220,17 @@ export function parseStooqCsv(csv: string, fetchedAt: string): ParsedQuote | nul
     isDelayed: true,
     sourceName: 'Stooq',
   };
+}
+
+function invalidStooqResponse(response: Response, body: string): boolean {
+  const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+  const sample = body.trimStart().slice(0, 256).toLowerCase();
+  return contentType.includes('text/html')
+    || contentType.includes('javascript')
+    || sample.startsWith('<!doctype html')
+    || sample.startsWith('<html')
+    || sample.includes('<script')
+    || sample.includes('_cf_chl_');
 }
 
 export function parseYahooDailyObs(json: any): ObsPoint[] {
@@ -166,7 +246,7 @@ export function parseYahooDailyObs(json: any): ObsPoint[] {
       if (Number.isFinite(d.getTime())) out.push({ date: d.toISOString().slice(0, 10), value: close });
     }
   }
-  return out;
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function parseStooqHistory(csv: string): { points: ObsPoint[]; invalidTimestamp: boolean } {
@@ -186,12 +266,13 @@ function yahooSourceTimestamp(json: any): string | null {
   const timestamps = result?.timestamp;
   const closes = result?.indicators?.quote?.[0]?.close;
   if (!Array.isArray(timestamps) || !Array.isArray(closes)) return null;
-  for (let index = Math.min(timestamps.length, closes.length) - 1; index >= 0; index--) {
+  let latest: number | null = null;
+  for (let index = 0; index < Math.min(timestamps.length, closes.length); index++) {
     if (typeof timestamps[index] !== 'number' || typeof closes[index] !== 'number' || !Number.isFinite(closes[index])) continue;
     const date = new Date(timestamps[index] * 1000);
-    if (Number.isFinite(date.getTime())) return date.toISOString();
+    if (Number.isFinite(date.getTime()) && (latest == null || date.getTime() > latest)) latest = date.getTime();
   }
-  return null;
+  return latest == null ? null : new Date(latest).toISOString();
 }
 
 export class YahooMarketDataProvider implements MarketDataProvider {
@@ -202,15 +283,19 @@ export class YahooMarketDataProvider implements MarketDataProvider {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
       const response = await this.fetchFn(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR');
+      if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const parsed = parseYahooQuote(await response.json(), fetchedAt);
-      if (!parsed) return failedQuote(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+      if (!parsed) return failedQuote(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
+      if (isFutureTimestamp(parsed.sourceTimestamp, fetchedAt)) {
+        return failedQuote(this.name, fetchedAt, 'FUTURE_TIMESTAMP', symbol);
+      }
       return {
-        ...parsed, fallbackUsed: false, primarySourceName: this.name,
+        ...parsed, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+        fallbackUsed: false, primarySourceName: this.name,
         status: qualityStatus(parsed.sourceTimestamp, fetchedAt, MARKET_DATA_QUALITY.quoteMaxAgeBusinessDays),
       };
-    } catch {
-      return failedQuote(this.name, fetchedAt, 'HTTP_ERROR');
+    } catch (error) {
+      return failedQuote(this.name, fetchedAt, errorReason(error), symbol);
     }
   }
 
@@ -218,21 +303,25 @@ export class YahooMarketDataProvider implements MarketDataProvider {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
       const response = await this.fetchFn(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
+      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const json: any = await response.json();
       const points = parseYahooDailyObs(json);
       const sourceTimestamp = yahooSourceTimestamp(json);
-      if (!sourceTimestamp || points.length === 0) return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+      if (!sourceTimestamp || points.length === 0) return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
+      if (isFutureTimestamp(sourceTimestamp, fetchedAt)) {
+        return failedSeries(this.name, fetchedAt, 'FUTURE_TIMESTAMP', symbol);
+      }
       const meta = json?.chart?.result?.[0]?.meta;
       return {
         points, sourceTimestamp, fetchedAt,
-        marketState: typeof meta?.marketState === 'string' ? meta.marketState : 'UNKNOWN',
+        marketState: knownYahooMarketState(meta?.marketState),
         isDelayed: typeof meta?.exchangeDataDelayedBy === 'number' && meta.exchangeDataDelayedBy > 0,
-        sourceName: this.name, fallbackUsed: false, primarySourceName: this.name,
+        sourceName: this.name, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+        fallbackUsed: false, primarySourceName: this.name,
         status: qualityStatus(sourceTimestamp, fetchedAt, MARKET_DATA_QUALITY.historyMaxAgeBusinessDays),
       };
-    } catch {
-      return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
+    } catch (error) {
+      return failedSeries(this.name, fetchedAt, errorReason(error), symbol);
     }
   }
 }
@@ -245,15 +334,21 @@ export class StooqMarketDataProvider implements MarketDataProvider {
     try {
       const url = `https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&f=sd2t2ohlcv&h&e=csv`;
       const response = await this.fetchFn(url);
-      if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR');
-      const parsed = parseStooqCsv(await response.text(), fetchedAt);
-      if (!parsed) return failedQuote(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+      if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      const body = await response.text();
+      if (invalidStooqResponse(response, body)) return failedQuote(this.name, fetchedAt, 'INVALID_RESPONSE', symbol);
+      const parsed = parseStooqCsv(body, fetchedAt);
+      if (!parsed) return failedQuote(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
+      if (isFutureTimestamp(parsed.sourceTimestamp, fetchedAt)) {
+        return failedQuote(this.name, fetchedAt, 'FUTURE_TIMESTAMP', symbol);
+      }
       return {
-        ...parsed, fallbackUsed: false, primarySourceName: this.name,
+        ...parsed, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+        fallbackUsed: false, primarySourceName: this.name,
         status: qualityStatus(parsed.sourceTimestamp, fetchedAt, MARKET_DATA_QUALITY.quoteMaxAgeBusinessDays),
       };
-    } catch {
-      return failedQuote(this.name, fetchedAt, 'HTTP_ERROR');
+    } catch (error) {
+      return failedQuote(this.name, fetchedAt, errorReason(error), symbol);
     }
   }
 
@@ -262,20 +357,26 @@ export class StooqMarketDataProvider implements MarketDataProvider {
       const start = new Date(Date.parse(fetchedAt) - 45 * 86400000).toISOString().slice(0, 10).replaceAll('-', '');
       const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&d1=${start}`;
       const response = await this.fetchFn(url);
-      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
-      const parsed = parseStooqHistory(await response.text());
-      if (parsed.invalidTimestamp) return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      const body = await response.text();
+      if (invalidStooqResponse(response, body)) return failedSeries(this.name, fetchedAt, 'INVALID_RESPONSE', symbol);
+      const parsed = parseStooqHistory(body);
+      if (parsed.invalidTimestamp) return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
       const points = parsed.points;
       const last = points.at(-1);
-      if (!last) return failedSeries(this.name, fetchedAt, 'NO_DATA');
+      if (!last) return failedSeries(this.name, fetchedAt, 'NO_DATA', symbol);
       const sourceTimestamp = `${last.date}T00:00:00.000Z`;
+      if (isFutureTimestamp(sourceTimestamp, fetchedAt)) {
+        return failedSeries(this.name, fetchedAt, 'FUTURE_TIMESTAMP', symbol);
+      }
       return {
         points, sourceTimestamp, fetchedAt, marketState: 'UNKNOWN', isDelayed: true,
-        sourceName: this.name, fallbackUsed: false, primarySourceName: this.name,
+        sourceName: this.name, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+        fallbackUsed: false, primarySourceName: this.name,
         status: qualityStatus(sourceTimestamp, fetchedAt, MARKET_DATA_QUALITY.historyMaxAgeBusinessDays),
       };
-    } catch {
-      return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
+    } catch (error) {
+      return failedSeries(this.name, fetchedAt, errorReason(error), symbol);
     }
   }
 }
@@ -285,7 +386,7 @@ export class FredMarketDataProvider implements MarketDataProvider {
   constructor(private readonly apiKey: string, private readonly fetchFn: Fetcher = fetch) {}
 
   private async observations(symbol: string, fetchedAt: string): Promise<SeriesResult> {
-    if (!this.apiKey) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
+    if (!this.apiKey) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
     try {
       const url = new URL('https://api.stlouisfed.org/fred/series/observations');
       url.searchParams.set('series_id', symbol);
@@ -293,26 +394,37 @@ export class FredMarketDataProvider implements MarketDataProvider {
       url.searchParams.set('file_type', 'json');
       url.searchParams.set('observation_start', new Date(Date.parse(fetchedAt) - 45 * 86400000).toISOString().slice(0, 10));
       const response = await this.fetchFn(url.toString());
-      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
+      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
       const json: any = await response.json();
       const observations: any[] = Array.isArray(json?.observations) ? json.observations : [];
-      const numericObservations = observations.filter((observation: any) => Number.isFinite(Number(observation?.value)));
+      const numericObservations = observations.filter((observation: any) => {
+        const value = observation?.value;
+        return value !== null && value !== undefined && value !== '' && value !== '.'
+          && Number.isFinite(Number(value));
+      });
       if (numericObservations.some((observation: any) => !validCalendarDate(observation?.date))) {
-        return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP');
+        return failedSeries(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
       }
       const points: ObsPoint[] = numericObservations
         .map((o: any) => ({ date: o.date, value: Number(o.value) }))
         .sort((a: ObsPoint, b: ObsPoint) => a.date.localeCompare(b.date));
       const last = points.at(-1);
-      if (!last) return failedSeries(this.name, fetchedAt, 'NO_DATA');
+      if (!last) return failedSeries(this.name, fetchedAt, 'NO_DATA', symbol);
       const sourceTimestamp = `${last.date}T00:00:00.000Z`;
+      if (isFutureTimestamp(sourceTimestamp, fetchedAt)) {
+        return failedSeries(this.name, fetchedAt, 'FUTURE_TIMESTAMP', symbol);
+      }
+      const maxAge = symbol === 'DTWEXBGS'
+        ? MARKET_DATA_QUALITY.fredMaxAgeBusinessDays.DTWEXBGS
+        : MARKET_DATA_QUALITY.historyMaxAgeBusinessDays;
       return {
         points, sourceTimestamp, fetchedAt, marketState: 'OFFICIAL', isDelayed: true,
-        sourceName: this.name, fallbackUsed: false, primarySourceName: this.name,
-        status: qualityStatus(sourceTimestamp, fetchedAt, MARKET_DATA_QUALITY.historyMaxAgeBusinessDays),
+        sourceName: this.name, sourceSymbol: symbol, sourceLabel: sourceLabel(symbol),
+        fallbackUsed: false, primarySourceName: this.name,
+        status: qualityStatus(sourceTimestamp, fetchedAt, maxAge),
       };
-    } catch {
-      return failedSeries(this.name, fetchedAt, 'HTTP_ERROR');
+    } catch (error) {
+      return failedSeries(this.name, fetchedAt, errorReason(error), symbol);
     }
   }
 
@@ -330,6 +442,8 @@ export class FredMarketDataProvider implements MarketDataProvider {
       marketState: history.marketState,
       isDelayed: history.isDelayed,
       sourceName: this.name,
+      sourceSymbol: history.sourceSymbol,
+      sourceLabel: history.sourceLabel,
       fallbackUsed: false,
       primarySourceName: this.name,
       status: history.status,
@@ -342,62 +456,102 @@ function relativeDifference(a: number, b: number): number {
   return Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b), Number.EPSILON);
 }
 
-function resolveQuote(primary: QuoteResult, secondary: QuoteResult, tolerance: number): QuoteResult {
-  if (primary.status === 'OK' && secondary.status === 'OK'
-      && primary.value != null && secondary.value != null
-      && primary.sourceTimestamp?.slice(0, 10) === secondary.sourceTimestamp?.slice(0, 10)
-      && relativeDifference(primary.value, secondary.value) > tolerance) {
-    return {
-      ...primary, status: 'DIVERGENT', reasonCode: 'SOURCE_DIVERGENCE',
-      comparisonSourceName: secondary.sourceName,
-    };
-  }
-  if (primary.status === 'OK') return primary;
-  if (secondary.status === 'OK') {
-    return { ...secondary, fallbackUsed: true, primarySourceName: primary.sourceName };
-  }
-  if (primary.status === 'STALE') return primary;
-  if (secondary.status === 'STALE') {
-    return { ...secondary, fallbackUsed: true, primarySourceName: primary.sourceName };
-  }
-  return primary;
+function quoteLevelsComparable(a: QuoteResult, b: QuoteResult): boolean {
+  return a.sourceSymbol !== 'DTWEXBGS' && b.sourceSymbol !== 'DTWEXBGS';
 }
 
-function normalizedChange(points: ObsPoint[]): number | null {
-  if (points.length < 2 || points[0].value === 0) return null;
-  return points.at(-1)!.value / points[0].value - 1;
+function resolveQuote(candidates: QuoteResult[], tolerance: number): QuoteResult {
+  const selectedIndex = candidates.findIndex(candidate => candidate.status === 'OK');
+  if (selectedIndex >= 0) {
+    const selected = candidates[selectedIndex];
+    const disagreement = candidates.find((candidate, index) => index !== selectedIndex
+      && candidate.status === 'OK'
+      && selected.value != null && candidate.value != null
+      && quoteLevelsComparable(selected, candidate)
+      && selected.sourceTimestamp?.slice(0, 10) === candidate.sourceTimestamp?.slice(0, 10)
+      && relativeDifference(selected.value, candidate.value) > tolerance);
+    if (disagreement) {
+      return {
+        ...selected, status: 'DIVERGENT', reasonCode: 'SOURCE_DIVERGENCE',
+        comparisonSourceName: disagreement.sourceName,
+      };
+    }
+    return selectedIndex === 0 ? selected : {
+      ...selected, fallbackUsed: true, primarySourceName: candidates[0].sourceName,
+    };
+  }
+  const staleIndex = candidates.findIndex(candidate => candidate.status === 'STALE');
+  if (staleIndex >= 0) {
+    const stale = candidates[staleIndex];
+    return staleIndex === 0 ? stale : { ...stale, fallbackUsed: true, primarySourceName: candidates[0].sourceName };
+  }
+  return candidates[0];
 }
 
 function sharedWindow(primary: ObsPoint[], secondary: ObsPoint[]): [ObsPoint[], ObsPoint[]] | null {
   const secondaryByDate = new Map(secondary.map(point => [point.date, point]));
   const primaryShared = primary.filter(point => secondaryByDate.has(point.date));
-  if (primaryShared.length < 2) return null;
+  if (primaryShared.length < 1) return null;
   return [primaryShared, primaryShared.map(point => secondaryByDate.get(point.date)!)];
 }
 
-function resolveHistory(primary: SeriesResult, secondary: SeriesResult, tolerance: number): SeriesResult {
-  if (primary.status === 'OK' && secondary.status === 'OK') {
-    // Yahoo commonly returns one month while Stooq returns full history. Only
-    // compare normalized changes on exact shared dates, never unrelated starts.
-    const shared = sharedWindow(primary.points, secondary.points);
-    const a = shared ? normalizedChange(shared[0]) : null;
-    const b = shared ? normalizedChange(shared[1]) : null;
-    if (a != null && b != null && Math.abs(a - b) > tolerance) {
+function historyStressClassification(symbol: MarketSymbol, points: ObsPoint[]): boolean | null {
+  if (symbol === 'vix') return points.length ? points.at(-1)!.value > STRESS.vix : null;
+  if (points.length < 6) return null;
+  const window = points.slice(-6);
+  const first = window[0].value, last = window.at(-1)!.value;
+  if (symbol === 'us10y') return last - first > STRESS.y10;
+  if (first === 0) return null;
+  const change = last / first - 1;
+  return symbol === 'spx' ? change < STRESS.spxDd : change > STRESS.dxy;
+}
+
+function historySemanticMetric(symbol: MarketSymbol, points: ObsPoint[]): number | null {
+  if (symbol === 'vix') return points.length ? points.at(-1)!.value : null;
+  if (points.length < 6) return null;
+  const window = points.slice(-6);
+  const first = window[0].value, last = window.at(-1)!.value;
+  if (symbol === 'us10y') return last - first;
+  return first === 0 ? null : last / first - 1;
+}
+
+function historySemanticsDisagree(symbol: MarketSymbol, a: SeriesResult, b: SeriesResult): boolean {
+  const shared = sharedWindow(a.points, b.points);
+  if (!shared) return false;
+  const aClass = historyStressClassification(symbol, shared[0]);
+  const bClass = historyStressClassification(symbol, shared[1]);
+  if (aClass != null && bClass != null && aClass !== bClass) return true;
+  const aMetric = historySemanticMetric(symbol, shared[0]);
+  const bMetric = historySemanticMetric(symbol, shared[1]);
+  if (aMetric == null || bMetric == null) return false;
+  const tolerance = MARKET_DATA_QUALITY.historyReturnTolerance[symbol];
+  return symbol === 'vix'
+    ? relativeDifference(aMetric, bMetric) > tolerance
+    : Math.abs(aMetric - bMetric) > tolerance;
+}
+
+function resolveHistory(symbol: MarketSymbol, candidates: SeriesResult[]): SeriesResult {
+  const selectedIndex = candidates.findIndex(candidate => candidate.status === 'OK');
+  if (selectedIndex >= 0) {
+    const selected = candidates[selectedIndex];
+    const disagreement = candidates.find((candidate, index) => index !== selectedIndex
+      && candidate.status === 'OK' && historySemanticsDisagree(symbol, selected, candidate));
+    if (disagreement) {
       return {
-        ...primary, status: 'DIVERGENT', reasonCode: 'SOURCE_DIVERGENCE',
-        comparisonSourceName: secondary.sourceName,
+        ...selected, status: 'DIVERGENT', reasonCode: 'SOURCE_DIVERGENCE',
+        comparisonSourceName: disagreement.sourceName,
       };
     }
+    return selectedIndex === 0 ? selected : {
+      ...selected, fallbackUsed: true, primarySourceName: candidates[0].sourceName,
+    };
   }
-  if (primary.status === 'OK') return primary;
-  if (secondary.status === 'OK') {
-    return { ...secondary, fallbackUsed: true, primarySourceName: primary.sourceName };
+  const staleIndex = candidates.findIndex(candidate => candidate.status === 'STALE');
+  if (staleIndex >= 0) {
+    const stale = candidates[staleIndex];
+    return staleIndex === 0 ? stale : { ...stale, fallbackUsed: true, primarySourceName: candidates[0].sourceName };
   }
-  if (primary.status === 'STALE') return primary;
-  if (secondary.status === 'STALE') {
-    return { ...secondary, fallbackUsed: true, primarySourceName: primary.sourceName };
-  }
-  return primary;
+  return candidates[0];
 }
 
 function scaleQuote(result: QuoteResult, transform: (value: number) => number): QuoteResult {
@@ -412,24 +566,42 @@ export function normalizeTnx(raw: number): number {
   return raw > 20 ? raw / 10 : raw;
 }
 
-export async function fetchLivePrices(nowIso: string, options: Omit<FetchOptions, 'fetchedAt'> = {}): Promise<LivePrices> {
-  const fetchFn = options.fetchFn ?? fetch;
+export async function fetchLivePrices(nowIso: string, options: Omit<ProviderFetchOptions, 'fetchedAt'> = {}): Promise<LivePrices> {
+  const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
   const yahoo = new YahooMarketDataProvider(fetchFn);
   const stooq = new StooqMarketDataProvider(fetchFn);
   const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn);
-  const quotePairs = await Promise.all([
-    Promise.all([yahoo.fetchQuote({ symbol: '^GSPC', fetchedAt: nowIso }), stooq.fetchQuote({ symbol: '^spx', fetchedAt: nowIso })]),
-    Promise.all([yahoo.fetchQuote({ symbol: '^VIX', fetchedAt: nowIso }), stooq.fetchQuote({ symbol: '^vix', fetchedAt: nowIso })]),
-    Promise.all([yahoo.fetchQuote({ symbol: 'DX-Y.NYB', fetchedAt: nowIso }), stooq.fetchQuote({ symbol: 'dx.f', fetchedAt: nowIso })]),
-    Promise.all([yahoo.fetchQuote({ symbol: '^TNX', fetchedAt: nowIso }), fred.fetchQuote({ symbol: 'DGS10', fetchedAt: nowIso })]),
+  const quoteCandidates = await Promise.all([
+    Promise.all([
+      yahoo.fetchQuote({ symbol: '^GSPC', fetchedAt: nowIso }),
+      stooq.fetchQuote({ symbol: '^spx', fetchedAt: nowIso }),
+      fred.fetchQuote({ symbol: 'SP500', fetchedAt: nowIso }),
+    ]),
+    Promise.all([
+      yahoo.fetchQuote({ symbol: '^VIX', fetchedAt: nowIso }),
+      stooq.fetchQuote({ symbol: '^vix', fetchedAt: nowIso }),
+      fred.fetchQuote({ symbol: 'VIXCLS', fetchedAt: nowIso }),
+    ]),
+    Promise.all([
+      yahoo.fetchQuote({ symbol: 'DX-Y.NYB', fetchedAt: nowIso }),
+      stooq.fetchQuote({ symbol: 'dx.f', fetchedAt: nowIso }),
+      fred.fetchQuote({ symbol: 'DTWEXBGS', fetchedAt: nowIso }),
+    ]),
+    Promise.all([
+      yahoo.fetchQuote({ symbol: '^TNX', fetchedAt: nowIso }),
+      stooq.fetchQuote({ symbol: '10usy.b', fetchedAt: nowIso }),
+      fred.fetchQuote({ symbol: 'DGS10', fetchedAt: nowIso }),
+    ]),
   ]);
   const quotes: Record<MarketSymbol, QuoteResult> = {
-    spx: resolveQuote(...quotePairs[0], MARKET_DATA_QUALITY.quoteRelativeTolerance.spx),
-    vix: resolveQuote(...quotePairs[1], MARKET_DATA_QUALITY.quoteRelativeTolerance.vix),
-    dxy: resolveQuote(...quotePairs[2], MARKET_DATA_QUALITY.quoteRelativeTolerance.dxy),
-    us10y: resolveQuote(
-      scaleQuote(quotePairs[3][0], normalizeTnx), quotePairs[3][1], MARKET_DATA_QUALITY.quoteRelativeTolerance.us10y,
-    ),
+    spx: resolveQuote(quoteCandidates[0], MARKET_DATA_QUALITY.quoteRelativeTolerance.spx),
+    vix: resolveQuote(quoteCandidates[1], MARKET_DATA_QUALITY.quoteRelativeTolerance.vix),
+    dxy: resolveQuote(quoteCandidates[2], MARKET_DATA_QUALITY.quoteRelativeTolerance.dxy),
+    us10y: resolveQuote([
+      scaleQuote(quoteCandidates[3][0], normalizeTnx),
+      quoteCandidates[3][1],
+      quoteCandidates[3][2],
+    ], MARKET_DATA_QUALITY.quoteRelativeTolerance.us10y),
   };
   const usable = (result: QuoteResult) => result.status === 'OK' ? result.value : null;
   return {
@@ -443,29 +615,45 @@ function historyMeta(result: SeriesResult): HistoryProvenance {
   return meta;
 }
 
-async function fetchMarketHistories(options: FetchOptions = {}): Promise<Record<MarketSymbol, SeriesResult>> {
+async function fetchMarketHistories(options: ProviderFetchOptions = {}): Promise<Record<MarketSymbol, SeriesResult>> {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
-  const fetchFn = options.fetchFn ?? fetch;
+  const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
   const yahoo = new YahooMarketDataProvider(fetchFn);
   const stooq = new StooqMarketDataProvider(fetchFn);
   const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn);
-  const pairs = await Promise.all([
-    Promise.all([yahoo.fetchHistory({ symbol: '^GSPC', fetchedAt }), stooq.fetchHistory({ symbol: '^spx', fetchedAt })]),
-    Promise.all([yahoo.fetchHistory({ symbol: '^VIX', fetchedAt }), stooq.fetchHistory({ symbol: '^vix', fetchedAt })]),
-    Promise.all([yahoo.fetchHistory({ symbol: 'DX-Y.NYB', fetchedAt }), stooq.fetchHistory({ symbol: 'dx.f', fetchedAt })]),
-    Promise.all([yahoo.fetchHistory({ symbol: '^TNX', fetchedAt }), fred.fetchHistory({ symbol: 'DGS10', fetchedAt })]),
+  const candidates = await Promise.all([
+    Promise.all([
+      yahoo.fetchHistory({ symbol: '^GSPC', fetchedAt }),
+      stooq.fetchHistory({ symbol: '^spx', fetchedAt }),
+      fred.fetchHistory({ symbol: 'SP500', fetchedAt }),
+    ]),
+    Promise.all([
+      yahoo.fetchHistory({ symbol: '^VIX', fetchedAt }),
+      stooq.fetchHistory({ symbol: '^vix', fetchedAt }),
+      fred.fetchHistory({ symbol: 'VIXCLS', fetchedAt }),
+    ]),
+    Promise.all([
+      yahoo.fetchHistory({ symbol: 'DX-Y.NYB', fetchedAt }),
+      stooq.fetchHistory({ symbol: 'dx.f', fetchedAt }),
+      fred.fetchHistory({ symbol: 'DTWEXBGS', fetchedAt }),
+    ]),
+    Promise.all([
+      yahoo.fetchHistory({ symbol: '^TNX', fetchedAt }),
+      stooq.fetchHistory({ symbol: '10usy.b', fetchedAt }),
+      fred.fetchHistory({ symbol: 'DGS10', fetchedAt }),
+    ]),
   ]);
   return {
-    spx: resolveHistory(...pairs[0], MARKET_DATA_QUALITY.historyReturnTolerance.spx),
-    vix: resolveHistory(...pairs[1], MARKET_DATA_QUALITY.historyReturnTolerance.vix),
-    dxy: resolveHistory(...pairs[2], MARKET_DATA_QUALITY.historyReturnTolerance.dxy),
-    us10y: resolveHistory(
-      scaleHistory(pairs[3][0], normalizeTnx), pairs[3][1], MARKET_DATA_QUALITY.historyReturnTolerance.us10y,
-    ),
+    spx: resolveHistory('spx', candidates[0]),
+    vix: resolveHistory('vix', candidates[1]),
+    dxy: resolveHistory('dxy', candidates[2]),
+    us10y: resolveHistory('us10y', [
+      scaleHistory(candidates[3][0], normalizeTnx), candidates[3][1], candidates[3][2],
+    ]),
   };
 }
 
-export async function fetchStressSeries(options: FetchOptions = {}): Promise<StressSeries> {
+export async function fetchStressSeries(options: ProviderFetchOptions = {}): Promise<StressSeries> {
   const results = await fetchMarketHistories(options);
   const values = (result: SeriesResult) => result.status === 'OK' ? result.points.map(p => p.value) : [];
   return {
@@ -477,16 +665,18 @@ export async function fetchStressSeries(options: FetchOptions = {}): Promise<Str
   };
 }
 
-export async function fetchDxyDaily(options: FetchOptions = {}): Promise<ObsPoint[]> {
+export async function fetchDxyDaily(options: ProviderFetchOptions = {}): Promise<ObsPoint[]> {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
-  const fetchFn = options.fetchFn ?? fetch;
+  const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
   const yahoo = new YahooMarketDataProvider(fetchFn);
   const stooq = new StooqMarketDataProvider(fetchFn);
-  const [primary, secondary] = await Promise.all([
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn);
+  const candidates = await Promise.all([
     yahoo.fetchHistory({ symbol: 'DX-Y.NYB', fetchedAt }),
     stooq.fetchHistory({ symbol: 'dx.f', fetchedAt }),
+    fred.fetchHistory({ symbol: 'DTWEXBGS', fetchedAt }),
   ]);
-  const result = resolveHistory(primary, secondary, MARKET_DATA_QUALITY.historyReturnTolerance.dxy);
+  const result = resolveHistory('dxy', candidates);
   return result.status === 'OK' ? result.points : [];
 }
 
