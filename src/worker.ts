@@ -31,7 +31,7 @@ import { runBacktest } from './backtest';
 import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
-import { runPurgedValidation } from './evaluation-protocol';
+import { runFormalValidation } from './evaluation-protocol';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
 import {
@@ -58,12 +58,6 @@ import {
   failClosedCachedStress,
 } from './live-data';
 import type { LivePrices, LiveStress } from './prices';
-import {
-  isPortfolioDirection,
-  isPortfolioVerdict,
-  mapPortfolioPolicy,
-  snapshotVixStressStatus,
-} from './portfolio-policy';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
@@ -132,28 +126,6 @@ function governedSnapshotModels(rows: NormalizedSnapshotRow[]): ReturnType<typeo
     unique.set(key, metadata);
   }
   return [...unique.values()];
-}
-
-function validationSnapsFromRows(rows: any[]) {
-  return rows
-    .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
-    .map((r: any) => {
-      let provenanceStatus = 'INVALID';
-      try { provenanceStatus = normalizeSnapshotProvenance(r).provenance_status; } catch { /* typed fail-closed result */ }
-      const policy = isPortfolioVerdict(r.verdict) && isPortfolioDirection(r.netliq_dir)
-        ? mapPortfolioPolicy({
-          score: r.score, verdict: r.verdict, netliqDir: r.netliq_dir,
-          stressStatus: snapshotVixStressStatus(r.vix_eod),
-        })
-        : null;
-      return {
-        date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
-        verdict: isPortfolioVerdict(r.verdict) ? r.verdict : null,
-        targetExposure: policy?.targetExposure ?? null,
-        pitStatus: r.pit_status,
-        provenanceStatus,
-      };
-    });
 }
 
 function presentSnapshot(row: unknown, stress: ReturnType<typeof evaluateLiveStress>, channel: 'OFFICIAL' | 'PROVISIONAL') {
@@ -426,25 +398,29 @@ export default {
       });
     }
     if (p === '/api/walkforward') {
-      const rows = await loadBacktestRows(env.DB);
+      const [rows, eventInputs] = await Promise.all([loadBacktestRows(env.DB), loadEventBacktestInputs(env.DB)]);
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
-      return json({ ...runWalkForward(snaps), validation: runPurgedValidation(validationSnapsFromRows(rows)) });
+      return json({ ...runWalkForward(snaps), validation: runFormalValidation(eventInputs) });
     }
     if (p === '/api/robustness' || p === '/api/v1/robustness') {
       const v1 = p === '/api/v1/robustness';
-      const rows = await loadBacktestRows(env.DB);
+      const [rows, eventInputs] = await Promise.all([loadBacktestRows(env.DB), loadEventBacktestInputs(env.DB)]);
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({
           date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
-      const result = { ...runRobustness(snaps), validation: runPurgedValidation(validationSnapsFromRows(rows)) };
+      const result = { ...runRobustness(snaps), validation: runFormalValidation(eventInputs) };
       if (!v1) return json(result);
       try {
-        const normalizedRows = rows.map(normalizeSnapshotProvenance);
+        const normalizedRows = eventInputs.signals.map(signal => normalizeSnapshotProvenance({
+          model_version: signal.modelVersion, config_hash: signal.configHash,
+          code_commit_sha: signal.codeCommitSha, data_run_id: signal.dataRunId,
+          data_cutoff: signal.dataCutoff, decision_at: signal.decisionAt, created_at: signal.createdAt,
+        }));
         return json({
           api_version: 'v1', runtime_model: presentModelDescriptor(await resolveModelIdentity(env)),
           snapshot_models: governedSnapshotModels(normalizedRows),

@@ -76,6 +76,7 @@ vi.mock('../src/db', () => ({
 import worker from '../src/worker';
 import { runIngest } from '../src/service';
 import { loadEventBacktestInputs } from '../src/db';
+import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
 
 const env = {
   DB: {} as D1Database,
@@ -84,6 +85,28 @@ const env = {
   ADMIN_TOKEN: 'test',
   START_DATE: '2024-01-01',
 };
+
+function formalEventInputs(signalCount = 300) {
+  const date = (index: number) => new Date(Date.UTC(2018, 0, 1 + index * 7)).toISOString().slice(0, 10);
+  const configHash = championConfigDigest();
+  return {
+    asOfCutoff: '2030-01-01T00:00:00Z',
+    signals: Array.from({ length: signalCount }, (_, index) => ({
+      signalDate: date(index), decisionAt: `${date(index)}T12:00:00Z`, tradableAt: `${date(index)}T12:00:00Z`,
+      score: index % 2 ? 60 : 40, verdict: index % 2 ? 'BULLISH' : 'BEARISH', targetExposure: index % 3 ? 1 : .25,
+      factors: { netliqTrend: index }, recordedAt: '2025-01-01T00:00:00Z', dataRunId: `run-${index}`,
+      modelVersion: CHAMPION_MODEL_VERSION, configHash,
+      codeCommitSha: '0123456789abcdef0123456789abcdef01234567',
+      dataCutoff: `${date(index)}T11:00:00Z`, createdAt: `${date(index)}T12:00:01Z`,
+    })),
+    prices: Array.from({ length: signalCount + 13 }, (_, index) => ({
+      date: date(index), adjustedClose: 100 + index, source: 'FRED:SP500',
+      fetchedAt: '2025-01-01T00:00:00Z', dataRunId: 'price-run', activationRunId: `activation-${index}`,
+      activatedAt: '2025-01-02T00:00:00Z', provenanceStatus: 'PIT_RAW',
+    })),
+    vix: [], cashRates: [],
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -447,6 +470,7 @@ describe('/api/robustness legacy methodology', () => {
   });
 
   it('adds purged validation using persisted verdicts and the existing portfolio target mapping', async () => {
+    dbState.eventInputs = formalEventInputs();
     dbState.backtestRows = Array.from({ length: 300 }, (_, index) => ({
       date: new Date(Date.UTC(2020, 0, 6 + index * 7)).toISOString().slice(0, 10),
       score: index % 2 ? 60 : 40,
@@ -467,7 +491,7 @@ describe('/api/robustness legacy methodology', () => {
     expect(body.validation).toMatchObject({ status: 'OK', protocol: { protocol: 'PURGED_VALIDATION_V1', embargoDays: 91 } });
     expect(body.validation.folds[0].metrics.formalVerdict.n).toBeGreaterThan(0);
     expect(body.validation.folds[0].metrics.risk.precision.n).toBeGreaterThan(0);
-    expect(body.validation.holdout).toMatchObject({ status: 'PENDING_MATURITY', frozen: { holdoutFrom: '2026-07-23' } });
+    expect(body.validation.holdout).toMatchObject({ status: 'PENDING_MATURITY', registration: { holdoutFrom: '2026-07-23' } });
   });
 
   it('fails the additive validation closed without altering legacy robustness fields', async () => {
@@ -481,10 +505,21 @@ describe('/api/robustness legacy methodology', () => {
     expect(body.strategy.methodology).toBe('LEGACY_WEEKLY');
     expect(body.validation).toMatchObject({ status: 'DATA_INCOMPLETE', folds: [], aggregateMetrics: null });
   });
+
+  it('fails formal validation closed when governed event signals mix model cohorts', async () => {
+    dbState.eventInputs = formalEventInputs();
+    dbState.eventInputs.signals[10] = { ...dbState.eventInputs.signals[10], configHash: 'b'.repeat(64) };
+    const response = await worker.fetch(new Request('https://example.test/api/robustness'), env);
+    const body = await response.json() as any;
+    expect(body.validation).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'MODEL_COHORT_MISMATCH', folds: [], aggregateMetrics: null,
+    });
+  });
 });
 
 describe('/api/walkforward additive validation', () => {
   it('keeps legacy walk-forward fields and adds the frozen protocol result', async () => {
+    dbState.eventInputs = formalEventInputs(1);
     dbState.backtestRows = [{
       date: '2024-01-01', score: 60, spx: 100, verdict: 'BULLISH', netliq_dir: 'UP', vix_eod: 20,
       factors_json: '{}', pit_status: 'PIT', model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64),
