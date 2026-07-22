@@ -32,6 +32,7 @@ _最后更新：2026-07-22（PR-15 purged validation 仅本地实现；未推送
 - 历史已修复：手机横向滚动、favicon、首页全屏 command center、左侧 Primary Screen 细分小卡片、去除红色细线、去除渐变/透明 UI 风格。
 
 ## 验证记录
+- PR-15：`npm test -- --reporter=dot` 745 个测试通过；TypeScript strict、ESLint、correctness、no-lookahead、rebuild consistency、0001–0010 本地 migration 双跑和 staging dry-run 全部通过。
 - `env -u NODE_OPTIONS npm test`：13 个测试文件、248 个测试通过。
 - `env -u NODE_OPTIONS npx tsc --noEmit`：通过。
 - 线上桌面验证：`1920x1080`、`2560x1440`、`3840x2160` 首页均无页面级上下滚动，核心面板在首屏内完整显示。
