@@ -72,26 +72,29 @@ function verdictRate(pairs: ForwardPair[]): RateEstimate {
     n++;
     if ((pair.verdict === 'BULLISH') === (pair.fwd > 0)) hits++;
   }
-  return rate(hits, n, pairs.length - n, missing);
+  if (missing) return { ...rate(hits, n, pairs.length - n, true), value: null, status: 'MISSING_FORMAL_SIGNAL' };
+  return rate(hits, n, pairs.length - n);
 }
 
 function riskRates(pairs: ForwardPair[]) {
   const eligible = pairs.filter(pair => pair.targetExposure != null && pair.fwd !== 0);
-  const missing = eligible.length === 0 && pairs.some(pair => pair.targetExposure == null);
+  const missing = pairs.some(pair => pair.targetExposure == null);
   const riskCalls = eligible.filter(pair => pair.targetExposure! <= .5);
   const downside = eligible.filter(pair => pair.fwd < 0);
   const caught = riskCalls.filter(pair => pair.fwd < 0).length;
-  return {
-    precision: rate(caught, riskCalls.length, pairs.length - riskCalls.length, missing),
-    downsideRecall: rate(caught, downside.length, pairs.length - downside.length, missing),
+  if (missing) return {
+    precision: { ...rate(caught, riskCalls.length, pairs.length - riskCalls.length, true), value: null, status: 'MISSING_FORMAL_SIGNAL' as const },
+    downsideRecall: { ...rate(caught, downside.length, pairs.length - downside.length, true), value: null, status: 'MISSING_FORMAL_SIGNAL' as const },
   };
+  return { precision: rate(caught, riskCalls.length, pairs.length - riskCalls.length), downsideRecall: rate(caught, downside.length, pairs.length - downside.length) };
 }
 
 function informationCoefficient(pairs: ForwardPair[]): IcEstimate {
   if (pairs.length < MIN_IC_N) return { value: null, n: pairs.length, status: 'INSUFFICIENT_SAMPLE' };
   const returns = pairs.map(pair => pair.fwd);
-  if (new Set(returns).size < 2) return { value: null, n: pairs.length, status: 'ZERO_VARIANCE' };
-  const value = spearman(pairs.map(pair => pair.score), returns);
+  const scores = pairs.map(pair => pair.score);
+  if (new Set(returns).size < 2 || new Set(scores).size < 2) return { value: null, n: pairs.length, status: 'ZERO_VARIANCE' };
+  const value = spearman(scores, returns);
   return Number.isFinite(value)
     ? { value, n: pairs.length, status: 'OK' }
     : { value: null, n: pairs.length, status: 'ZERO_VARIANCE' };

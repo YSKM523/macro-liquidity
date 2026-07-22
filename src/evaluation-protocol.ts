@@ -147,7 +147,8 @@ export interface PurgedFold {
   embargoedN: number;
   overlappingN: number;
   independentN: number;
-  weights: Record<string, number>;
+  diagnosticFittedWeights: Record<string, number>;
+  diagnosticFitted: Pick<ValidationMetrics, 'direction' | 'ic'>;
   q10: number | null;
   metrics: ValidationMetrics;
   trainPairs: ForwardPair[];
@@ -173,7 +174,18 @@ export function buildPurgedFolds(
     const purged = purgeTrainingPairs(candidates, testFrom, embargoDays);
     const testPairs = allPairs.filter(pair => pair.startIdx >= testStartIdx && pair.startIdx <= testEndIdx);
     if (testPairs.length === 0) continue;
-    const q10 = quantile(purged.pairs.map(pair => pair.fwd), .1);
+    const q10 = purged.pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
+      ? quantile(purged.pairs.map(pair => pair.fwd), .1) : null;
+    const diagnosticFittedWeights = trainingWeights(purged.pairs);
+    const fittedPairs = testPairs.flatMap(pair => {
+      const available = Object.entries(diagnosticFittedWeights)
+        .filter(([key, weight]) => weight > 0 && Number.isFinite(pair.factors[key]));
+      const denominator = available.reduce((sum, [, weight]) => sum + weight, 0);
+      if (!(denominator > 0)) return [];
+      const score = available.reduce((sum, [key, weight]) => sum + pair.factors[key] * weight, 0) / denominator;
+      return [{ ...pair, score }];
+    });
+    const fitted = evaluateValidationMetrics(fittedPairs, null, 0);
     folds.push({
       testFrom, testTo,
       testLabelThrough: testPairs.at(-1)!.outcomeDate,
@@ -183,7 +195,8 @@ export function buildPurgedFolds(
       embargoedN: purged.embargoedN,
       overlappingN: testPairs.length,
       independentN: greedyIndependentPairs(testPairs).length,
-      weights: trainingWeights(purged.pairs),
+      diagnosticFittedWeights,
+      diagnosticFitted: { direction: fitted.direction, ic: fitted.ic },
       q10,
       metrics: evaluateValidationMetrics(testPairs, q10, purged.pairs.length),
       trainPairs: purged.pairs,
@@ -199,12 +212,16 @@ function governedPit(snaps: ValidationSnap[]): boolean {
 
 function frozenTraining(snaps: ValidationSnap[]) {
   const pre = snaps.filter(snap => snap.date < HOLDOUT_REGISTRATION.holdoutFrom);
-  const pairs = buildForwardPairs(pre).filter(pair => pair.outcomeDate < HOLDOUT_REGISTRATION.holdoutFrom);
+  const trainingOutcomeCutoffExclusive = addDays(HOLDOUT_REGISTRATION.holdoutFrom, -VALIDATION_PROTOCOL.embargoDays);
+  const pairs = buildForwardPairs(pre).filter(pair => pair.outcomeDate < trainingOutcomeCutoffExclusive);
   return {
-    trainingThrough: pre.at(-1)?.date ?? null,
+    trainingOutcomeCutoffExclusive,
+    trainingThrough: pairs.at(-1)?.signalDate ?? null,
+    trainingLabelThrough: pairs.at(-1)?.outcomeDate ?? null,
     trainingN: pairs.length,
     weights: trainingWeights(pairs),
-    q10: quantile(pairs.map(pair => pair.fwd), .1),
+    q10: pairs.length >= VALIDATION_PROTOCOL.minimumTailCalibrationN
+      ? quantile(pairs.map(pair => pair.fwd), .1) : null,
   };
 }
 
@@ -238,14 +255,39 @@ export function runPurgedValidation(
   }
   const folds = buildPurgedFolds(snaps, opts);
   const testPairs = folds.flatMap(fold => fold.testPairs);
-  const finalTraining = folds.at(-1)?.trainPairs ?? [];
+  const aggregateBase = testPairs.length > 0 ? evaluateValidationMetrics(testPairs, null, 0) : null;
+  const totalTailEvents = folds.reduce((sum, fold) => sum + fold.metrics.tail.tailEvents, 0);
+  const totalCaught = folds.reduce((sum, fold) => sum + fold.metrics.tail.caught, 0);
+  const totalRiskCalls = folds.reduce((sum, fold) => sum + fold.metrics.tail.riskCalls, 0);
+  const calibrationReady = folds.length > 0 && folds.every(fold => fold.metrics.tail.calibrationN >= VALIDATION_PROTOCOL.minimumTailCalibrationN);
+  const tailReady = calibrationReady && totalTailEvents >= VALIDATION_PROTOCOL.minimumTestTailEvents;
+  const aggregateTail = aggregateBase == null ? null : {
+    recall: {
+      value: tailReady ? totalCaught / totalTailEvents : null,
+      hits: totalCaught, n: totalTailEvents, abstentions: testPairs.length - totalTailEvents,
+      minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
+      status: tailReady ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+    },
+    precision: {
+      value: tailReady && totalRiskCalls > 0 ? totalCaught / totalRiskCalls : null,
+      hits: totalCaught, n: totalRiskCalls, abstentions: testPairs.length - totalRiskCalls,
+      minRequired: VALIDATION_PROTOCOL.minimumTestTailEvents,
+      status: tailReady && totalRiskCalls > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
+    },
+    tailEvents: totalTailEvents,
+    caught: totalCaught,
+    riskCalls: totalRiskCalls,
+    calibrationN: null,
+    foldCalibrationN: folds.map(fold => fold.metrics.tail.calibrationN),
+    threshold: null,
+    thresholdSemantics: 'FOLD_SPECIFIC' as const,
+    method: 'TRAIN_ONLY_Q10' as const,
+  };
   return {
     status: folds.length > 0 ? 'OK' as const : 'INSUFFICIENT_SAMPLE' as const,
     protocol,
     folds: folds.map(({ trainPairs: _trainPairs, testPairs: _testPairs, ...fold }) => fold),
-    aggregateMetrics: testPairs.length > 0
-      ? evaluateValidationMetrics(testPairs, quantile(finalTraining.map(pair => pair.fwd), .1), finalTraining.length)
-      : null,
+    aggregateMetrics: aggregateBase == null || aggregateTail == null ? null : { ...aggregateBase, tail: aggregateTail },
     overlappingN: testPairs.length,
     independentN: greedyIndependentPairs(testPairs).length,
     holdout: runFrozenHoldout(snaps),
