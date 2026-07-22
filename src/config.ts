@@ -86,14 +86,17 @@ const CHAMPION_SCORING = {
 } as const;
 // data-grounded weights from measured factor IC (13w spearman, 2016-2026): netliqTrend +0.19, curve +0.17,
 // dollar +0.16, reserveAdequacy +0.12 (top-4 → ~0.80 of weight); impulse/rates weak, credit/funding ~neutral kept low;
-// vol = robust contrarian → 0, lives in the live-stress overlay.
+// vol = robust contrarian → 0; retained only as a legacy macro diagnostic and is not the live overlay.
 // curve EARNED its weight: adding it raises the zero-tuning equal-weight OOS IC 0.206→0.252 and it's selected
 // top-2 in every walk-forward fold (genuinely orthogonal, not overfitting). Walk-forward warns: don't over-tune —
 // the edge is the factor SET, not precise weights, so this is a modest IC-direction tilt, not an IC-proportional fit.
 // sum check: 0.35+0.05+0.06+0.04+0.05+0.18+0.00+0.12+0.15 = 1.00
 export const WEIGHTS = CHAMPION_SCORING.weights;
-// coverage = 真正参与评分(权重>0)的因子里，有真实数据的比例。vol 权重为 0(已移入 live-stress overlay)，不计入。
+// coverage = 真正参与评分(权重>0)的因子里，有真实数据的比例。vol 权重为 0(legacy diagnostic)，不计入。
 export const COVERAGE_FACTORS = CHAMPION_SCORING.coverageFactors;
+export const SCORING_FACTOR_KEYS = CHAMPION_SCORING.coverageFactors;
+export const LEGACY_ZERO_WEIGHT_DIAGNOSTICS = { vol: 'LEGACY_ZERO_WEIGHT_DIAGNOSTIC' } as const;
+export const LIVE_RISK_OVERLAY_INPUTS = ['vix', 'spx', 'us10y', 'dxy'] as const;
 export const RESERVE_LOW = CHAMPION_SCORING.reserveAdequacy.lowBillions;
 export const RESERVE_HIGH = CHAMPION_SCORING.reserveAdequacy.highBillions;
 export const QEQT_EPSILON_B = CHAMPION_SCORING.qeQt.deadBandBillions;

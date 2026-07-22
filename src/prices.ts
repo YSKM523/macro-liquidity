@@ -1,10 +1,10 @@
 import { MARKET_DATA_QUALITY, STRESS } from './config';
-import { fetchWithRetry } from './http-retry';
+import { HttpAttemptBudgetExhaustedError, HttpAttemptTimeoutError, fetchWithRetry } from './http-retry';
 import type { HttpRetryOptions } from './http-retry';
 
 export type ProviderStatus = 'OK' | 'STALE' | 'DIVERGENT' | 'FAILED';
 export type ProviderReasonCode = 'SOURCE_DIVERGENCE' | 'HTTP_ERROR' | 'INVALID_RESPONSE'
-  | 'INVALID_TIMESTAMP' | 'FUTURE_TIMESTAMP' | 'NO_DATA' | 'TIMEOUT';
+  | 'INVALID_TIMESTAMP' | 'FUTURE_TIMESTAMP' | 'NO_DATA' | 'TIMEOUT' | 'ATTEMPT_BUDGET_EXHAUSTED';
 export type MarketSymbol = 'spx' | 'vix' | 'dxy' | 'us10y';
 export interface ObsPoint { date: string; value: number }
 
@@ -123,31 +123,18 @@ function sourceLabel(symbol: string): string {
   return INSTRUMENT_LABELS[symbol] ?? symbol;
 }
 
-class ProviderTimeoutError extends Error {}
-
-function timedFetcher(fetchFn: Fetcher, timeoutMs: number): Fetcher {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<Response>((_resolve, reject) => {
-      timeoutId = setTimeout(() => {
-        controller.abort();
-        reject(new ProviderTimeoutError(`provider timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
-    });
-    try {
-      return await Promise.race([
-        fetchFn(input, { ...init, signal: controller.signal }),
-        timeout,
-      ]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
-  }) as Fetcher;
+function errorReason(error: unknown): ProviderReasonCode {
+  if (error instanceof HttpAttemptTimeoutError) return 'TIMEOUT';
+  if (error instanceof HttpAttemptBudgetExhaustedError) return 'ATTEMPT_BUDGET_EXHAUSTED';
+  return 'HTTP_ERROR';
 }
 
-function errorReason(error: unknown): ProviderReasonCode {
-  return error instanceof ProviderTimeoutError ? 'TIMEOUT' : 'HTTP_ERROR';
+function providerRetryOptions(options: ProviderFetchOptions): HttpRetryOptions {
+  return {
+    ...options,
+    attemptTimeoutMs: options.providerTimeoutMs ?? options.attemptTimeoutMs
+      ?? MARKET_DATA_QUALITY.providerTimeoutMs,
+  };
 }
 
 function knownYahooMarketState(value: unknown): string {
@@ -583,10 +570,11 @@ export function normalizeTnx(raw: number): number {
 }
 
 export async function fetchLivePrices(nowIso: string, options: Omit<ProviderFetchOptions, 'fetchedAt'> = {}): Promise<LivePrices> {
-  const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
-  const yahoo = new YahooMarketDataProvider(fetchFn, options);
-  const stooq = new StooqMarketDataProvider(fetchFn, options);
-  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, options);
+  const fetchFn = options.fetchFn ?? fetch;
+  const retryOptions = providerRetryOptions(options);
+  const yahoo = new YahooMarketDataProvider(fetchFn, retryOptions);
+  const stooq = new StooqMarketDataProvider(fetchFn, retryOptions);
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, retryOptions);
   const quoteCandidates = await Promise.all([
     Promise.all([
       yahoo.fetchQuote({ symbol: '^GSPC', fetchedAt: nowIso }),
@@ -633,10 +621,11 @@ function historyMeta(result: SeriesResult): HistoryProvenance {
 
 async function fetchMarketHistories(options: ProviderFetchOptions = {}): Promise<Record<MarketSymbol, SeriesResult>> {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
-  const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
-  const yahoo = new YahooMarketDataProvider(fetchFn, options);
-  const stooq = new StooqMarketDataProvider(fetchFn, options);
-  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, options);
+  const fetchFn = options.fetchFn ?? fetch;
+  const retryOptions = providerRetryOptions(options);
+  const yahoo = new YahooMarketDataProvider(fetchFn, retryOptions);
+  const stooq = new StooqMarketDataProvider(fetchFn, retryOptions);
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, retryOptions);
   const candidates = await Promise.all([
     Promise.all([
       yahoo.fetchHistory({ symbol: '^GSPC', fetchedAt }),
@@ -683,10 +672,11 @@ export async function fetchStressSeries(options: ProviderFetchOptions = {}): Pro
 
 export async function fetchDxyDaily(options: ProviderFetchOptions = {}): Promise<ObsPoint[]> {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
-  const fetchFn = timedFetcher(options.fetchFn ?? fetch, options.providerTimeoutMs ?? MARKET_DATA_QUALITY.providerTimeoutMs);
-  const yahoo = new YahooMarketDataProvider(fetchFn, options);
-  const stooq = new StooqMarketDataProvider(fetchFn, options);
-  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, options);
+  const fetchFn = options.fetchFn ?? fetch;
+  const retryOptions = providerRetryOptions(options);
+  const yahoo = new YahooMarketDataProvider(fetchFn, retryOptions);
+  const stooq = new StooqMarketDataProvider(fetchFn, retryOptions);
+  const fred = new FredMarketDataProvider(options.fredApiKey ?? '', fetchFn, retryOptions);
   const candidates = await Promise.all([
     yahoo.fetchHistory({ symbol: 'DX-Y.NYB', fetchedAt }),
     stooq.fetchHistory({ symbol: 'dx.f', fetchedAt }),

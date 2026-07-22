@@ -18,7 +18,14 @@ import {
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
 import { policyRegime, deriveDecisionState } from './metrics';
-import { INGEST_STALE_HOURS, COVERAGE_FACTORS } from './config';
+import {
+  INGEST_STALE_HOURS,
+  COVERAGE_FACTORS,
+  LEGACY_ZERO_WEIGHT_DIAGNOSTICS,
+  LIVE_RISK_OVERLAY_INPUTS,
+  SCORING_FACTOR_KEYS,
+} from './config';
+import { createHttpAttemptBudget } from './http-retry';
 import { assessHealth } from './health';
 import { runBacktest } from './backtest';
 import { runEventTimeBacktest } from './event-backtest';
@@ -53,13 +60,16 @@ import type { LivePrices, LiveStress } from './prices';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
+export const LIVE_HTTP_ATTEMPT_BUDGET = 32;
 
 async function loadLive(env: Env, ctx?: ExecutionContext) {
+  const attemptBudget = createHttpAttemptBudget(LIVE_HTTP_ATTEMPT_BUDGET);
+  const providerOptions = { fredApiKey: env.FRED_API_KEY, attemptBudget };
   const cached = <T>(cache: LiveDataCache<T>, loader: () => Promise<T>) => ctx
     ? cache.getSWR(loader, promise => ctx.waitUntil(promise))
     : cache.get(loader);
   const pricesPromise = cached(livePricesCache, () =>
-    fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY })
+    fetchLivePrices(new Date().toISOString(), providerOptions)
       .then(assertCacheableLivePrices))
     .catch(error => {
       if (error instanceof TypedLiveDataFailure) {
@@ -68,7 +78,7 @@ async function loadLive(env: Env, ctx?: ExecutionContext) {
       throw error;
     });
   const stressPromise = cached(liveStressCache, () =>
-    fetchStressSeries({ fredApiKey: env.FRED_API_KEY })
+    fetchStressSeries(providerOptions)
       .then(evaluateLiveStress).then(assertCacheableStress))
     .catch(error => {
       if (error instanceof TypedLiveDataFailure) {
@@ -131,13 +141,23 @@ function presentSnapshot(row: unknown, stress: ReturnType<typeof evaluateLiveStr
     stressStatus: stress.status,
     decisionStatus,
   });
+  const factorQuality = parseJsonObject(r.factor_quality_json);
+  const vol = factorQuality.vol;
+  if (vol != null && typeof vol === 'object' && !Array.isArray(vol)) {
+    factorQuality.vol = { ...vol as Record<string, unknown>, classification: 'LEGACY_ZERO_WEIGHT_DIAGNOSTIC' };
+  }
   return {
     ...r,
     channel_status: channel,
     score: persistedScore,
     verdict: persistedVerdict,
     decision_status: decisionStatus,
-    factor_quality: parseJsonObject(r.factor_quality_json),
+    factor_quality: factorQuality,
+    factor_classification: {
+      scoring_factor_keys: SCORING_FACTOR_KEYS,
+      legacy_zero_weight_diagnostics: LEGACY_ZERO_WEIGHT_DIAGNOSTICS,
+      live_risk_overlay_inputs: LIVE_RISK_OVERLAY_INPUTS,
+    },
     freshness: parseJsonObject(r.freshness_json),
     policy_regime: decisionStatus === 'OK' ? policyRegime(r.qe_qt_regime, r.date) : null,
     reason: decision.reason,
