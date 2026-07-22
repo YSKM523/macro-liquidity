@@ -93,6 +93,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 
 Snapshot writer hardening was completed in remediation 1: every official/nowcast write requires provenance and the legacy fallback write path was deleted.
 
+### Re-review remediation 1 — legacy current snapshot provenance
+
+- RED: worker test returned 503 for a migration-backfilled legacy official row on `/api/v1/snapshot`.
+- GREEN: worker/API-schema tests passed 2 files / 37 tests; typecheck, lint, and diff check passed.
+- V1 current official/nowcast rows now use the same `LEGACY`/`GOVERNED` normalization and joint provenance summary as historical endpoints. Unknown legacy identity/provenance fields are null; partial mixed identity still fails closed.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

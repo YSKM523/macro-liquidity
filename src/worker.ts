@@ -231,12 +231,21 @@ export default {
         ingest_status: meta.last_status ?? null,
         runs: ingestRuns,
       };
-      const official = presentSnapshot(officialRow, stress, 'OFFICIAL');
-      const nowcast = presentSnapshot(nowcastRow, stress, 'PROVISIONAL');
+      let officialSource = officialRow;
+      let nowcastSource = nowcastRow;
+      let snapshotProvenance: ReturnType<typeof summarizeSnapshotProvenance> | undefined;
       if (v1) {
         try {
-          if (officialRow) assertSnapshotVersionMetadata(officialRow);
-          if (nowcastRow) assertSnapshotVersionMetadata(nowcastRow);
+          const normalized: NormalizedSnapshotRow[] = [];
+          if (officialRow) {
+            officialSource = normalizeSnapshotProvenance(officialRow);
+            normalized.push(officialSource as NormalizedSnapshotRow);
+          }
+          if (nowcastRow) {
+            nowcastSource = normalizeSnapshotProvenance(nowcastRow);
+            normalized.push(nowcastSource as NormalizedSnapshotRow);
+          }
+          snapshotProvenance = summarizeSnapshotProvenance(normalized);
         } catch (error) {
           structuredLog('request_failure', {
             request_id: requestId, error_code: 'SNAPSHOT_SCHEMA_INVALID', error: String((error as Error).message),
@@ -244,12 +253,18 @@ export default {
           return errorJson(requestId, 'schema_validation_failed', 'SNAPSHOT_SCHEMA_INVALID', 503);
         }
       }
+      const official = presentSnapshot(officialSource, stress, 'OFFICIAL');
+      const nowcast = presentSnapshot(nowcastSource, stress, 'PROVISIONAL');
       if (!official && !nowcast) return json({
         ...(v1 ? { api_version: 'v1' } : {}),
         official: null, nowcast: null, live, live_cache: cache, ingest,
+        ...(v1 ? { snapshot_provenance: snapshotProvenance } : {}),
         error: 'no_data', error_code: 'SNAPSHOT_NO_DATA', request_id: requestId,
       });
-      return json({ ...(v1 ? { api_version: 'v1' } : {}), official, nowcast, live, live_cache: cache, ingest });
+      return json({
+        ...(v1 ? { api_version: 'v1', snapshot_provenance: snapshotProvenance } : {}),
+        official, nowcast, live, live_cache: cache, ingest,
+      });
     }
     if (p === '/api/explain') {
       const wparam = url.searchParams.get('window');

@@ -174,6 +174,28 @@ describe('public error contract', () => {
 });
 
 describe('/api/v1 governance routes', () => {
+  it('returns a migration-backfilled legacy snapshot honestly instead of permanently rejecting it', async () => {
+    dbState.row = {
+      ...dbState.row,
+      model_version: 'LEGACY_UNVERSIONED', config_hash: 'LEGACY_UNVERSIONED',
+      code_commit_sha: 'LEGACY_UNVERSIONED', data_run_id: 'must-not-leak',
+      data_cutoff: '2020-01-01T00:00:00Z', decision_at: null,
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    dbState.nowcast = null;
+    const response = await worker.fetch(new Request('https://example.test/api/v1/snapshot'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.snapshot_provenance).toEqual({
+      totalCount: 1, governedCount: 0, legacyCount: 1, completeness: 'PARTIAL_LEGACY',
+    });
+    expect(body.official).toMatchObject({
+      provenance_status: 'LEGACY', model_version: 'LEGACY_UNVERSIONED',
+      config_hash: null, code_commit_sha: null, data_run_id: null,
+      data_cutoff: null, decision_at: null, created_at: null,
+    });
+  });
+
   it('returns strict joint legacy/governed provenance instead of permanently rejecting legacy history', async () => {
     const legacy = {
       date: '2020-01-01', score: 50, spx: 3200, verdict: 'NEUTRAL', factors_json: '{}',
