@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Miniflare } from 'miniflare';
 import { SERIES_IDS } from '../src/config';
-import { upsertNowcastSnapshot, upsertOfficialSnapshot } from '../src/db';
+import { loadEventBacktestInputs, upsertNowcastSnapshot, upsertOfficialSnapshot } from '../src/db';
 import type { SnapshotInput } from '../src/pit';
 
 const snapshot = {
@@ -46,6 +46,33 @@ function manifest(): SnapshotInput[] {
 }
 
 describe('official PIT snapshot persistence', () => {
+  it('freezes a PIT row against a legacy no-provenance write and preserves its as-of replay', async () => {
+    const { mf, db } = await migratedDb();
+    const provenance = {
+      dataRunId: 'run-1', dataCutoff: '2024-01-04T23:59:59Z',
+      decisionAt: '2024-01-05T00:00:00Z', tradableAt: '2024-01-05T14:30:00Z',
+      releaseResolutionAt: '2024-01-10T00:00:00Z', inputs: manifest(),
+    };
+    await upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, provenance);
+
+    let beforeReplay = await loadEventBacktestInputs(db);
+    for (let attempt = 0; beforeReplay.signals.length === 0 && attempt < 50; attempt += 1) {
+      beforeReplay = await loadEventBacktestInputs(db);
+    }
+    expect(beforeReplay.signals).toHaveLength(1);
+    const cutoff = beforeReplay.asOfCutoff;
+    const beforeRow = await db.prepare(`SELECT date,decision_week,score,pit_status,data_run_id,recorded_at
+      FROM model_snapshot_weekly WHERE decision_week='2024-01-01'`).first();
+
+    const outcome = await upsertOfficialSnapshot(db, 'run-1', { ...snapshot, score: 1 }, 1);
+
+    expect(await db.prepare(`SELECT date,decision_week,score,pit_status,data_run_id,recorded_at
+      FROM model_snapshot_weekly WHERE decision_week='2024-01-01'`).first()).toEqual(beforeRow);
+    expect(await loadEventBacktestInputs(db, cutoff)).toEqual(beforeReplay);
+    expect(outcome).toBe('FROZEN');
+    await mf.dispose();
+  }, 15000);
+
   it('atomically stores a complete manifest, freezes it, and gives nowcasts provenance without a manifest', async () => {
     const { mf, db } = await migratedDb();
     const provenance = {

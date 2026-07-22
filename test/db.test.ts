@@ -124,7 +124,7 @@ describe('official and nowcast snapshot channels', () => {
     });
     const db = await mf.getD1Database('DB') as unknown as D1Database;
     const extraColumn = channel === 'official'
-      ? 'decision_week TEXT UNIQUE, recorded_at TEXT'
+      ? "decision_week TEXT UNIQUE, recorded_at TEXT, pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT'"
       : 'channel_status TEXT';
     const table = channel === 'official' ? 'model_snapshot_weekly' : 'nowcast_snapshot_daily';
     await db.batch([

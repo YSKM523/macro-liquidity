@@ -4,7 +4,7 @@ Base: `37fd6c4`
 
 Branch: `codex/pr-09-event-time-backtest`
 
-Implementation commits: `0764210..a1f5b54` (review candidate diff: `37fd6c4..a1f5b54`)
+Implementation commits: `0764210..HEAD` (whole-branch review candidate diff: `37fd6c4..HEAD`)
 
 ## Outcome
 
@@ -41,11 +41,14 @@ Implementation commits: `0764210..a1f5b54` (review candidate diff: `37fd6c4..a1f
 - Whole-branch review first found partial NAV/cost leakage, no hard active/latest-PIT value fence, insufficient revision disclosure, legacy weekly prose appearing formal, and missing same-date supersession audit. Those fixes erased incomplete performance, added the transactional mismatch guard and superseded-signal audit, and labeled every weekly metric. A later final review correctly rejected the interim mutable-revision design; the append-only strict-as-of redesign in this candidate supersedes that interim response contract.
 - Final-review reproducibility RED: the mutable overwrite schema, lack of shared signal/daily cutoff, synthetic formal inputs, and 23:59 eligibility all violated the formal contract. RED evidence included 11/25 engine failures plus DB errors for missing `activated_at`/`recorded_at`; a second DB/API batch had 9 failures/65 passes. The implementation above made the focused engine/DB/API suite green.
 - Formal-cutoff RED separately proved that engine calls without a D1-supplied `asOfCutoff` incorrectly returned `OK`; the gate now rejects them. Strict-visibility RED proved rows with `recorded_at == cutoff` were included; all signal/daily queries and the engine gate now require `< cutoff`.
-- Fresh candidate `env -u NODE_OPTIONS npm test -- --reporter=basic`: **29/29 files, 517/517 tests, exit 0**.
+- Whole-branch Important RED proved the legacy no-provenance writer could overwrite a frozen PIT row: score changed **60→1** and `recorded_at` changed, which also invalidated the previously captured cutoff replay. The conflict update now excludes `pit_status='PIT'`, reports `FROZEN`, and preserves the complete row plus same-cutoff replay. Focused DB/event/PIT verification: **3/3 files, 31/31 tests, exit 0**.
+- Fresh candidate `env -u NODE_OPTIONS npm test -- --reporter=json --outputFile=/tmp/pr09-full-review-fix.json`: **29/29 files, 518/518 tests, exit 0**.
 - Fresh candidate `env -u NODE_OPTIONS npx tsc --noEmit`: **exit 0**.
 - `git diff --check`: **exit 0**.
 - Fresh local `npm exec wrangler -- d1 migrations apply macro_liquidity --local --persist-to /tmp/pr09-repro-migrations.Sos167`: migrations **0001–0009 applied successfully**; immediate second invocation returned **No migrations to apply!**. Wrangler 3.114.17's update warning did not affect either exit code.
 - Review-package evidence is generated after the candidate commit; older 504-test/migration outputs are intentionally not claimed for this head.
+
+Review conclusion: the Important frozen-PIT reproducibility defect is fixed locally with RED→GREEN evidence. The candidate is green and ready for a new whole-branch review; it is not marked final-reviewed or production-approved here.
 
 ## Historical and production impact
 

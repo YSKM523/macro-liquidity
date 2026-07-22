@@ -18,7 +18,7 @@
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
-| PR-09 | 待复审（本地候选） | `0764210`–`a1f5b54` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 517 tests + TypeScript strict 已通过，final rereview 待完成 |
+| PR-09 | 待复审（本地候选） | `0764210`–`HEAD` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview 待完成 |
 | PR-10～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1799,7 +1799,8 @@ refactor: event-time backtest engine
 - [x] BT-04：日频净值、SOFR ACT/360、手续费/滑点、高波动额外滑点与 >100% 融资支持
 - [x] `/api/backtest?as_of=` 使用同一个 D1 strict-visibility cutoff 提供 `APPEND_ONLY_AS_OF` 正式 `event_time` 与 typed `DATA_INCOMPLETE`；旧周频与 robustness strategy 均标记 `LEGACY_WEEKLY`
 - [x] 页面披露 eligibility/accounting 区别、strict cutoff、source/run provenance、现金、成本、VIX 保守政策与 legacy/event-time 区别
-- [x] 当前候选 head 的 29 files / 517 tests、TypeScript strict 与 diff-check
+- [x] legacy 无 provenance writer 不可覆盖已冻结 PIT row/`recorded_at`，固定 `as_of` replay 保持不变（Important RED→GREEN）
+- [x] 当前候选 head 的 29 files / 518 tests、TypeScript strict 与 diff-check
 - [x] fresh local 0001–0009 migration 首次全部成功，紧接二次返回 `No migrations to apply!`
 - [ ] 当前候选提交的 review package 与 final rereview
 - [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）

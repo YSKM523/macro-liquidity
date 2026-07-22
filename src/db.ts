@@ -955,6 +955,7 @@ export async function upsertOfficialSnapshot(
     });
     return existing ? 'UPGRADED_LEGACY' : 'INSERTED';
   }
+  const week = decisionWeek(s.date);
   const placeholders = Array.from({ length: 28 }, () => '?').join(',');
   const result = await db.prepare(
     `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS}, recorded_at)
@@ -965,9 +966,14 @@ export async function upsertOfficialSnapshot(
          AND unixepoch(lease.expires_at) > unixepoch('now')
      )
      ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,
-       ${SNAPSHOT_UPDATE},recorded_at=excluded.recorded_at`
-  ).bind(s.date, decisionWeek(s.date), ...snapshotValues(s, spx), runId).run();
+       ${SNAPSHOT_UPDATE},recorded_at=excluded.recorded_at
+     WHERE model_snapshot_weekly.pit_status<>'PIT'`
+  ).bind(s.date, week, ...snapshotValues(s, spx), runId).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
+    const frozen = await db.prepare(
+      "SELECT 1 AS frozen FROM model_snapshot_weekly WHERE decision_week=? AND pit_status='PIT'",
+    ).bind(week).first();
+    if (frozen) return 'FROZEN';
     throw new Error(`ingest lease fence rejected official snapshot write for run ${runId}`);
   }
 }
