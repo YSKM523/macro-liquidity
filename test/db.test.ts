@@ -224,7 +224,7 @@ describe('event-time backtest repository', () => {
     const queries: string[] = [];
     const results = [
       [{ db_now: '2024-01-20T00:00:00Z', cutoff: '2024-01-15T00:00:00Z' }],
-      [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T16:00:00Z', score: 60, recorded_at: '2024-01-06T00:00:00Z', data_run_id: 'signal-a' }],
+      [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T16:00:00Z', score: 60, verdict: 'BULLISH', netliq_dir: 'DOWN', vix_eod: 20, recorded_at: '2024-01-06T00:00:00Z', data_run_id: 'signal-a' }],
       [
         { symbol: 'SPX', date: '2024-01-05', adjusted_close: 100, source: 'FRED:SP500', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a', activation_run_id: 'activation-a', activated_at: '2024-01-07T00:00:00Z', provenance_status: 'PIT_RAW' },
         { symbol: 'VIX', date: '2024-01-05', adjusted_close: 20, source: 'FRED:VIXCLS', fetched_at: '2024-01-06T00:00:00Z', data_run_id: 'run-a', activation_run_id: 'activation-a', activated_at: '2024-01-07T00:00:00Z', provenance_status: 'PIT_RAW' },
@@ -250,11 +250,18 @@ describe('event-time backtest repository', () => {
     expect(queries[1]).toMatch(/model_snapshot_weekly[\s\S]*decision_status='OK'[\s\S]*pit_status='PIT'/i);
     expect(queries[1]).toMatch(/recorded_at[\s\S]*julianday\(recorded_at\).*julianday\(\?\)/i);
     expect(queries[1]).toMatch(/ORDER BY[\s\S]*julianday\(decision_at\)/i);
+    expect(queries[1]).toMatch(/verdict[\s\S]*netliq_dir[\s\S]*vix_eod/i);
     expect(queries[2]).toMatch(/ROW_NUMBER\(\)[\s\S]*market_prices_daily[\s\S]*activated_at/i);
     expect(queries[3]).toMatch(/ROW_NUMBER\(\)[\s\S]*cash_rates_daily[\s\S]*activated_at/i);
     expect(loaded).toEqual({
       asOfCutoff: '2024-01-15T00:00:00Z',
-      signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z', score: 60, recordedAt: '2024-01-06T00:00:00Z', dataRunId: 'signal-a' }],
+      signals: [{
+        signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z',
+        score: 60, verdict: 'BULLISH', netliqDir: 'DOWN', snapshotVixEod: 20,
+        stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY', targetExposure: 0.9,
+        portfolioTier: 'ORDINARY_TAILWIND', portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
+        recordedAt: '2024-01-06T00:00:00Z', dataRunId: 'signal-a',
+      }],
       prices: [{ date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],
       vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-a', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],
       cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-b', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],

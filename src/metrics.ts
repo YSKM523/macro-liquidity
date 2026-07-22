@@ -338,7 +338,7 @@ export interface Guidance {
   lean: string;
   divergence: string | null;
   triggers: GuidanceTrigger[];
-  portfolioPolicy: PortfolioPolicy;
+  portfolioPolicy: PortfolioPolicy | null;
 }
 
 export function buildGuidance(input: GuidanceInput): Guidance {
@@ -502,6 +502,7 @@ export function deriveDecisionState(input: DecisionInput): DecisionState {
         lean: '等待关键宏观数据恢复',
         divergence: null,
         triggers: [{ label: '关键宏观数据恢复后再评估', detail: '当前无法形成可靠宏观判定', armed: true }],
+        portfolioPolicy: null,
       },
     };
   }

@@ -1,5 +1,6 @@
 import { isoTimestampMs } from './pit';
 import { EVENT_BACKTEST_ASSUMPTIONS } from './config';
+import type { PortfolioDirection, PortfolioTier, PortfolioVerdict } from './portfolio-policy';
 
 export interface EventSignal {
   signalDate: string;
@@ -7,6 +8,12 @@ export interface EventSignal {
   tradableAt: string;
   score: number;
   targetExposure?: number;
+  verdict?: PortfolioVerdict;
+  netliqDir?: PortfolioDirection;
+  snapshotVixEod?: number | null;
+  portfolioTier?: PortfolioTier;
+  portfolioMethodology?: 'DASHBOARD_EXPOSURE_TIERS_V1';
+  stressMethodology?: 'PIT_SNAPSHOT_VIX_PROXY';
   recordedAt?: string;
   dataRunId?: string;
 }
@@ -273,6 +280,11 @@ function formalProvenanceIssue(inputs: EventBacktestInputs, provenance: InputPro
   const cutoffMs = isoTimestampMs(provenance.asOfCutoff, 'backtest asOfCutoff');
   for (const signal of inputs.signals) {
     if (!signal.recordedAt || !signal.dataRunId) return 'missing official signal provenance';
+    if (signal.targetExposure == null || !signal.portfolioTier ||
+      signal.portfolioMethodology !== 'DASHBOARD_EXPOSURE_TIERS_V1' ||
+      signal.stressMethodology !== 'PIT_SNAPSHOT_VIX_PROXY') {
+      return 'missing explicit formal portfolio target';
+    }
     if (isoTimestampMs(signal.recordedAt, 'signal recordedAt') >= cutoffMs) {
       return 'signal not visible strictly before as-of cutoff';
     }

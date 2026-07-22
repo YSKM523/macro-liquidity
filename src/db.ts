@@ -3,6 +3,7 @@ import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
 import { compareIsoTimestamps, isoTimestampMs, validateReleaseOverride } from './pit';
 import type { EventBacktestInputs } from './event-backtest';
+import { mapPortfolioPolicy, snapshotVixStressStatus } from './portfolio-policy';
 
 function requireIsoTimestamp(value: string, field: string): void {
   isoTimestampMs(value, field);
@@ -1099,7 +1100,7 @@ export async function loadEventBacktestInputs(
   const cutoff = clock.cutoff;
   const [signalRows, marketRows, cashRows] = await Promise.all([
     db.prepare(
-      `SELECT date AS signal_date,decision_at,tradable_at,score,recorded_at,data_run_id
+      `SELECT date AS signal_date,decision_at,tradable_at,score,verdict,netliq_dir,vix_eod,recorded_at,data_run_id
        FROM model_snapshot_weekly
        WHERE decision_status='OK' AND pit_status='PIT'
          AND decision_at IS NOT NULL AND tradable_at IS NOT NULL AND score IS NOT NULL
@@ -1107,6 +1108,7 @@ export async function loadEventBacktestInputs(
        ORDER BY julianday(decision_at),date`,
     ).bind(cutoff).all<{
       signal_date: string; decision_at: string; tradable_at: string; score: number;
+      verdict: 'BULLISH' | 'NEUTRAL' | 'BEARISH'; netliq_dir: 'UP' | 'DOWN' | 'FLAT'; vix_eod: number | null;
       recorded_at: string; data_run_id: string | null;
     }>(),
     db.prepare(
@@ -1151,14 +1153,27 @@ export async function loadEventBacktestInputs(
   const markets = marketRows.results ?? [];
   return {
     asOfCutoff: cutoff,
-    signals: (signalRows.results ?? []).map(row => ({
-      signalDate: row.signal_date,
-      decisionAt: row.decision_at,
-      tradableAt: row.tradable_at,
-      score: row.score,
-      recordedAt: row.recorded_at,
-      dataRunId: row.data_run_id ?? undefined,
-    })),
+    signals: (signalRows.results ?? []).map(row => {
+      const stressStatus = snapshotVixStressStatus(row.vix_eod);
+      const policy = mapPortfolioPolicy({
+        score: row.score, verdict: row.verdict, netliqDir: row.netliq_dir, stressStatus,
+      });
+      return {
+        signalDate: row.signal_date,
+        decisionAt: row.decision_at,
+        tradableAt: row.tradable_at,
+        score: row.score,
+        verdict: row.verdict,
+        netliqDir: row.netliq_dir,
+        snapshotVixEod: row.vix_eod,
+        targetExposure: policy.targetExposure,
+        portfolioTier: policy.tier,
+        portfolioMethodology: policy.methodology,
+        stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY' as const,
+        recordedAt: row.recorded_at,
+        dataRunId: row.data_run_id ?? undefined,
+      };
+    }),
     prices: markets.filter(row => row.symbol === 'SPX').map(row => ({
       date: row.date, adjustedClose: row.adjusted_close, source: row.source,
       fetchedAt: row.fetched_at, dataRunId: row.data_run_id ?? undefined,

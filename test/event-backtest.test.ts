@@ -101,13 +101,24 @@ const daily = [
 ];
 const longSignal = {
   signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T16:00:00Z',
-  score: 60, recordedAt: '2024-01-10T00:30:00Z', dataRunId: 'run-a',
+  score: 60, verdict: 'BULLISH' as const, netliqDir: 'UP' as const, snapshotVixEod: 20,
+  targetExposure: 1, portfolioTier: 'STRONG_TAILWIND' as const,
+  portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1' as const,
+  stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY' as const,
+  recordedAt: '2024-01-10T00:30:00Z', dataRunId: 'run-a',
 };
 const calmVix = [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' as const }];
 const sofr = [{ date: '2024-01-04', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-10T00:00:00Z', dataRunId: 'run-a', activationRunId: 'run-a', activatedAt: '2024-01-10T01:00:00Z', provenanceStatus: 'PIT_RAW' as const }];
 const asOfCutoff = '2024-01-10T01:00:00.001Z';
 
 describe('daily event-time NAV', () => {
+  it('fails closed instead of using the scheduler compatibility fallback for a formal signal', () => {
+    const { targetExposure: _target, portfolioTier: _tier, portfolioMethodology: _methodology, ...implicit } = longSignal;
+    const result = runEventTimeBacktest({ asOfCutoff, signals: [implicit], prices: daily, vix: calmVix, cashRates: sofr });
+    expect(result.status).toBe('DATA_INCOMPLETE');
+    expect(result.reason).toMatch(/explicit.*portfolio.*target/i);
+    expect(result.nav).toEqual([]);
+  });
   it('fails closed when no single D1 as-of cutoff is supplied', () => {
     const result = runEventTimeBacktest({ signals: [longSignal], prices: daily, vix: calmVix, cashRates: sofr });
     expect(result.status).toBe('DATA_INCOMPLETE');
@@ -125,23 +136,23 @@ describe('daily event-time NAV', () => {
   });
 
   it('accrues positive SOFR ACT/360 cash carry across one-day and weekend gaps', () => {
-    const flat = { ...longSignal, score: 40 };
+    const flat = { ...longSignal, score: 40, targetExposure: 0.25, portfolioTier: 'HEADWIND' as const };
     const result = runEventTimeBacktest({ asOfCutoff, signals: [flat], prices: daily, vix: calmVix, cashRates: sofr });
     expect(result.status).toBe('OK');
-    expect(result.nav[1].cashReturn).toBeCloseTo(0.05 * 3 / 360, 12);
-    expect(result.nav[2].cashReturn).toBeCloseTo(0.05 / 360, 12);
+    expect(result.nav[1].cashReturn).toBeCloseTo(0.75 * 0.05 * 3 / 360, 12);
+    expect(result.nav[2].cashReturn).toBeCloseTo(0.75 * 0.05 / 360, 12);
     expect(result.nav[2].nav).toBeGreaterThan(1);
   });
 
   it('does not look ahead to a same-date SOFR fixing that was not known at interval start', () => {
-    const flat = { ...longSignal, score: 40 };
+    const flat = { ...longSignal, score: 40, targetExposure: 0.25, portfolioTier: 'HEADWIND' as const };
     const result = runEventTimeBacktest({
       asOfCutoff,
       signals: [flat], prices: daily, vix: calmVix,
       cashRates: [...sofr, { ...sofr[0], date: '2024-01-05', rate: 99 }],
     });
     expect(result.status).toBe('OK');
-    expect(result.nav[1].cashReturn).toBeCloseTo(0.05 * 3 / 360, 12);
+    expect(result.nav[1].cashReturn).toBeCloseTo(0.75 * 0.05 * 3 / 360, 12);
   });
 
   it.each([
