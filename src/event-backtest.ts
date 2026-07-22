@@ -1,5 +1,6 @@
 import { isoTimestampMs } from './pit';
 import { EVENT_BACKTEST_ASSUMPTIONS } from './config';
+import { officialPortfolioFieldIssue } from './portfolio-policy';
 import type { PortfolioDirection, PortfolioTier, PortfolioVerdict } from './portfolio-policy';
 
 export interface EventSignal {
@@ -8,12 +9,13 @@ export interface EventSignal {
   tradableAt: string;
   score: number;
   targetExposure?: number;
-  verdict?: PortfolioVerdict;
-  netliqDir?: PortfolioDirection;
+  verdict?: unknown;
+  netliqDir?: unknown;
   snapshotVixEod?: number | null;
   portfolioTier?: PortfolioTier;
   portfolioMethodology?: 'DASHBOARD_EXPOSURE_TIERS_V1';
   stressMethodology?: 'PIT_SNAPSHOT_VIX_PROXY';
+  policyIssue?: string;
   recordedAt?: string;
   dataRunId?: string;
 }
@@ -126,7 +128,8 @@ export interface PortfolioComparisonEntry {
 export interface EventPortfolioAnalytics {
   methodology: 'DASHBOARD_EXPOSURE_TIERS_V1';
   stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY';
-  timingAlpha: number | null;
+  timingComparisonMethodology: 'CUMULATIVE_RETURN_DIFFERENCE_VS_BETA_MATCHED_STATIC';
+  cumulativeTimingReturnDifference: number | null;
   strategy: PortfolioComparisonEntry;
   benchmarks: {
     spxBuyHold: PortfolioComparisonEntry;
@@ -291,15 +294,22 @@ function populationStd(values: number[]): number | null {
 export function buildBenchmarkTargets(
   prices: DailyMarketPrice[],
   strategyExposures: number[],
+  evaluationStartIndex = 0,
 ): BenchmarkTargets {
-  if (prices.length !== strategyExposures.length) throw new Error('benchmark exposure length mismatch');
+  if (!Number.isInteger(evaluationStartIndex) || evaluationStartIndex < 0 || evaluationStartIndex > prices.length) {
+    throw new Error('invalid benchmark evaluation start');
+  }
+  const evaluationPrices = prices.slice(evaluationStartIndex);
+  if (evaluationPrices.length !== strategyExposures.length) throw new Error('benchmark exposure length mismatch');
   if (strategyExposures.some(value => !Number.isFinite(value) || value < 0 || value > 1)) {
     throw new Error('invalid strategy exposure for benchmark');
   }
-  const averageBeta = strategyExposures.length === 0
+  const returnBearingExposures = strategyExposures.slice(0, -1);
+  const averageBeta = returnBearingExposures.length === 0
     ? 0
-    : strategyExposures.reduce((sum, value) => sum + value, 0) / strategyExposures.length;
-  const volatilityTarget = prices.map((_row, index) => {
+    : returnBearingExposures.reduce((sum, value) => sum + value, 0) / returnBearingExposures.length;
+  const volatilityTarget = evaluationPrices.map((_row, localIndex) => {
+    const index = evaluationStartIndex + localIndex;
     if (index < 21) return 0;
     const priorReturns: number[] = [];
     for (let cursor = index - 20; cursor < index; cursor++) {
@@ -310,15 +320,16 @@ export function buildBenchmarkTargets(
     if (dailyVolatility === 0) return 1;
     return Math.min(1, 0.10 / (dailyVolatility * Math.sqrt(252)));
   });
-  const movingAverage200 = prices.map((_row, index) => {
+  const movingAverage200 = evaluationPrices.map((_row, localIndex) => {
+    const index = evaluationStartIndex + localIndex;
     if (index < 200) return 0;
     const priorCloses = prices.slice(index - 200, index).map(row => row.adjustedClose);
     const average = priorCloses.reduce((sum, value) => sum + value, 0) / priorCloses.length;
     return priorCloses[priorCloses.length - 1] > average ? 1 : 0;
   });
   return {
-    spxBuyHold: prices.map(() => 1),
-    betaMatchedStatic: prices.map(() => averageBeta),
+    spxBuyHold: evaluationPrices.map(() => 1),
+    betaMatchedStatic: evaluationPrices.map(() => averageBeta),
     volatilityTarget,
     movingAverage200,
   };
@@ -401,13 +412,13 @@ export function computePortfolioMetrics(rows: Array<Pick<EventNavRow, 'date' | '
   if (rows.some(row => !Number.isFinite(row.nav) || row.nav <= 0 || !Number.isFinite(row.exposure))) {
     throw new Error('invalid portfolio metric input');
   }
-  const returns = rows.slice(1).map((row, index) => row.nav / rows[index].nav - 1);
+  const returns = rows.map((row, index) => row.nav / (index === 0 ? 1 : rows[index - 1].nav) - 1);
   const averageReturn = returns.reduce((sum, value) => sum + value, 0) / returns.length;
   const volatility = populationStd(returns);
-  const downside = returns.filter(value => value < 0);
-  const downsideDeviation = downside.length === 0
+  const hasDownside = returns.some(value => value < 0);
+  const downsideDeviation = !hasDownside
     ? null
-    : Math.sqrt(downside.reduce((sum, value) => sum + value ** 2, 0) / downside.length);
+    : Math.sqrt(returns.reduce((sum, value) => sum + Math.min(value, 0) ** 2, 0) / returns.length);
   let peak = 1;
   let maxDrawdown = 0;
   let currentDuration = 0;
@@ -424,7 +435,7 @@ export function computePortfolioMetrics(rows: Array<Pick<EventNavRow, 'date' | '
   }
   return {
     totalReturn: rows[rows.length - 1].nav - 1,
-    averageBeta: rows.reduce((sum, row) => sum + row.exposure, 0) / rows.length,
+    averageBeta: rows.slice(0, -1).reduce((sum, row) => sum + row.exposure, 0) / (rows.length - 1),
     annualizedVolatility: volatility == null ? null : volatility * Math.sqrt(252),
     sharpe: volatility == null || volatility === 0 ? null : averageReturn / volatility * Math.sqrt(252),
     sortino: downsideDeviation == null || downsideDeviation === 0 ? null : averageReturn / downsideDeviation * Math.sqrt(252),
@@ -450,12 +461,16 @@ function incomplete(
 
 function portfolioAnalytics(
   strategy: DailyPortfolioSimulation,
-  prices: DailyMarketPrice[],
+  cutoffVisiblePrices: DailyMarketPrice[],
+  evaluationStartIndex: number,
   vix: DailyVix[],
   cashRates: DailyCashRate[],
 ): EventPortfolioAnalytics {
   if (strategy.status !== 'OK' || strategy.tradingCostRate == null) throw new Error('strategy simulation incomplete');
-  const targets = buildBenchmarkTargets(prices, strategy.nav.map(row => row.exposure));
+  const prices = cutoffVisiblePrices.slice(evaluationStartIndex);
+  const targets = buildBenchmarkTargets(
+    cutoffVisiblePrices, strategy.nav.map(row => row.exposure), evaluationStartIndex,
+  );
   const run = (methodology: string, targetExposures: number[]): PortfolioComparisonEntry => {
     const simulation = simulateDailyPortfolio({ prices, targetExposures, vix, cashRates });
     if (simulation.status !== 'OK' || simulation.tradingCostRate == null) {
@@ -476,7 +491,10 @@ function portfolioAnalytics(
   return {
     methodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
     stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
-    timingAlpha: strategyReturn == null || betaReturn == null ? null : strategyReturn - betaReturn,
+    timingComparisonMethodology: 'CUMULATIVE_RETURN_DIFFERENCE_VS_BETA_MATCHED_STATIC',
+    cumulativeTimingReturnDifference: strategyReturn == null || betaReturn == null
+      ? null
+      : strategyReturn - betaReturn,
     strategy: strategyEntry,
     benchmarks: {
       spxBuyHold: run('SPX_BUY_HOLD', targets.spxBuyHold),
@@ -542,6 +560,14 @@ function formalProvenanceIssue(inputs: EventBacktestInputs, provenance: InputPro
 export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktestResult {
   const prices = [...inputs.prices].sort((a, b) => a.date.localeCompare(b.date));
   const provenance = inputProvenance(inputs);
+  const invalidOfficialField = inputs.signals.some(signal => signal.policyIssue != null ||
+    officialPortfolioFieldIssue({
+      score: signal.score, verdict: signal.verdict, netliqDir: signal.netliqDir,
+      snapshotVixEod: signal.snapshotVixEod,
+    }) != null);
+  if (invalidOfficialField) {
+    return incomplete('invalid official portfolio field', { executions: [], unexecuted: [], superseded: [] }, provenance);
+  }
   const schedule = scheduleExecutions(inputs.signals, prices);
   const vix = validateDatedSeries(inputs.vix, row => row.value, 'VIX');
   if (vix.some(row => row.value < 0)) throw new Error('invalid VIX value');
@@ -568,7 +594,7 @@ export function runEventTimeBacktest(inputs: EventBacktestInputs): EventBacktest
   if (simulation.status !== 'OK' || simulation.tradingCostRate == null) {
     return incomplete(simulation.reason ?? 'portfolio simulation incomplete', schedule, provenance);
   }
-  const portfolio = portfolioAnalytics(simulation, evaluationPrices, vix, cashRates);
+  const portfolio = portfolioAnalytics(simulation, prices, firstIndex, vix, cashRates);
 
   return {
     status: 'OK', reason: null, nav: simulation.nav,

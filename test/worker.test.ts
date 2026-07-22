@@ -203,6 +203,24 @@ describe('/api/backtest event-time performance', () => {
     expect(body.event_time.provenance.revisionPolicy).toBe('APPEND_ONLY_AS_OF');
     expect(body.event_time.portfolio).toBeNull();
   });
+
+  it.each([
+    ['score', { score: Number.NaN }],
+    ['verdict', { verdict: null }],
+    ['net liquidity direction', { netliqDir: 'SIDEWAYS' }],
+    ['snapshot VIX', { snapshotVixEod: -1 }],
+  ])('returns HTTP 200 typed DATA_INCOMPLETE for invalid official %s', async (_label, patch) => {
+    dbState.eventInputs = {
+      ...dbState.eventInputs,
+      signals: [{ ...dbState.eventInputs.signals[0], ...patch }],
+    };
+    const response = await worker.fetch(new Request('https://example.test/api/backtest'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.event_time.status).toBe('DATA_INCOMPLETE');
+    expect(body.event_time.reason).toMatch(/official.*portfolio.*field/i);
+    expect(body.event_time.portfolio).toBeNull();
+  });
 });
 
 describe('/api/robustness legacy methodology', () => {

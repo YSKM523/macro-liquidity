@@ -19,33 +19,31 @@ function priceSeries(length: number) {
 
 describe('fair portfolio benchmark targets', () => {
   it('beta-matches the static benchmark to strategy average exposure', () => {
-    const prices = priceSeries(4);
-    const targets = buildBenchmarkTargets(prices, [0.25, 0.75, 1, 0.5]);
-    expect(targets.betaMatchedStatic).toEqual([0.625, 0.625, 0.625, 0.625]);
-    expect(targets.spxBuyHold).toEqual([1, 1, 1, 1]);
+    const prices = priceSeries(2);
+    const targets = buildBenchmarkTargets(prices, [1, 0], 0);
+    expect(targets.betaMatchedStatic).toEqual([1, 1]);
+    expect(targets.spxBuyHold).toEqual([1, 1]);
   });
 
   it('uses 20 completed prior returns for volatility targeting and never the current price', () => {
     const prices = priceSeries(24);
-    const original = buildBenchmarkTargets(prices, prices.map(() => 0.75)).volatilityTarget;
+    const original = buildBenchmarkTargets(prices, prices.slice(21).map(() => 0.75), 21).volatilityTarget;
     const shocked = prices.map((row, index) => index === 21 ? { ...row, adjustedClose: row.adjustedClose * 10 } : row);
-    const rerun = buildBenchmarkTargets(shocked, shocked.map(() => 0.75)).volatilityTarget;
-    expect(original.slice(0, 21)).toEqual(Array(21).fill(0));
-    expect(original[21]).toBeGreaterThan(0);
-    expect(rerun[21]).toBe(original[21]);
-    expect(rerun[22]).not.toBe(original[22]);
+    const rerun = buildBenchmarkTargets(shocked, shocked.slice(21).map(() => 0.75), 21).volatilityTarget;
+    expect(original[0]).toBeGreaterThan(0);
+    expect(rerun[0]).toBe(original[0]);
+    expect(rerun[1]).not.toBe(original[1]);
     expect(Math.max(...rerun)).toBeLessThanOrEqual(1);
   });
 
   it('uses only the prior 200 closes for the moving-average control', () => {
     const prices = priceSeries(202);
-    const original = buildBenchmarkTargets(prices, prices.map(() => 0.75)).movingAverage200;
+    const original = buildBenchmarkTargets(prices, prices.slice(200).map(() => 0.75), 200).movingAverage200;
     const shocked = prices.map((row, index) => index === 200 ? { ...row, adjustedClose: 1 } : row);
-    const rerun = buildBenchmarkTargets(shocked, shocked.map(() => 0.75)).movingAverage200;
-    expect(original.slice(0, 200)).toEqual(Array(200).fill(0));
-    expect(original[200]).toBe(1);
-    expect(rerun[200]).toBe(original[200]);
-    expect(rerun[201]).toBe(0);
+    const rerun = buildBenchmarkTargets(shocked, shocked.slice(200).map(() => 0.75), 200).movingAverage200;
+    expect(original[0]).toBe(1);
+    expect(rerun[0]).toBe(original[0]);
+    expect(rerun[1]).toBe(0);
   });
 });
 
@@ -63,6 +61,38 @@ describe('reusable daily long/cash simulator and analytics', () => {
     expect(result.nav[1].assetReturn).toBeCloseTo(0.05, 12);
     expect(result.nav[1].cashReturn).toBeCloseTo(0.5 * 0.05 / 360, 12);
     expect(result.nav[1].tradeCost).toBeCloseTo(0.00015, 12);
+  });
+
+  it('charges a terminal trade without letting it dilute return-bearing average beta', () => {
+    const prices = priceSeries(2).map(row => ({ ...row, adjustedClose: 100 }));
+    const result = simulateDailyPortfolio({
+      prices, targetExposures: [1, 0],
+      vix: [{ date: '2024-01-01', value: 20, ...provenance, source: 'FRED:VIXCLS' }],
+      cashRates: [{ date: '2023-12-31', rate: 5, ...provenance, source: 'FRED:SOFR' }],
+    });
+    expect(result.nav[1].tradeCost).toBeCloseTo(0.0003, 12);
+    expect(computePortfolioMetrics(result.nav).averageBeta).toBe(1);
+  });
+
+  it('includes inception capital to first NAV so initial cost affects risk ratios', () => {
+    const metrics = computePortfolioMetrics([
+      { date: '2024-01-01', nav: 0.99, exposure: 1 },
+      { date: '2024-01-02', nav: 0.99 * 1.02, exposure: 1 },
+    ]);
+    expect(metrics.annualizedVolatility).toBeCloseTo(0.015 * Math.sqrt(252), 12);
+    expect(metrics.sharpe).toBeCloseTo((0.005 / 0.015) * Math.sqrt(252), 12);
+    expect(metrics.sortino).toBeCloseTo((0.005 / Math.sqrt(0.0001 / 2)) * Math.sqrt(252), 12);
+  });
+
+  it('defines Sortino downside deviation over all return observations', () => {
+    const returns = [0.1, -0.2, 0.05, -0.1];
+    let nav = 1;
+    const rows = returns.map((value, index) => ({
+      date: `2024-01-0${index + 1}`, nav: nav *= 1 + value, exposure: 0.5,
+    }));
+    const expected = (returns.reduce((sum, value) => sum + value, 0) / returns.length)
+      / Math.sqrt((0.2 ** 2 + 0.1 ** 2) / returns.length) * Math.sqrt(252);
+    expect(computePortfolioMetrics(rows).sortino).toBeCloseTo(expected, 12);
   });
 
   it('reports return, beta, annualized risk, downside risk and drawdown duration', () => {

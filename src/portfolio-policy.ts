@@ -26,6 +26,31 @@ export interface PortfolioPolicy {
   stressApplied: boolean;
 }
 
+export function isPortfolioVerdict(value: unknown): value is PortfolioVerdict {
+  return value === 'BULLISH' || value === 'NEUTRAL' || value === 'BEARISH';
+}
+
+export function isPortfolioDirection(value: unknown): value is PortfolioDirection {
+  return value === 'UP' || value === 'DOWN' || value === 'FLAT';
+}
+
+export function officialPortfolioFieldIssue(input: {
+  score: unknown;
+  verdict: unknown;
+  netliqDir: unknown;
+  snapshotVixEod: unknown;
+}): 'invalid official portfolio field' | null {
+  if (typeof input.score !== 'number' || !Number.isFinite(input.score)) return 'invalid official portfolio field';
+  if (!isPortfolioVerdict(input.verdict) || !isPortfolioDirection(input.netliqDir)) {
+    return 'invalid official portfolio field';
+  }
+  if (input.snapshotVixEod !== null &&
+    (typeof input.snapshotVixEod !== 'number' || !Number.isFinite(input.snapshotVixEod) || input.snapshotVixEod < 0)) {
+    return 'invalid official portfolio field';
+  }
+  return null;
+}
+
 function basePolicy(input: PortfolioPolicyInput): Pick<PortfolioPolicy, 'targetExposure' | 'tier'> {
   if (input.verdict === 'BULLISH') {
     return input.netliqDir === 'DOWN'

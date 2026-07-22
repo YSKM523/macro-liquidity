@@ -149,7 +149,9 @@ describe('daily event-time NAV', () => {
       },
     });
     expect(result.portfolio?.strategy.metrics).toHaveProperty('maxDrawdownDurationSessions');
-    expect(result.portfolio?.timingAlpha).toBeCloseTo(0, 12);
+    expect(result.portfolio?.cumulativeTimingReturnDifference).toBeCloseTo(0, 12);
+    expect(result.portfolio?.timingComparisonMethodology)
+      .toBe('CUMULATIVE_RETURN_DIFFERENCE_VS_BETA_MATCHED_STATIC');
     for (const benchmark of Object.values(result.portfolio!.benchmarks)) {
       expect(benchmark.metrics).toHaveProperty('sortino');
       expect(benchmark.sessions).toBe(result.totals.sessions);
@@ -261,5 +263,22 @@ describe('daily event-time NAV', () => {
     expect(oneSession.reason).toMatch(/insufficient.*session/i);
     expect(oneSession.nav).toEqual([]);
     expect(oneSession.totals).toEqual({ totalReturn: null, tradingCostRate: null, sessions: null });
+  });
+
+  it.each([
+    ['non-finite score', { score: Number.NaN }],
+    ['invalid verdict', { verdict: 'UNKNOWN' }],
+    ['missing verdict', { verdict: null }],
+    ['invalid net liquidity direction', { netliqDir: 'SIDEWAYS' }],
+    ['missing net liquidity direction', { netliqDir: null }],
+    ['negative frozen VIX', { snapshotVixEod: -1 }],
+    ['non-finite frozen VIX', { snapshotVixEod: Number.NaN }],
+  ])('returns formal DATA_INCOMPLETE for %s instead of throwing', (_label, patch) => {
+    const result = runEventTimeBacktest({
+      asOfCutoff, signals: [{ ...longSignal, ...patch } as any], prices: daily, vix: calmVix, cashRates: sofr,
+    });
+    expect(result.status).toBe('DATA_INCOMPLETE');
+    expect(result.reason).toMatch(/official.*portfolio.*field/i);
+    expect(result.nav).toEqual([]);
   });
 });

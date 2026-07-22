@@ -3,7 +3,13 @@ import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
 import { compareIsoTimestamps, isoTimestampMs, validateReleaseOverride } from './pit';
 import type { EventBacktestInputs } from './event-backtest';
-import { mapPortfolioPolicy, snapshotVixStressStatus } from './portfolio-policy';
+import {
+  isPortfolioDirection,
+  isPortfolioVerdict,
+  mapPortfolioPolicy,
+  officialPortfolioFieldIssue,
+  snapshotVixStressStatus,
+} from './portfolio-policy';
 
 function requireIsoTimestamp(value: string, field: string): void {
   isoTimestampMs(value, field);
@@ -1108,7 +1114,7 @@ export async function loadEventBacktestInputs(
        ORDER BY julianday(decision_at),date`,
     ).bind(cutoff).all<{
       signal_date: string; decision_at: string; tradable_at: string; score: number;
-      verdict: 'BULLISH' | 'NEUTRAL' | 'BEARISH'; netliq_dir: 'UP' | 'DOWN' | 'FLAT'; vix_eod: number | null;
+      verdict: string | null; netliq_dir: string | null; vix_eod: number | null;
       recorded_at: string; data_run_id: string | null;
     }>(),
     db.prepare(
@@ -1154,11 +1160,10 @@ export async function loadEventBacktestInputs(
   return {
     asOfCutoff: cutoff,
     signals: (signalRows.results ?? []).map(row => {
-      const stressStatus = snapshotVixStressStatus(row.vix_eod);
-      const policy = mapPortfolioPolicy({
-        score: row.score, verdict: row.verdict, netliqDir: row.netliq_dir, stressStatus,
+      const fieldIssue = officialPortfolioFieldIssue({
+        score: row.score, verdict: row.verdict, netliqDir: row.netliq_dir, snapshotVixEod: row.vix_eod,
       });
-      return {
+      const baseSignal = {
         signalDate: row.signal_date,
         decisionAt: row.decision_at,
         tradableAt: row.tradable_at,
@@ -1166,12 +1171,22 @@ export async function loadEventBacktestInputs(
         verdict: row.verdict,
         netliqDir: row.netliq_dir,
         snapshotVixEod: row.vix_eod,
+        recordedAt: row.recorded_at,
+        dataRunId: row.data_run_id ?? undefined,
+      };
+      if (fieldIssue || !isPortfolioVerdict(row.verdict) || !isPortfolioDirection(row.netliq_dir)) {
+        return { ...baseSignal, policyIssue: fieldIssue ?? 'invalid official portfolio field' };
+      }
+      const stressStatus = snapshotVixStressStatus(row.vix_eod);
+      const policy = mapPortfolioPolicy({
+        score: row.score, verdict: row.verdict, netliqDir: row.netliq_dir, stressStatus,
+      });
+      return {
+        ...baseSignal,
         targetExposure: policy.targetExposure,
         portfolioTier: policy.tier,
         portfolioMethodology: policy.methodology,
         stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY' as const,
-        recordedAt: row.recorded_at,
-        dataRunId: row.data_run_id ?? undefined,
       };
     }),
     prices: markets.filter(row => row.symbol === 'SPX').map(row => ({

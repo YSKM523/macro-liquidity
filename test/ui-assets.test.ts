@@ -176,7 +176,10 @@ describe('static UI assets', () => {
     expect(js).toContain('平均 Beta 匹配静态 SPX/现金');
     expect(js).toContain('前20个已完成交易日');
     expect(js).toContain('前一收盘 200DMA');
-    expect(js).toContain('择时 Alpha');
+    expect(js).toContain('窗口前 warm-up');
+    expect(js).toContain('不读取目标日价格');
+    expect(js).toContain('累计择时收益差');
+    expect(js).not.toContain('择时 Alpha');
     expect(js).toContain('Sortino');
     expect(js).toContain('最大回撤持续期');
     expect(js).toContain('rbEsc(event.reason');

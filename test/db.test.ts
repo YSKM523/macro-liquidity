@@ -267,6 +267,31 @@ describe('event-time backtest repository', () => {
       cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR', fetchedAt: '2024-01-06T00:00:00Z', dataRunId: 'run-b', activationRunId: 'activation-a', activatedAt: '2024-01-07T00:00:00Z', provenanceStatus: 'PIT_RAW' }],
     });
   });
+
+  it('preserves an invalid official policy row as a fail-closed loader issue instead of throwing', async () => {
+    const results = [
+      [{ db_now: '2024-01-20T00:00:00Z', cutoff: '2024-01-15T00:00:00Z' }],
+      [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T16:00:00Z', score: 60, verdict: null, netliq_dir: 'UP', vix_eod: -1, recorded_at: '2024-01-06T00:00:00Z', data_run_id: 'signal-a' }],
+      [], [],
+    ];
+    let call = 0;
+    const db = { prepare() {
+      const rows = results[call++];
+      const statement: any = {
+        bind: () => statement,
+        all: async () => ({ results: rows }),
+        first: async () => rows[0],
+      };
+      return statement;
+    } } as unknown as D1Database;
+
+    const loaded = await loadEventBacktestInputs(db, '2024-01-15T00:00:00Z');
+    expect(loaded.signals[0]).toMatchObject({
+      verdict: null, snapshotVixEod: -1,
+      policyIssue: 'invalid official portfolio field',
+    });
+    expect(loaded.signals[0].targetExposure).toBeUndefined();
+  });
 });
 
 describe('snapshot quality persistence', () => {

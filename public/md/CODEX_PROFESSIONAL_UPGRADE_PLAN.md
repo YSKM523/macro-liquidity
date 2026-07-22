@@ -1825,11 +1825,11 @@ feat: portfolio backtest aligned with dashboard exposure tiers
 - [x] 历史 stress 只读冻结 snapshot `vix_eod`（`PIT_SNAPSHOT_VIX_PROXY`），缺字段正式绩效 fail closed
 - [x] 同一窗口比较 100% SPX、平均 Beta 静态组合、prior-only 20-session vol target、prior-close 200DMA
 - [x] 全部组合共用 SOFR prior-date、费用、VIX 滑点与 incomplete gate
-- [x] 报告总收益、timing alpha、平均 Beta、波动、Sharpe、Sortino、最大回撤与持续期；不足样本返回 null
+- [x] 报告总收益、相对 Beta 静态组合的累计择时收益差、平均 Beta、波动、Sharpe、Sortino、最大回撤与持续期；不足样本返回 null
 - [x] fresh full 31 files / 536 tests、TypeScript strict、diff-check、local 0001–0009 migrations twice
 - [ ] independent task/spec + whole-branch review（完成后更新状态行）
 
-PR-10 已知限制：SPX 是不含股息的 FRED 指数收盘；历史 stress 仅用冻结周快照 VIX 水平 proxy，不复建完整实时四资产 stress overlay。20-session 波动目标和 200DMA 在前置历史不足时持有现金，因此若正式策略 evaluation window 从较晚首个执行日开始，基准不会借用窗口外价格历史。Sharpe/Sortino 使用日频已含现金与成本的组合收益，不另减无风险利率；无负收益或零波动时相应比率返回 null。没有独立交易所 calendar，仍由 SPX 实际行定义 session。
+PR-10 已知限制：SPX 是不含股息的 FRED 指数收盘；历史 stress 仅用冻结周快照 VIX 水平 proxy，不复建完整实时四资产 stress overlay。20-session 波动目标和 200DMA 可借用同一 `as_of` cutoff 已可见的 evaluation-window 前价格作 warm-up，但净值/成本严格从策略首个执行日开始；若整个可见历史仍不足 20/200 条则持有现金。Sharpe/Sortino 使用日频已含现金与成本的组合收益，不另减无风险利率；无负收益或零波动时相应比率返回 null。没有独立交易所 calendar，仍由 SPX 实际行定义 session。
 
 PR-10 回滚：对 PR-10 base `f04d4b2` 之后的本 PR commit range 做专用 revert；本 PR 无 migration、无远程数据库变更，回滚不需要删表或改数据。PR-09 append-only 日频存储和 event-time API 基础保持不动。
 
@@ -1928,7 +1928,7 @@ feat: model versioning, CI, staging, observability and backup
 - [x] 使用日频价格
 - [x] 现金收益不为 0
 - [x] 成本纳入
-- [ ] 与相同 Beta 基准比较
+- [x] 与相同 Beta 基准比较（PR-10：仅按实际承担收益区间的 exposure 匹配）
 - [ ] overlapping 和 non-overlapping 分开
 - [ ] purged walk-forward
 - [ ] 分数桶大体单调
