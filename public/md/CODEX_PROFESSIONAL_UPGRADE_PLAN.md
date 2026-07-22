@@ -1765,10 +1765,12 @@ feat: point-in-time observation storage
 
 内容：
 
-- vintage schema
-- released_at
-- tradable_at
-- append-only
+- [x] ALFRED vintage schema 与 inclusive checkpoint
+- [x] `released_at` / `fetched_at` / `tradable_at` 与 release calendar override
+- [x] append-only raw observations、revision view 与原子激活
+- [x] event-time no-lookahead frame 与完整 configured-series manifest
+- [x] legacy 一次升级、PIT 正式快照和输入清单冻结
+- [x] 本地 migration、450 tests 与 TypeScript strict 验证（实现 commits `07f7c81..350da61`）
 
 ---
 
@@ -1877,16 +1879,16 @@ feat: model versioning, CI, staging, observability and backup
 - [x] stress 数据失败返回 UNKNOWN
 - [x] 缺关键数据返回 DATA_INCOMPLETE
 - [x] stale 序列不会无限 forward-fill
-- [ ] mixed vintage 不会进入生产
+- [x] mixed vintage 不会进入生产
 - [x] 同时运行 cron 和 refresh 不会并发写坏数据
 
 ## Point-in-Time
 
-- [ ] 发布前数据无法读取
-- [ ] 未来 vintage 无法进入历史信号
-- [ ] 观察日与发布日期区分
-- [ ] 每个快照可以列出完整输入
-- [ ] 历史修订不会改变冻结快照
+- [x] 发布前数据无法读取
+- [x] 未来 vintage 无法进入历史信号
+- [x] 观察日与发布日期区分
+- [x] 每个快照可以列出完整输入
+- [x] 历史修订不会改变冻结快照
 
 ## 回测
 

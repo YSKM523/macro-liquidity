@@ -4,6 +4,14 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-08 — Point-in-time observation storage
+
+- Added append-only ALFRED vintage storage, revision reporting, conservative release metadata, manual release overrides, and next-weekday tradability metadata.
+- Added inclusive vintage checkpoints and atomically promoted PIT rows beside the existing `observations` compatibility view under the existing database lease fence.
+- Added no-lookahead frame resolution and explicit `AVAILABLE`/`MISSING` manifests for every configured series.
+- Froze PIT official snapshots and their exact manifests after a one-time legacy upgrade; nowcasts persist provenance without creating formal manifests.
+- Added local-only migration `0008_point_in_time_observations.sql`; no deployment, remote D1 access, model formula, weight, threshold, hysteresis, or channel-policy change was made.
+
 ### PR-07 — Source timestamps and provider fallback
 
 - Added one typed quote/history provider contract with injectable Yahoo, Stooq, and FRED implementations.
