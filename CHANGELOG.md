@@ -15,6 +15,9 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Corrected Stooq history parsing to its distinct six-column CSV contract and reject impossible Stooq/FRED calendar dates as `INVALID_TIMESTAMP`.
 - Updated snapshot/prices API payloads and the dashboard to show source time, fetch time, provider, market state, delay, fallback, and divergence separately.
 - Added no migration and made no Champion scoring, weight, threshold, exposure, channel, ingest, or PIT change.
+- Added official FRED fallback for every market input (`SP500`, `VIXCLS`, `DTWEXBGS`, `DGS10`) after optional Stooq, while exposing the actual fallback instrument and preserving DXY return-chain scale.
+- Hardened provider trust boundaries with strict/future timestamps, missing-value rejection, Stooq challenge detection, a named injectable timeout, Yahoo market-state whitelisting, and escaped UI provenance.
+- Made history divergence symbol-aware: VIX level, SPX/DXY five-day return, and 10Y five-day percentage-point change now disagree on either stress classification or a named material-difference tolerance.
 
 ### PR-06 — Atomic ingest runs and staging activation
 

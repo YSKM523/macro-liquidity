@@ -28,7 +28,7 @@ flowchart LR
 ```
 
 - **单个 Cloudflare Worker** 托管前端(Workers Static Assets)、`/api/*` 接口和每日 `cron`。
-- **FRED = 宏观历史与模型逻辑的唯一真相源**；实时行情层使用 Yahoo 主源、Stooq/FRED 备用源，只影响顶部读数和 live-stress、**不入库且不改变宏观分**。每个结果分别携带 provider 行情时间和抓取时间；无合法 provider 时间戳时不会拿抓取时间代替。
+- **FRED = 宏观历史与模型逻辑的唯一真相源**；实时行情层按 Yahoo → Stooq（可用时）→ FRED 官方序列降级，只影响顶部读数和 live-stress、**不入库且不改变宏观分**。FRED 映射为 SPX=`SP500`、VIX=`VIXCLS`、DXY=`DTWEXBGS`、10Y=`DGS10`。每个结果分别携带实际 instrument/provider 的行情时间和抓取时间；无合法 provider 时间戳时不会拿抓取时间代替。
 - **D1**(SQLite)先按 `run_id` 保存逐序列尝试与 staging 数据；全部校验通过后在一个事务中更新兼容表 `observations` 并切换唯一 ACTIVE run。失败 run 保留审计信息且不改变生产观测。`cron` 每 3 小时增量更新 nowcast，正式历史只由全量重建写入。
 
 ---
@@ -91,7 +91,7 @@ flowchart TD
 
 ### 4)live-stress 实时风控覆盖层
 
-近 5 个交易日任一触发(`VIX>28` / `SPX 5日<−4%` / `10Y 5日>+0.25pp` / `美元 5日>+2%`)→ 把**显示**结论降一级(偏多→中性→偏空),但**宏观 score 不变、不入库**。强环境(score≥65)压过短期噪音、不降级。主源失败但备用源有效时继续工作并显示实际 provider；任一必需历史为 `FAILED`、`STALE` 或 `DIVERGENT` 时，live-stress 返回 `UNKNOWN` 并暂停风险增加。
+近 5 个交易日任一触发(`VIX>28` / `SPX 5日<−4%` / `10Y 5日>+0.25pp` / `美元 5日>+2%`)→ 把**显示**结论降一级(偏多→中性→偏空),但**宏观 score 不变、不入库**。强环境(score≥65)压过短期噪音、不降级。主源失败但备用源有效时继续工作并显示实际 provider/instrument；任一必需历史为 `FAILED`、`STALE` 或 `DIVERGENT` 时，live-stress 返回 `UNKNOWN` 并暂停风险增加。历史一致性按各品种的同一 stress 语义比较（VIX 水平、SPX/DXY 5 日收益、10Y 5 日百分点变化），触发分类不同或差异超过命名容差均 fail closed。
 
 ### 5)操作建议 · 仓位旋钮
 
@@ -140,9 +140,9 @@ flowchart TD
 ## 技术栈
 
 - **Cloudflare Worker**(TypeScript)+ **Workers Static Assets** + **D1**(SQLite)+ **Cron Triggers**
-- 数据:**FRED**(宏观)+ **Yahoo / Stooq**(实时价格)
+- 数据:**FRED**(宏观与官方行情 fallback)+ **Yahoo / Stooq**(实时价格)
 - 前端:原生 HTML / CSS / JS + 自托管 [Lightweight-Charts](https://github.com/tradingview/lightweight-charts),仿 Stripe 纯色风格
-- 测试:**Vitest**(409 测试，覆盖模型逻辑、原子摄取、provider fallback、锁与 API)
+- 测试:**Vitest**(430 测试，覆盖模型逻辑、原子摄取、provider fallback、锁与 API)
 - 部署:`wrangler`
 
 ---
