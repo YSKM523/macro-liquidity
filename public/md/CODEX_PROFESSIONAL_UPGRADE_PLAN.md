@@ -24,7 +24,7 @@
 | PR-12 | 已完成（本地） | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
 | PR-13 | 已完成（本地） | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；未部署 |
 | PR-14 | 本地实现与验证完成，待独立复审 | `3638c55`–候选 HEAD | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，TypeScript、ESLint 与 correctness gates 通过；Champion 及既有研究诊断数值不变，未部署 |
-| PR-15 | 本地实现与验证完成，待独立复审 | `710bb30`–候选 HEAD | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、固定 Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 752 tests、TypeScript、ESLint 与全部本地 gates 通过；未部署、未修改远程数据库 |
+| PR-15 | 本地实现与验证完成，待最终独立复审 | `710bb30`–候选 HEAD | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 757 tests、TypeScript、ESLint 与全部本地 gates 通过；未部署、未修改远程数据库 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
