@@ -1,7 +1,9 @@
 # PR-09 Event-Time Backtest Report
 
-Base: `37fd6c4`  
-Branch: `codex/pr-09-event-time-backtest`  
+Base: `37fd6c4`
+
+Branch: `codex/pr-09-event-time-backtest`
+
 Implementation commits: `0764210..99e9616`
 
 ## Outcome
