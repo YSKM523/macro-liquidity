@@ -40,3 +40,9 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - `npm run deploy:dry` bundled successfully for staging and exited at `--dry-run`; output retained the explicit `REPLACE_WITH_STAGING_D1` placeholder. This is not a staging deployment.
 - `npm run restore:drill` returned `PASS`; `npm run backup:dry` returned `DRY_RUN` with `remoteWrites:false`.
 - Production workflow is manual-only and references the protected `production` environment. No workflow was pushed or executed.
+
+## Final verification
+
+- First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
+- Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
+- Fresh final suite and remaining gates: pending.

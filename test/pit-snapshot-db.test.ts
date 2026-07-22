@@ -21,6 +21,7 @@ async function migratedDb() {
     '0001_init.sql', '0002_add_coverage.sql', '0003_meta.sql', '0004_snapshot_quality.sql',
     '0005_official_nowcast.sql', '0006_atomic_ingest.sql', '0007_ingest_snapshot_outcome.sql',
     '0008_point_in_time_observations.sql', '0009_event_time_backtest.sql',
+    '0010_model_governance.sql',
   ];
   for (const file of files) {
     const sql = readFileSync(`migrations/${file}`, 'utf8').replace(/^\s*--.*$/gm, '').replace(/\s+/g, ' ');
