@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   HOLDOUT_REGISTRATION, buildForwardPairs, buildPurgedFolds, greedyIndependentPairs,
-  purgeTrainingPairs, runFrozenHoldout, runPurgedValidation,
+  buildFormalForwardPairs, purgeTrainingPairs, runFrozenHoldout, runPurgedValidation,
 } from '../src/evaluation-protocol';
 import type { ValidationSnap } from '../src/evaluation-protocol';
 import { addDays } from '../src/backtest';
+import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
+import type { EventBacktestInputs } from '../src/event-backtest';
 
 function snap(date: string, i: number, overrides: Partial<ValidationSnap> = {}): ValidationSnap {
   return {
     date, score: 40 + i % 20, spx: 100 + i, factors: { netliqTrend: i },
     verdict: i % 3 === 0 ? 'BEARISH' : 'BULLISH', targetExposure: i % 3 === 0 ? .25 : 1,
-    pitStatus: 'PIT', provenanceStatus: 'GOVERNED', ...overrides,
+    pitStatus: 'PIT', provenanceStatus: 'GOVERNED', modelVersion: CHAMPION_MODEL_VERSION,
+    configHash: championConfigDigest(), codeCommitSha: '0123456789abcdef0123456789abcdef01234567',
+    dataRunId: `run-${i}`, ...overrides,
   };
 }
 
@@ -39,9 +43,12 @@ describe('date interval labels', () => {
   });
 
   it('applies the calendar embargo after outcome-overlap purging', () => {
-    const base = buildForwardPairs([snap('2023-10-02', 0), snap('2024-01-02', 1)], 13)[0];
-    const result = purgeTrainingPairs([{ ...base, outcomeDate: '2023-12-31' }], '2024-01-01', 91);
-    expect(result).toMatchObject({ purgedOverlapN: 0, embargoedN: 1, pairs: [] });
+    const overlap = buildForwardPairs([snap('2024-04-01', 0), snap('2024-07-01', 1)], 13)[0];
+    const exactBoundary = buildForwardPairs([snap('2024-01-01', 0), snap('2024-04-01', 1)], 13)[0];
+    const beforeBoundary = buildForwardPairs([snap('2023-12-31', 0), snap('2024-03-31', 1)], 13)[0];
+    const result = purgeTrainingPairs([overlap, exactBoundary, beforeBoundary], '2024-07-01', 91);
+    expect(result.pairs.map(pair => pair.outcomeDate)).toEqual(['2024-03-31']);
+    expect(result).toMatchObject({ purgedOverlapN: 1, embargoedN: 1, embargoFrom: '2024-04-01' });
   });
 
   it('greedily reports truly interval-non-overlapping labels', () => {
@@ -53,10 +60,45 @@ describe('date interval labels', () => {
       expect(independent[i].signalDate >= independent[i - 1].outcomeDate).toBe(true);
     }
   });
+
+  it('uses earliest-exit greedy ordering for half-open return intervals', () => {
+    const late = buildForwardPairs([snap('2024-01-01', 0), snap('2024-04-15', 1)], 13)[0];
+    const early = buildForwardPairs([snap('2024-01-10', 0), snap('2024-04-10', 1)], 13)[0];
+    const next = buildForwardPairs([snap('2024-04-10', 0), snap('2024-07-10', 1)], 13)[0];
+    expect(greedyIndependentPairs([late, early, next]).map(pair => pair.signalDate))
+      .toEqual(['2024-01-10', '2024-04-10']);
+  });
+
+  it('builds returns only from formal execution close and selects holdout by execution date', () => {
+    const input: EventBacktestInputs = {
+      asOfCutoff: '2026-12-01T00:00:00Z',
+      signals: [{
+        signalDate: '2026-07-22', decisionAt: '2026-07-23T18:00:00Z', tradableAt: '2026-07-23T18:00:00Z',
+        score: 60, verdict: 'BULLISH', targetExposure: 1, factors: { netliqTrend: 60 },
+        modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
+        codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'run-formal',
+      }],
+      prices: [
+        { date: '2026-07-22', adjustedClose: 50, source: 'PIT', provenanceStatus: 'PIT_RAW' },
+        { date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW' },
+        { date: '2026-10-23', adjustedClose: 110, source: 'PIT', provenanceStatus: 'PIT_RAW' },
+      ], vix: [], cashRates: [],
+    };
+    const [label] = buildFormalForwardPairs(input);
+    expect(label).toMatchObject({ modelDate: '2026-07-22', signalDate: '2026-07-24', entryDate: '2026-07-24', outcomeDate: '2026-10-23', fwd: .1 });
+    expect(label.fwd).toBeCloseTo(.1);
+  });
+
+  it('fails formal labels closed for non-PIT daily prices', () => {
+    const input: EventBacktestInputs = { asOfCutoff: '2026-12-01T00:00:00Z', signals: [], prices: [
+      { date: '2026-07-24', adjustedClose: 100, source: 'synthetic', provenanceStatus: 'SYNTHETIC_BACKFILL' },
+    ], vix: [], cashRates: [] };
+    expect(() => buildFormalForwardPairs(input)).toThrow(/PIT_RAW/);
+  });
 });
 
 describe('purged folds and frozen holdout', () => {
-  const rows = Array.from({ length: 100 }, (_, i) => snap(addDays('2023-01-02', i * 7), i));
+  const rows = Array.from({ length: 300 }, (_, i) => snap(addDays('2018-01-01', i * 7), i));
 
   it('never trains on a label before its outcome matures and reports overlap counts', () => {
     const folds = buildPurgedFolds(rows, { initialTrain: 40, testN: 10, horizonWeeks: 13, embargoDays: 91 });
@@ -68,26 +110,23 @@ describe('purged folds and frozen holdout', () => {
     }
   });
 
-  it('freezes the registered holdout date, protocol digest, weights, and q10 from pre-holdout rows', () => {
+  it('freezes the registered Champion identity without a mutable pre-period artifact', () => {
     expect(HOLDOUT_REGISTRATION.holdoutFrom).toBe('2026-07-23');
-    expect(HOLDOUT_REGISTRATION.protocolDigest).toBe('ceb72ac5a72619be17ca208f02f1229dca337d9d1f754074c009b65ce16d9b2e');
+    expect(HOLDOUT_REGISTRATION.registeredAt).toBe('2026-07-22T19:37:28Z');
+    expect(HOLDOUT_REGISTRATION.registrationCommit).toBe('75c93d526bf6073440335d3c90a7d5c0b90ea58b');
+    expect(HOLDOUT_REGISTRATION.modelVersion).toBe(CHAMPION_MODEL_VERSION);
+    expect(HOLDOUT_REGISTRATION.configHash).toBe(championConfigDigest());
+    expect(HOLDOUT_REGISTRATION.protocolDigest).toMatch(/^[a-f0-9]{64}$/);
     const before = runFrozenHoldout(rows);
-    const later = runFrozenHoldout([...rows, snap('2026-07-23', 101), snap('2026-11-01', 102, { spx: 300 })]);
-    expect(later.frozen).toEqual(before.frozen);
-    expect(before.frozen.trainingOutcomeCutoffExclusive).toBe('2026-04-23');
-    expect(later.status).toBe('PENDING_MATURITY');
-    expect(later.metrics).toBeNull();
-  });
-
-  it('does not expose q10 before 20 pre-holdout calibration outcomes', () => {
-    const short = Array.from({ length: 25 }, (_, i) => snap(addDays('2025-01-01', i * 7), i));
-    const holdout = runFrozenHoldout(short);
-    expect(holdout.frozen.trainingN).toBeLessThan(20);
-    expect(holdout.frozen.q10).toBeNull();
+    const mutated = rows.map((row, index) => index === 20 ? { ...row, score: 99, spx: 999 } : row);
+    const after = runFrozenHoldout(mutated);
+    expect(after.registration).toEqual(before.registration);
+    expect(after).not.toHaveProperty('frozen');
+    expect(after.tailStatus).toBe('UNAVAILABLE_AT_REGISTRATION');
   });
 
   it('labels fitted weights as diagnostic and never recalibrates aggregate tail with the last fold', () => {
-    const result = runPurgedValidation(rows, { initialTrain: 40, testN: 10 });
+    const result = runPurgedValidation(rows);
     expect(result.folds[0]).toHaveProperty('diagnosticFittedWeights');
     expect(result.folds[0]).toHaveProperty('diagnosticFitted');
     expect(result.folds[0]).not.toHaveProperty('weights');
@@ -97,7 +136,7 @@ describe('purged folds and frozen holdout', () => {
   it('fails closed for non-PIT or ungoverned rows', () => {
     const bad = [...rows];
     bad[3] = { ...bad[3], pitStatus: 'LEGACY_NO_PIT' };
-    const result = runPurgedValidation(bad, { initialTrain: 40, testN: 10 });
+    const result = runPurgedValidation(bad);
     expect(result.status).toBe('DATA_INCOMPLETE');
     expect(result.folds).toEqual([]);
     expect(result.aggregateMetrics).toBeNull();
@@ -105,9 +144,9 @@ describe('purged folds and frozen holdout', () => {
 
   it('computes retrospective metrics honestly across legacy PIT history', () => {
     const legacy = rows.map(row => ({ ...row, provenanceStatus: 'LEGACY' }));
-    const result = runPurgedValidation(legacy, { initialTrain: 40, testN: 10 });
+    const result = runPurgedValidation(legacy);
     expect(result.status).toBe('PARTIAL_LEGACY');
-    expect(result.provenance).toEqual({ totalCount: 100, governedCount: 0, legacyCount: 100, completeness: 'PARTIAL_LEGACY' });
+    expect(result.provenance).toMatchObject({ totalCount: 300, governedCount: 0, legacyCount: 300, completeness: 'PARTIAL_LEGACY' });
     expect(result.folds.length).toBeGreaterThan(0);
     expect(result.aggregateMetrics?.direction.n).toBeGreaterThan(0);
     expect(result.aggregateMetrics?.tail.recall).toMatchObject({ value: null, status: 'PARTIAL_LEGACY_CALIBRATION' });
@@ -115,10 +154,10 @@ describe('purged folds and frozen holdout', () => {
 
   it('allows a governed/legacy PIT cohort but rejects malformed provenance', () => {
     const mixed = rows.map((row, index) => ({ ...row, provenanceStatus: index < 50 ? 'LEGACY' : 'GOVERNED' }));
-    expect(runPurgedValidation(mixed, { initialTrain: 40, testN: 10 }).status).toBe('PARTIAL_LEGACY');
+    expect(runPurgedValidation(mixed).status).toBe('PARTIAL_LEGACY');
     const invalid = [...rows];
     invalid[5] = { ...invalid[5], provenanceStatus: 'INVALID' };
-    expect(runPurgedValidation(invalid, { initialTrain: 40, testN: 10 }).status).toBe('DATA_INCOMPLETE');
+    expect(runPurgedValidation(invalid).status).toBe('DATA_INCOMPLETE');
   });
 
   it('requires every post-registration holdout signal to be governed', () => {
@@ -128,18 +167,25 @@ describe('purged folds and frozen holdout', () => {
 
   it('propagates missing formal risk signals into aggregate tail metrics', () => {
     const missing = rows.map((row, index) => index === 45 ? { ...row, targetExposure: null } : row);
-    const result = runPurgedValidation(missing, { initialTrain: 40, testN: 10 });
+    const result = runPurgedValidation(missing);
     expect(result.aggregateMetrics?.tail.recall.status).toBe('MISSING_FORMAL_SIGNAL');
     expect(result.aggregateMetrics?.tail.precision.status).toBe('MISSING_FORMAL_SIGNAL');
   });
 
-  it('keeps holdout tail calibration typed partial when its frozen pre-period is legacy', () => {
+  it('keeps prospective holdout tail permanently unavailable and rejects a model mismatch', () => {
     const legacyPre = rows.map(row => ({ ...row, provenanceStatus: 'LEGACY' }));
     const governedPost = Array.from({ length: 20 }, (_, index) =>
       snap(addDays('2026-07-23', index * 7), 200 + index, { provenanceStatus: 'GOVERNED' }));
     const result = runFrozenHoldout([...legacyPre, ...governedPost]);
     expect(result.status).toBe('OK');
-    expect(result.frozen.calibrationStatus).toBe('PARTIAL_LEGACY_CALIBRATION');
-    expect(result.metrics?.tail.recall).toMatchObject({ value: null, status: 'PARTIAL_LEGACY_CALIBRATION' });
+    expect(result.tailStatus).toBe('UNAVAILABLE_AT_REGISTRATION');
+    expect(result.metrics?.tail.recall).toMatchObject({ value: null, status: 'UNAVAILABLE_AT_REGISTRATION' });
+    governedPost[0] = { ...governedPost[0], configHash: 'b'.repeat(64) };
+    expect(runFrozenHoldout([...legacyPre, ...governedPost]).status).toBe('DATA_INCOMPLETE');
+  });
+
+  it('does not allow formal protocol overrides to masquerade under the registered digest', () => {
+    // @ts-expect-error formal API intentionally has no fold override
+    expect(() => runPurgedValidation(rows, { initialTrain: 40, testN: 10 })).toThrow(/override/i);
   });
 });

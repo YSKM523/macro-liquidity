@@ -35,6 +35,16 @@ describe('validation metric taxonomy', () => {
     expect(result.risk.downsideRecall).toMatchObject({ value: null, hits: 2, n: 3, status: 'INSUFFICIENT_SAMPLE' });
   });
 
+  it('counts flat low-exposure outcomes as risk-call false positives', () => {
+    const result = evaluateValidationMetrics([
+      pair(0, 50, -.1, 'BEARISH', .5),
+      pair(1, 50, 0, 'NEUTRAL', .5), pair(2, 50, 0, 'NEUTRAL', .5),
+      pair(3, 50, 0, 'NEUTRAL', .5), pair(4, 50, 0, 'NEUTRAL', .5),
+    ], -.05, 20);
+    expect(result.risk.precision).toMatchObject({ value: .2, hits: 1, n: 5, status: 'OK' });
+    expect(result.risk.downsideRecall).toMatchObject({ value: null, hits: 1, n: 1, status: 'INSUFFICIENT_SAMPLE' });
+  });
+
   it('returns Spearman IC and typed null for zero-variance outcomes', () => {
     const ok = evaluateValidationMetrics([
       pair(0, 10, -.2, 'BEARISH', .25), pair(1, 20, -.1, 'BEARISH', .25), pair(2, 30, .1, 'BULLISH', 1),
@@ -81,5 +91,14 @@ describe('validation metric taxonomy', () => {
     expect(result.risk.downsideRecall).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
     expect(result.tail.recall).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
     expect(result.tail.precision).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
+  });
+
+  it('requires three risk-call observations before tail precision is defined', () => {
+    const result = evaluateValidationMetrics([
+      pair(0, 40, -.3, 'BEARISH', .5), pair(1, 60, -.2, 'BULLISH', 1),
+      pair(2, 60, -.1, 'BULLISH', 1), pair(3, 60, .1, 'BULLISH', 1), pair(4, 60, .2, 'BULLISH', 1),
+    ], -.1, 20);
+    expect(result.tail.recall).toMatchObject({ value: 1 / 3, n: 3, status: 'OK' });
+    expect(result.tail.precision).toMatchObject({ value: null, n: 1, status: 'INSUFFICIENT_SAMPLE' });
   });
 });
