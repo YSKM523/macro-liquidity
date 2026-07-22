@@ -8,7 +8,7 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 - Added deterministic `champion-v1.0.0` canonical configuration hashing and validated deployment commit identity to every new official/nowcast snapshot; additive migration 0010 labels historical rows `LEGACY_UNVERSIONED` without changing scores.
 - Added schema-validated `/api/v1/snapshot`, `/api/v1/backtest`, `/api/v1/robustness`, `/api/v1/model`, and JSON/CSV official export with strict query validation and spreadsheet-injection-safe CSV escaping; legacy routes remain compatible.
-- Added secret-redacted structured logs, SLO health fields, auditable alert outcomes, Access service-token support, full-rebuild second confirmation, admin audit, short live cache, bounded stale service, and a circuit breaker.
+- Added secret-redacted structured logs, SLO health fields, auditable alert outcomes, Access service-token support, admin rate limiting, full-rebuild second confirmation, admin audit, short live cache, bounded stale service, and a circuit breaker; typed provider failures count toward the circuit and stale stress is always `UNKNOWN`.
 - Added dry-run-default critical/full backup tooling, explicit production confirmation, protected backup workflow, and an ephemeral local D1 restore drill with table/count/model metadata/content-hash verification.
 - Added dev/staging/production Wrangler environments, reproducible npm gates, CI, manual protected production deployment, Model Card, Champion–Challenger registry, and operations runbook.
 - Kept the staging D1 identifier as an unmistakable placeholder. No push, deploy, remote database/R2 access, secret creation, or real alert delivery was performed; staging deployment remains unverified.

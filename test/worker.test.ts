@@ -40,6 +40,7 @@ const dbState = vi.hoisted(() => ({
   } as any,
   exportRows: [] as any[],
   adminRateAllowed: true,
+  backtestRows: [] as any[],
 }));
 
 vi.mock('../src/service', () => ({
@@ -53,7 +54,7 @@ vi.mock('../src/db', () => ({
   getAllMeta: vi.fn(async () => dbState.meta),
   countOfficialSnapshots: vi.fn(async () => 1),
   officialSnapshotHistory: vi.fn(async () => []),
-  loadBacktestRows: vi.fn(async () => []),
+  loadBacktestRows: vi.fn(async () => dbState.backtestRows),
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
   recordAdminAudit: vi.fn(async () => undefined),
@@ -119,6 +120,7 @@ beforeEach(() => {
   };
   dbState.exportRows = [];
   dbState.adminRateAllowed = true;
+  dbState.backtestRows = [];
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -253,6 +255,24 @@ describe('/api/admin/refresh contention', () => {
 });
 
 describe('/api/backtest event-time performance', () => {
+  it('v1 returns the exact persisted model/data identities represented by snapshot rows', async () => {
+    dbState.backtestRows = [{
+      date: '2026-07-15', score: 60, spx: 6000, verdict: 'BULLISH', factors_json: '{}',
+      qe_qt_regime: 'FLAT', vix_eod: 20, model_version: 'champion-v1.0.0',
+      config_hash: 'b'.repeat(64), code_commit_sha: '0123456789abcdef0123456789abcdef01234567',
+      data_run_id: 'historical-run', data_cutoff: '2026-07-15T23:59:59Z',
+      decision_at: '2026-07-16T00:00:00Z', created_at: '2026-07-16T00:00:01Z',
+    }];
+    const response = await worker.fetch(new Request('https://example.test/api/v1/backtest'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.snapshot_models).toEqual([expect.objectContaining({
+      modelVersion: 'champion-v1.0.0', configHash: 'b'.repeat(64),
+      codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'historical-run',
+    })]);
+    expect(body.runtime_model).toBeDefined();
+  });
+
   it('adds event-time NAV while preserving diagnostics and marks weekly strategy legacy', async () => {
     const response = await worker.fetch(new Request('https://example.test/api/backtest?as_of=2024-01-10T01%3A00%3A00.001Z'), env);
     const body = await response.json() as any;

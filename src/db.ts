@@ -1149,7 +1149,9 @@ export async function distinctOfficialSnapshotDates(db: D1Database, lastN: numbe
 
 export async function loadBacktestRows(db: D1Database): Promise<any[]> {
   const rs = await db.prepare(
-    "SELECT date, score, spx, verdict, factors_json, qe_qt_regime, vix_eod FROM model_snapshot_weekly WHERE decision_status = 'OK' AND spx IS NOT NULL ORDER BY date"
+    `SELECT date,score,spx,verdict,factors_json,qe_qt_regime,vix_eod,
+            model_version,config_hash,code_commit_sha,data_run_id,data_cutoff,decision_at,created_at
+     FROM model_snapshot_weekly WHERE decision_status = 'OK' AND spx IS NOT NULL ORDER BY date`
   ).all();
   return rs.results ?? [];
 }

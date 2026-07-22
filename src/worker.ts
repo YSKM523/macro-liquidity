@@ -86,6 +86,17 @@ function parseJsonObject(value: unknown): Record<string, unknown> {
   }
 }
 
+function snapshotModels(rows: unknown[]): ReturnType<typeof assertSnapshotVersionMetadata>[] {
+  const unique = new Map<string, ReturnType<typeof assertSnapshotVersionMetadata>>();
+  for (const row of rows) {
+    const metadata = assertSnapshotVersionMetadata(row);
+    const key = [metadata.modelVersion, metadata.configHash, metadata.codeCommitSha,
+      metadata.dataRunId, metadata.dataCutoff, metadata.decisionAt, metadata.createdAt].join('|');
+    unique.set(key, metadata);
+  }
+  return [...unique.values()];
+}
+
 function presentSnapshot(row: unknown, stress: ReturnType<typeof evaluateLiveStress>, channel: 'OFFICIAL' | 'PROVISIONAL') {
   if (!row) return null;
   const r: any = row;
@@ -287,8 +298,19 @@ export default {
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
       const legacy = runBacktest(snaps);
+      let governedModels: ReturnType<typeof assertSnapshotVersionMetadata>[] = [];
+      if (v1) {
+        try {
+          governedModels = snapshotModels(rows);
+        } catch (error) {
+          return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+        }
+      }
       return json({
-        ...(v1 ? { api_version: 'v1', model: presentModelDescriptor(await resolveModelIdentity(env)) } : {}),
+        ...(v1 ? {
+          api_version: 'v1', runtime_model: presentModelDescriptor(await resolveModelIdentity(env)),
+          snapshot_models: governedModels,
+        } : {}),
         ...legacy,
         strategy_long_flat: { ...legacy.strategy_long_flat, methodology: 'LEGACY_WEEKLY' },
         event_time: runEventTimeBacktest(eventInputs),
@@ -311,9 +333,15 @@ export default {
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
       const result = runRobustness(snaps);
-      return json(v1
-        ? { api_version: 'v1', model: presentModelDescriptor(await resolveModelIdentity(env)), result }
-        : result);
+      if (!v1) return json(result);
+      try {
+        return json({
+          api_version: 'v1', runtime_model: presentModelDescriptor(await resolveModelIdentity(env)),
+          snapshot_models: snapshotModels(rows), result,
+        });
+      } catch (error) {
+        return json({ api_version: 'v1', error: 'schema_validation_failed', message: String((error as Error).message) }, 503);
+      }
     }
     if (p === '/api/v1/model') {
       return json({ api_version: 'v1', model: presentModelDescriptor(await resolveModelIdentity(env)) });
