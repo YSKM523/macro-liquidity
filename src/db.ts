@@ -345,6 +345,7 @@ export async function activateIngestRun(
   runId: string,
   completedAt: string,
 ): Promise<void> {
+  requireIsoTimestamp(completedAt, 'ingest completedAt');
   const results = await db.batch([
     db.prepare(
       `SELECT CASE WHEN NOT EXISTS (
@@ -387,6 +388,39 @@ export async function activateIngestRun(
          )
        ON CONFLICT(series_id, date) DO UPDATE SET value = excluded.value`
     ).bind(runId, runId, runId),
+    db.prepare(
+      `INSERT INTO market_prices_daily
+         (symbol,date,close,adjusted_close,source,fetched_at,data_run_id)
+       SELECT CASE series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END,
+              date,value,value,'FRED:' || series_id,?,?
+       FROM observations
+       WHERE series_id IN ('SP500','VIXCLS')
+         AND EXISTS (SELECT 1 FROM ingest_runs target
+           WHERE target.run_id=? AND target.state='RUNNING')
+         AND EXISTS (SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name='fred_ingest' AND lease.owner_run_id=?
+             AND unixepoch(lease.expires_at)>unixepoch('now'))
+       ON CONFLICT(symbol,date) DO UPDATE SET
+         close=excluded.close,adjusted_close=excluded.adjusted_close,
+         source=excluded.source,fetched_at=excluded.fetched_at,data_run_id=excluded.data_run_id
+       WHERE market_prices_daily.close<>excluded.close
+          OR market_prices_daily.adjusted_close<>excluded.adjusted_close`
+    ).bind(completedAt, runId, runId, runId),
+    db.prepare(
+      `INSERT INTO cash_rates_daily (rate_id,date,rate,source,fetched_at,data_run_id)
+       SELECT 'SOFR',date,value,'FRED:SOFR',?,?
+       FROM observations
+       WHERE series_id='SOFR'
+         AND EXISTS (SELECT 1 FROM ingest_runs target
+           WHERE target.run_id=? AND target.state='RUNNING')
+         AND EXISTS (SELECT 1 FROM ingest_lock lease
+           WHERE lease.lock_name='fred_ingest' AND lease.owner_run_id=?
+             AND unixepoch(lease.expires_at)>unixepoch('now'))
+       ON CONFLICT(rate_id,date) DO UPDATE SET
+         rate=excluded.rate,source=excluded.source,
+         fetched_at=excluded.fetched_at,data_run_id=excluded.data_run_id
+       WHERE cash_rates_daily.rate<>excluded.rate`
+    ).bind(completedAt, runId, runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET state = 'SUPERSEDED'
        WHERE state = 'ACTIVE' AND run_id <> ?
@@ -433,7 +467,7 @@ export async function activateIngestRun(
       `ingest run ${runId} activation lease/state fence rejected; target must be RUNNING: ${String((error as any)?.message ?? error)}`,
     );
   });
-  if (Number((results[4]?.meta as any)?.changes ?? 0) !== 1) {
+  if (Number((results[6]?.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest run ${runId} must be RUNNING before activation`);
   }
 }
