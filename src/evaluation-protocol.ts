@@ -161,7 +161,8 @@ function formalProvenance(signal: EventSignal): 'GOVERNED' | 'LEGACY' | 'INVALID
   if (typeof signal.modelVersion !== 'string' || typeof signal.configHash !== 'string'
     || !/^[a-f0-9]{64}$/.test(signal.configHash)
     || typeof signal.codeCommitSha !== 'string'
-    || !(signal.codeCommitSha === 'LOCAL_UNCONFIGURED' || /^[a-f0-9]{40}$/.test(signal.codeCommitSha))) return 'INVALID';
+    || !(signal.codeCommitSha === 'LOCAL_UNCONFIGURED' || /^[a-f0-9]{40}$/.test(signal.codeCommitSha))
+    || typeof signal.dataRunId !== 'string' || signal.dataRunId.length === 0) return 'INVALID';
   return 'GOVERNED';
 }
 
@@ -175,6 +176,9 @@ function prepareFormal(input: EventBacktestInputs): { pairs: ForwardPair[]; exec
       throw new Error('formal validation requires complete daily price provenance');
     }
     if (Date.parse(price.activatedAt) >= Date.parse(input.asOfCutoff)) throw new Error('formal validation price not visible at cutoff');
+  }
+  if (input.signals.some(signal => signal.validationIssue || signal.factors == null)) {
+    throw new Error('formal validation requires valid persisted scoring factors');
   }
   const schedule = scheduleExecutions(input.signals, input.prices);
   const prices = [...input.prices].sort((left, right) => left.date.localeCompare(right.date));
