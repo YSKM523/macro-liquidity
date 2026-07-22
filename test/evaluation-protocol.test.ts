@@ -35,7 +35,13 @@ describe('date interval labels', () => {
     ];
     const result = purgeTrainingPairs(pairs, '2024-01-01', 91);
     expect(result.pairs.map(pair => pair.signalDate)).toEqual(['2023-07-01']);
-    expect(result).toMatchObject({ purgedOverlapN: 1, embargoedN: 1 });
+    expect(result).toMatchObject({ purgedOverlapN: 2, embargoedN: 0 });
+  });
+
+  it('applies the calendar embargo after outcome-overlap purging', () => {
+    const base = buildForwardPairs([snap('2023-10-02', 0), snap('2024-01-02', 1)], 13)[0];
+    const result = purgeTrainingPairs([{ ...base, outcomeDate: '2023-12-31' }], '2024-01-01', 91);
+    expect(result).toMatchObject({ purgedOverlapN: 0, embargoedN: 1, pairs: [] });
   });
 
   it('greedily reports truly interval-non-overlapping labels', () => {

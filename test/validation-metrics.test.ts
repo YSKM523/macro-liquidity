@@ -79,5 +79,7 @@ describe('validation metric taxonomy', () => {
     expect(result.formalVerdict).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
     expect(result.risk.precision).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
     expect(result.risk.downsideRecall).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
+    expect(result.tail.recall).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
+    expect(result.tail.precision).toMatchObject({ value: null, status: 'MISSING_FORMAL_SIGNAL' });
   });
 });

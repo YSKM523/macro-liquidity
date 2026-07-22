@@ -483,6 +483,21 @@ describe('/api/robustness legacy methodology', () => {
   });
 });
 
+describe('/api/walkforward additive validation', () => {
+  it('keeps legacy walk-forward fields and adds the frozen protocol result', async () => {
+    dbState.backtestRows = [{
+      date: '2024-01-01', score: 60, spx: 100, verdict: 'BULLISH', netliq_dir: 'UP', vix_eod: 20,
+      factors_json: '{}', pit_status: 'PIT', model_version: 'champion-v1.0.0', config_hash: 'a'.repeat(64),
+      code_commit_sha: '0123456789abcdef0123456789abcdef01234567', data_run_id: 'run-a',
+      data_cutoff: '2024-01-01T23:59:59Z', decision_at: '2024-01-02T00:00:00Z', created_at: '2024-01-02T00:00:01Z',
+    }];
+    const response = await worker.fetch(new Request('https://example.test/api/walkforward'), env);
+    const body = await response.json() as any;
+    expect(body.methodology).toBe('LEGACY_9_SIGNAL_DIAGNOSTIC');
+    expect(body.validation).toMatchObject({ status: 'INSUFFICIENT_SAMPLE', protocol: { protocol: 'PURGED_VALIDATION_V1' } });
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
