@@ -444,6 +444,18 @@ describe('provider fallback and provenance', () => {
       .toMatchObject({ status: 'FAILED', reasonCode: 'HTTP_ERROR' });
   });
 
+  it('releases a terminal provider error body without masking failure metadata', async () => {
+    const cancel = vi.fn(async () => { throw new Error('cancel failed'); });
+    const provider = new YahooMarketDataProvider(
+      vi.fn(async () => new Response(new ReadableStream({ cancel }), { status: 503 })) as any,
+      { maxAttempts: 1 },
+    );
+
+    await expect(provider.fetchQuote({ symbol: '^GSPC', fetchedAt: '2026-07-17T22:00:00.000Z' }))
+      .resolves.toMatchObject({ status: 'FAILED', reasonCode: 'HTTP_ERROR', sourceName: 'Yahoo Finance' });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('falls through Yahoo and unusable Stooq to official FRED quotes for all four symbols', async () => {
     const fetchedAt = '2026-07-17T22:00:00.000Z';
     const fredValues: Record<string, string> = { SP500: '5000', VIXCLS: '15', DTWEXBGS: '120', DGS10: '4.25' };

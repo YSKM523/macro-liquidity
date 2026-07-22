@@ -161,7 +161,7 @@ describe('bounded HTTP retry policy', () => {
   it('does not retry a caller-initiated abort', async () => {
     const caller = new AbortController();
     const abortError = new DOMException('caller cancelled', 'AbortError');
-    const fetchFn = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       queueMicrotask(() => caller.abort(abortError));
       return new Promise<Response>(() => {});
     });

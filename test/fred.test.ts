@@ -85,6 +85,16 @@ describe('FRED bounded retries', () => {
     })).rejects.toThrow('FRED WALCL 404');
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  it('releases a terminal FRED error body before surfacing its status', async () => {
+    const cancel = vi.fn(async () => undefined);
+    const fetchFn = vi.fn(async () => new Response(new ReadableStream({ cancel }), { status: 503 }));
+
+    await expect(fetchFredSeries('WALCL', '2024-01-01', 'key', {
+      fetchFn: fetchFn as any, maxAttempts: 1,
+    })).rejects.toThrow('FRED WALCL 503');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ALFRED vintages', () => {
