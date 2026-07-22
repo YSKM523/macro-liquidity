@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Vitest executes in Node.
 import { readFileSync } from 'node:fs';
+// @ts-ignore Vitest executes in Node.
+import { createHash } from 'node:crypto';
 import { addDays } from '../src/backtest';
 import { buildFormalForwardPairs } from '../src/evaluation-protocol';
 import type { EventBacktestInputs } from '../src/event-backtest';
@@ -12,6 +14,7 @@ import {
   buildScoreBuckets,
   deflatedSharpeRatio,
   evaluateStressEvents,
+  canonicalScoreStressProtocol,
   validateHypothesisLedger,
 } from '../src/score-stress-diagnostics';
 
@@ -41,11 +44,14 @@ describe('registered score/stress protocol', () => {
       protocol: 'SCORE_STRESS_DIAGNOSTICS_V1',
       registeredAt: '2026-07-22T20:36:03Z',
       registrationCommit: 'd7aba3c2b5bd79cfaf7847cdc82770abb499fdcd',
-      protocolDigest: '891f77f991ca40521639dee3ab50418999e4c3d9296e7bd675f693ee3801efa2',
+      protocolDigest: '3ea92b2fc2f11745ab8f4810d9bab940f4ce4bed7892a50229822524176f38b3',
       horizonsWeeks: [4, 8, 13], alpha: .05,
     });
     expect(SCORE_STRESS_PROTOCOL.events).toHaveLength(8);
     expect(SCORE_STRESS_PROTOCOL.events.at(-1)).toMatchObject({ id: '2025_2026_RESERVE_MGMT', from: '2025-01-01', to: '2027-01-01' });
+    const artifact = JSON.parse(readFileSync('docs/research/SCORE_STRESS_DIAGNOSTICS_PROTOCOL.json', 'utf8'));
+    expect(createHash('sha256').update(canonicalScoreStressProtocol(artifact)).digest('hex'))
+      .toBe(SCORE_STRESS_PROTOCOL.protocolDigest);
   });
 });
 
@@ -80,9 +86,25 @@ describe('shared formal event-time outcomes', () => {
   it('returns typed pending outcomes and fails closed on non-PIT prices', () => {
     const immature = formalInput();
     immature.prices = immature.prices.slice(0, 40);
+    immature.asOfCutoff = '2024-03-10T00:00:00Z';
     expect(buildFormalOutcomes(immature).map(row => row.status)).toEqual(['OK', 'PENDING_OUTCOME', 'PENDING_OUTCOME']);
     immature.prices[0] = { ...immature.prices[0], provenanceStatus: 'SYNTHETIC_BACKFILL' };
     expect(() => buildFormalOutcomes(immature)).toThrow(/PIT_RAW/);
+  });
+
+  it('distinguishes mature missing-price coverage and enforces the shared PR-15 signal gate', () => {
+    const gap = formalInput();
+    gap.prices = gap.prices.slice(0, 40);
+    expect(buildFormalOutcomes(gap).map(row => row.status)).toEqual(['OK', 'MISSING_PRICE_COVERAGE', 'MISSING_PRICE_COVERAGE']);
+    const missingFactors = formalInput();
+    missingFactors.signals[0] = { ...missingFactors.signals[0], factors: undefined };
+    expect(() => buildFormalOutcomes(missingFactors)).toThrow(/factors/i);
+    const missingPolicy = formalInput();
+    missingPolicy.signals[0] = { ...missingPolicy.signals[0], targetExposure: undefined };
+    expect(() => buildFormalOutcomes(missingPolicy)).toThrow(/policy/i);
+    const missingProvenance = formalInput();
+    missingProvenance.signals[0] = { ...missingProvenance.signals[0], dataRunId: undefined };
+    expect(() => buildFormalOutcomes(missingProvenance)).toThrow(/provenance/i);
   });
 });
 
@@ -196,6 +218,14 @@ describe('multiplicity', () => {
     expect(deflatedSharpeRatio({
       observedSharpe: 1.2, trialSharpes: [.2, null, .6], sampleT: 252, skewness: 0, kurtosis: 3,
     })).toEqual({ status: 'TRIAL_UNIVERSE_INCOMPLETE', value: null, expectedMaximumSharpe: null, trialCount: 3 });
+    expect(deflatedSharpeRatio({ observedSharpe: .2, trialSharpes: [.1, .1], sampleT: 252, skewness: 0, kurtosis: 3 }))
+      .toMatchObject({ status: 'ZERO_TRIAL_VARIANCE', value: null, expectedMaximumSharpe: null });
+    expect(deflatedSharpeRatio({ observedSharpe: .2, trialSharpes: [.1], sampleT: 252, skewness: 0, kurtosis: 3 }))
+      .toMatchObject({ status: 'INSUFFICIENT_TRIALS', value: null });
+    expect(deflatedSharpeRatio({ observedSharpe: .2, trialSharpes: [.1, .2], sampleT: 1, skewness: 0, kurtosis: 3 }))
+      .toMatchObject({ status: 'INSUFFICIENT_SAMPLE', value: null });
+    expect(deflatedSharpeRatio({ observedSharpe: Number.NaN, trialSharpes: [.1, .2], sampleT: 252, skewness: 0, kurtosis: 3 }))
+      .toMatchObject({ status: 'INVALID_INPUT', value: null });
   });
 });
 
@@ -210,13 +240,29 @@ describe('stress events', () => {
 
   it('includes from and excludes to, distinguishes pending and non-PIT coverage', () => {
     const base = buildFormalOutcomes(formalInput())[0];
-    const atFrom = { ...base, entryDate: '2018-10-01', exitDate: '2018-10-29' };
+    const atFrom = { ...base, entryDate: '2018-10-01', exitDate: '2018-10-29', verdict: 'BEARISH' as const, targetExposure: .25 };
     const atTo = { ...base, entryDate: '2019-01-01', exitDate: '2019-01-29' };
-    expect(evaluateStressEvents([atFrom, atTo], '2027-01-02').find(event => event.id === '2018_Q4'))
-      .toMatchObject({ status: 'OK', outcomeCount: 1 });
+    const eventPrices = [100, 110, 80, 90].map((adjustedClose, index) => ({
+      date: addDays('2018-10-01', index), adjustedClose, source: 'PIT', provenanceStatus: 'PIT_RAW' as const,
+    }));
+    expect(evaluateStressEvents([
+      atFrom,
+      { ...atFrom, horizonWeeks: 8 as const },
+      { ...atFrom, horizonWeeks: 13 as const },
+      atTo,
+    ], '2027-01-02', eventPrices).find(event => event.id === '2018_Q4')).toMatchObject({
+      status: 'OK', outcomeCount: 3, spxDrawdown: -0.2727272727272727,
+      horizons: [
+        { horizonWeeks: 4, n: 1, bearishN: 1, averageExposure: .25 },
+        { horizonWeeks: 8, n: 1, bearishN: 1, averageExposure: .25 },
+        { horizonWeeks: 13, n: 1, bearishN: 1, averageExposure: .25 },
+      ],
+    });
     expect(evaluateStressEvents([{ ...atFrom, status: 'PENDING_OUTCOME', totalReturn: null, worstDrawdown: null }], '2027-01-02')
       .find(event => event.id === '2018_Q4')).toMatchObject({ status: 'PENDING_OUTCOME' });
     expect(evaluateStressEvents([{ ...atFrom, priceProvenance: 'LEGACY_NO_PIT' as const }], '2027-01-02')
       .find(event => event.id === '2018_Q4')).toMatchObject({ status: 'NON_PIT_PRICE_COVERAGE' });
+    expect(evaluateStressEvents([atFrom], '2027-01-02', eventPrices).find(event => event.id === '2018_Q4'))
+      .toMatchObject({ status: 'PARTIAL_COVERAGE' });
   });
 });
