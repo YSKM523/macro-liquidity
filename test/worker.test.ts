@@ -447,8 +447,8 @@ describe('/api/robustness legacy methodology', () => {
   });
 
   it('adds purged validation using persisted verdicts and the existing portfolio target mapping', async () => {
-    dbState.backtestRows = Array.from({ length: 100 }, (_, index) => ({
-      date: new Date(Date.UTC(2023, 0, 2 + index * 7)).toISOString().slice(0, 10),
+    dbState.backtestRows = Array.from({ length: 300 }, (_, index) => ({
+      date: new Date(Date.UTC(2020, 0, 6 + index * 7)).toISOString().slice(0, 10),
       score: index % 2 ? 60 : 40,
       spx: 100 + index,
       verdict: index % 2 ? 'BEARISH' : 'BULLISH',

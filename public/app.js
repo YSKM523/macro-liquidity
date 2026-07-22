@@ -626,6 +626,7 @@ async function fetchRobust() {
 function rbPct(x, d = 1) { return (x * 100).toFixed(d) + '%'; }
 function rbMaybePct(x, d = 1) { return x == null ? '—' : rbPct(x, d); }
 function rbMaybeNum(x, d = 2) { return x == null ? '—' : Number(x).toFixed(d); }
+function rbValidationRate(metric, d = 1) { return metric.value == null ? '—' : rbPct(metric.value, d); }
 function rbIcCls(x) { return x >= 0 ? 'rb-pos' : 'rb-neg'; }
 function rbEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
@@ -649,9 +650,36 @@ function renderRobust(r) {
       return `<table class="rb-table"><thead><tr><th>${REGIME_AXIS_LABEL[axis] || rbEsc(axis)}</th><th class="num">n</th><th class="num">IC</th></tr></thead><tbody>${rows}</tbody></table>`;
     }).join('');
 
+  const validationBlock = renderPurgedValidation(r.validation);
   const concl = `<div class="rb-concl">${robustConclusion(r)}</div>`;
   const notes = (r.caveats || []).map(c => `<p class="rb-note">· ${rbEsc(c)}</p>`).join('');
-  return icBlock + stratBlock + regimeBlock + concl + notes;
+  return validationBlock + icBlock + stratBlock + regimeBlock + concl + notes;
+}
+
+function renderPurgedValidation(validation) {
+  if (!validation) return '';
+  const protocol = validation.protocol || {};
+  if (validation.status === 'DATA_INCOMPLETE') {
+    return `<div class="rb-sub">${rbEsc(protocol.protocol || 'PURGED_VALIDATION_V1')}</div>`
+      + '<p class="rb-note">PIT / provenance 不完整，专业验证指标已关闭；旧版诊断仍单独展示。</p>';
+  }
+  const metrics = validation.aggregateMetrics;
+  const holdout = validation.holdout || {};
+  const holdoutText = holdout.status === 'PENDING_MATURITY'
+    ? `PENDING_MATURITY（固定自 ${rbEsc(holdout.frozen?.holdoutFrom || '—')}，不把历史尾部伪称 unseen）`
+    : rbEsc(holdout.status || '—');
+  if (!metrics) {
+    return `<div class="rb-sub">${rbEsc(protocol.protocol || 'PURGED_VALIDATION_V1')}</div>`
+      + `<p class="rb-note">回溯样本不足 · 前瞻 holdout ${holdoutText}</p>`;
+  }
+  const status = metric => rbEsc(metric?.status || '—');
+  return `<div class="rb-sub">${rbEsc(protocol.protocol || 'PURGED_VALIDATION_V1')} · purged walk-forward</div>`
+    + `<div class="rb-stat"><span class="k">方向命中</span><span class="v">${rbValidationRate(metrics.direction)} · n=${metrics.direction.n} · ${status(metrics.direction)}</span></div>`
+    + `<div class="rb-stat"><span class="k">正式 verdict 命中</span><span class="v">${rbValidationRate(metrics.formalVerdict)} · n=${metrics.formalVerdict.n} · ${status(metrics.formalVerdict)}</span></div>`
+    + `<div class="rb-stat"><span class="k">风险精确率 / 下行召回</span><span class="v">${rbValidationRate(metrics.risk.precision)} / ${rbValidationRate(metrics.risk.downsideRecall)} · ${status(metrics.risk.precision)}</span></div>`
+    + `<div class="rb-stat"><span class="k">IC（Spearman）</span><span class="v">${rbMaybeNum(metrics.ic.value, 3)} · n=${metrics.ic.n} · ${status(metrics.ic)}</span></div>`
+    + `<div class="rb-stat"><span class="k">尾部风险 q10 召回 / 精确率</span><span class="v">${rbValidationRate(metrics.tail.recall)} / ${rbValidationRate(metrics.tail.precision)} · fold-training-only</span></div>`
+    + `<p class="rb-note">重叠 n=${validation.overlappingN ?? 0} · 区间非重叠 n=${validation.independentN ?? 0} · 前瞻 holdout ${holdoutText}</p>`;
 }
 
 function robustConclusion(r) {

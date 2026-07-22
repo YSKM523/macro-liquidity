@@ -128,7 +128,7 @@ describe('static UI assets', () => {
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
     expect(html).toContain('/styles.css?v=0721d');
-    expect(html).toContain('/app.js?v=0722c');
+    expect(html).toContain('/app.js?v=0722d');
   });
 
   it('renders market time separately from fetch and provider quality metadata', () => {

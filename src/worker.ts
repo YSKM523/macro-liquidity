@@ -31,6 +31,7 @@ import { runBacktest } from './backtest';
 import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
+import { runPurgedValidation } from './evaluation-protocol';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
 import {
@@ -57,6 +58,12 @@ import {
   failClosedCachedStress,
 } from './live-data';
 import type { LivePrices, LiveStress } from './prices';
+import {
+  isPortfolioDirection,
+  isPortfolioVerdict,
+  mapPortfolioPolicy,
+  snapshotVixStressStatus,
+} from './portfolio-policy';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
@@ -412,7 +419,26 @@ export default {
           date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
           regime: r.qe_qt_regime, vix: r.vix_eod,
         }));
-      const result = runRobustness(snaps);
+      const validationSnaps = rows
+        .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
+        .map((r: any) => {
+          let provenanceStatus = 'INVALID';
+          try { provenanceStatus = normalizeSnapshotProvenance(r).provenance_status; } catch { /* fail closed below */ }
+          const policy = isPortfolioVerdict(r.verdict) && isPortfolioDirection(r.netliq_dir)
+            ? mapPortfolioPolicy({
+              score: r.score, verdict: r.verdict, netliqDir: r.netliq_dir,
+              stressStatus: snapshotVixStressStatus(r.vix_eod),
+            })
+            : null;
+          return {
+            date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json),
+            verdict: isPortfolioVerdict(r.verdict) ? r.verdict : null,
+            targetExposure: policy?.targetExposure ?? null,
+            pitStatus: r.pit_status,
+            provenanceStatus,
+          };
+        });
+      const result = { ...runRobustness(snaps), validation: runPurgedValidation(validationSnaps) };
       if (!v1) return json(result);
       try {
         const normalizedRows = rows.map(normalizeSnapshotProvenance);
