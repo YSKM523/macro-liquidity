@@ -18,7 +18,7 @@
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
-| PR-09 | 已完成（本地） | `0764210`–`eaa4e73` | event-time 首个可交易日收盘、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 500 tests |
+| PR-09 | 已完成（本地） | `0764210`–`c8c08ec` | event-time 首个可交易日收盘、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 501 tests |
 | PR-10～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1799,7 +1799,7 @@ refactor: event-time backtest engine
 - [x] BT-04：日频净值、SOFR ACT/360、手续费/滑点、高波动额外滑点与 >100% 融资支持
 - [x] `/api/backtest` 提供正式 `event_time` 与 typed `DATA_INCOMPLETE`；旧周频策略标记 `LEGACY_WEEKLY`
 - [x] 页面披露执行时间、现金、成本、VIX 保守政策与 legacy/event-time 区别
-- [x] fresh 0001–0009 migration 与二次 no-op、29 files / 500 tests、TypeScript strict、diff-check
+- [x] fresh 0001–0009 migration 与二次 no-op、29 files / 501 tests、TypeScript strict、diff-check
 - [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）
 - [ ] BT-05：公平基准与尾部指标（PR-10）
 

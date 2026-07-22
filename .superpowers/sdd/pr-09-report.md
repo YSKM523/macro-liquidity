@@ -4,7 +4,7 @@ Base: `37fd6c4`
 
 Branch: `codex/pr-09-event-time-backtest`
 
-Implementation commits: `0764210..eaa4e73`
+Implementation commits: `0764210..c8c08ec`
 
 ## Outcome
 
@@ -36,7 +36,7 @@ Implementation commits: `0764210..eaa4e73`
 - Final self-review added a no-lookahead regression proving a same-date 99% SOFR fixing was incorrectly visible at interval start; the RED cash return was 0.00825. The strict-prior-date fix in `eaa4e73` restored the expected 5% Fri→Mon carry of 0.0004166667 and documents the conservative date-only availability rule.
 - Task/spec review found the global mandatory backtest checklist still marked PR-09's four delivered gates incomplete. The review fix checks only next-tradable execution, daily prices, non-zero cash carry, and costs; the remaining five PR-10/later gates stay unchecked.
 - Task rereview found activation stamping daily rows with activation time and generic FRED source instead of raw-vintage provenance. The regression separates PIT `fetched_at` from activation time across SPX/VIX/SOFR, covers a corrected SPX vintage and same-value synthetic upgrade, and preserves unchanged-row/fence behavior.
-- Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 500/500 tests, exit 0**.
+- Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 501/501 tests, exit 0**.
 - Fresh final `env -u NODE_OPTIONS npx tsc --noEmit`: **exit 0**.
 - `git diff --check 37fd6c4..HEAD`: **exit 0**.
 - Fresh local `npm exec wrangler -- d1 migrations apply macro_liquidity --local --persist-to /tmp/pr09-d1-e1yvC9`: migrations **0001–0009 applied successfully**; immediate second invocation returned **No migrations to apply!**.
