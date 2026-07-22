@@ -125,4 +125,21 @@ describe('purged folds and frozen holdout', () => {
     const postLegacy = [...rows, snap('2026-07-23', 101, { provenanceStatus: 'LEGACY' })];
     expect(runFrozenHoldout(postLegacy).status).toBe('DATA_INCOMPLETE');
   });
+
+  it('propagates missing formal risk signals into aggregate tail metrics', () => {
+    const missing = rows.map((row, index) => index === 45 ? { ...row, targetExposure: null } : row);
+    const result = runPurgedValidation(missing, { initialTrain: 40, testN: 10 });
+    expect(result.aggregateMetrics?.tail.recall.status).toBe('MISSING_FORMAL_SIGNAL');
+    expect(result.aggregateMetrics?.tail.precision.status).toBe('MISSING_FORMAL_SIGNAL');
+  });
+
+  it('keeps holdout tail calibration typed partial when its frozen pre-period is legacy', () => {
+    const legacyPre = rows.map(row => ({ ...row, provenanceStatus: 'LEGACY' }));
+    const governedPost = Array.from({ length: 20 }, (_, index) =>
+      snap(addDays('2026-07-23', index * 7), 200 + index, { provenanceStatus: 'GOVERNED' }));
+    const result = runFrozenHoldout([...legacyPre, ...governedPost]);
+    expect(result.status).toBe('OK');
+    expect(result.frozen.calibrationStatus).toBe('PARTIAL_LEGACY_CALIBRATION');
+    expect(result.metrics?.tail.recall).toMatchObject({ value: null, status: 'PARTIAL_LEGACY_CALIBRATION' });
+  });
 });
