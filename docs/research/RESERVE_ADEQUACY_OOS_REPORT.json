@@ -70,7 +70,9 @@
     "reserveChange13": {
       "status": "CURRENT_INCOMPLETE",
       "currentAsOf": "2026-07-15",
+      "priorTargetDate": "2026-04-17",
       "priorAsOf": "2026-04-15",
+      "priorAgeDays": 2,
       "horizonCalendarDays": 91,
       "value": null
     },

@@ -27,7 +27,7 @@ describe('dynamic reserve adequacy preregistration', () => {
     expect(PREREGISTRATION.sources.NYFED_SRF_ACCEPTED).toMatchObject({
       endpoint: 'https://markets.newyorkfed.org/api/rp/results/search.json',
       operationTypes: 'Repo',
-      aggregation: 'SUM_TOTAL_AMT_ACCEPTED_BY_OPERATION_DATE_FOR_OVERNIGHT_SRP',
+      aggregation: 'SUM_TOTAL_AMT_ACCEPTED_BY_OPERATION_DATE_FOR_OVERNIGHT_SRF',
       launchDate: '2021-07-29',
     });
     expect(Object.isFrozen(PREREGISTRATION)).toBe(true);

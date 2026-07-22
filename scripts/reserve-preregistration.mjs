@@ -17,7 +17,7 @@ export const PREREGISTRATION = Object.freeze({
       docs: 'https://markets.newyorkfed.org/static/docs/markets-api.html',
       operationTypes: 'Repo',
       requiredFields: Object.freeze(['operationDate', 'operationType', 'term', 'totalAmtAccepted']),
-      aggregation: 'SUM_TOTAL_AMT_ACCEPTED_BY_OPERATION_DATE_FOR_OVERNIGHT_SRP',
+      aggregation: 'SUM_TOTAL_AMT_ACCEPTED_BY_OPERATION_DATE_FOR_OVERNIGHT_SRF',
       launchDate: '2021-07-29',
       units: 'USD_BILLIONS',
     }),

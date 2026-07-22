@@ -1883,7 +1883,7 @@ research: dynamic reserve adequacy challenger
 
 PR-12 corrected methodology 为 `PR12_RESEARCH_V2_SRF_BOUNDARY`。v1 在 fetch 后、正式发布前被审查发现包含 2021-07-29 之前的临时 Repo，已保留为无效审计件；v2 严格拒绝 launch 前行。NY Fed 小额 exercises 因没有无歧义字段而保留，可能夸大市场驱动的 SRF 使用，是明确限制。公式、权重、状态阈值、freshness、folds、bootstrap、OOS gate 与资格均未调参。
 
-PR-12 实证摘要：1231 个 Friday anchors 中 248 个完整、196 个在 52 prior weeks 后可评分；194 个成熟目标 overlapping IC 为 0.2363，15 个 interval-non-overlap IC 为 −0.0071；bootstrap 95% CI [−0.0492, 0.4805]、p=0.0515。六个固定 fold 中前两个为空，剩余四个只有三个为正；Q5 mean 高于 Q1，但 Q5 10% tail 更差，因此冻结 gate 给出 `DROP_RESEARCH`。
+PR-12 实证摘要：这些结果仅是 current-vintage retrospective pseudo-OOS；GDP observation-date alignment is not release-aware。1231 个 Friday anchors 中 248 个完整、196 个在 52 prior weeks 后可评分；194 个成熟目标 overlapping IC 为 0.2363，15 个 interval-non-overlap IC 为 −0.0071；bootstrap 95% CI [−0.0492, 0.4805]、p=0.0515。六个固定 fold 中前两个为空，剩余四个只有三个为正；Q5 mean 高于 Q1，但 Q5 10% tail 更差，因此冻结 gate 给出 `DROP_RESEARCH`。
 
 PR-12 回滚：回退 base `ba74a6c` 后的 PR-12 commits。没有 migration 或生产/远程数据写入，无需数据库回滚。
 

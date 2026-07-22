@@ -25,7 +25,7 @@ export function renderReserveReport(report) {
 - Research decision: \`${report.decision.decision}\`
 - Champion: unchanged
 
-FRED GDP is current-vintage quarterly data and is aligned only by observation date; no historical publication-date claim is made. Historical revisions remain a material limitation.
+These diagnostics are **current-vintage retrospective pseudo-OOS**, not historical point-in-time evidence. GDP observation-date alignment is not release-aware; no historical publication-date claim is made. Historical revisions remain a material limitation.
 
 ## A-001 source correction
 
@@ -77,6 +77,7 @@ The frozen gate selected **${report.decision.decision}**. The only possible outc
 ## Limitations and rollback
 
 - Current-vintage FRED and NY Fed artifacts do not reconstruct historical vintages or historical availability.
+- GDP observation-date alignment is not release-aware, so quarterly values can embody revision and publication-timing bias.
 - SP500 is a price index without dividends; this is an IC/state-ranking study, not a tradable portfolio backtest.
 - Overlapping 13-week targets are dependent; interval-non-overlap and the seeded block bootstrap are the conservative diagnostics.
 - A daily SRF accepted amount measures operation take-up, not every dimension of reserve scarcity.

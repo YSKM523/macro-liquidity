@@ -10,7 +10,7 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added ABUNDANT/AMPLE/TRANSITION/SCARCE/STRESSED states, fail-closed `DATA_INCOMPLETE`, next-Monday 13-week SP500 alignment, overlapping/non-overlapping Spearman IC, seeded moving-block bootstrap, six fixed folds, quintile tails, and monotonicity diagnostics.
 - Recorded A-001 after nonexistent FRED `TGCR`/`SRFONTSYD` returned 404, using exact FRED `TGCRRATE` and official NY Fed Repo results without changing formula or gates.
 - Recorded A-002 after review found v1 mixed temporary Repo history with SRF: v1 is `INVALIDATED_BY_REVIEW`; schema-v2 starts the NY Fed request exactly at the official `2021-07-29` launch and rejects earlier rows. Small-value exercises remain included and disclosed because the API has no unambiguous flag.
-- Froze current-vintage snapshot SHA-256 `0a7f47c7599994dc4271c94bfc1faa5aa065472e1db2de790985c7788394da65`. This is `RESEARCH_CURRENT_VINTAGE`, not ALFRED/PIT.
+- Froze current-vintage snapshot SHA-256 `0a7f47c7599994dc4271c94bfc1faa5aa065472e1db2de790985c7788394da65`. This is `RESEARCH_CURRENT_VINTAGE`, not ALFRED/PIT; diagnostics are current-vintage retrospective pseudo-OOS and GDP observation-date alignment is not release-aware.
 - Generated the corrected report once: overlapping/non-overlapping IC 0.2363/−0.0071 (n=194/15), bootstrap p=0.0515, three positive fixed folds, and a worse top-quintile 10% tail. The frozen gate selected `DROP_RESEARCH`.
 - Kept `replacementEligible=false`; Champion score, weights, thresholds, verdict, hysteresis, portfolio policy, production API/snapshots, migrations, deployment, and databases are unchanged.
 

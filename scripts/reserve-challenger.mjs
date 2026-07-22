@@ -84,13 +84,18 @@ function buildRelative(input, anchorDate) {
 }
 
 function buildChange(input, anchorDate, relative) {
-  const priorBound = addDays(anchorDate, -91);
-  const prior = latestAtOrBefore(input.WRESBAL, priorBound);
-  const status = relative.status !== 'OK' ? 'CURRENT_INCOMPLETE' : !prior ? 'MISSING_PRIOR' : 'OK';
+  const priorTargetDate = addDays(anchorDate, -91);
+  const prior = latestAtOrBefore(input.WRESBAL, priorTargetDate);
+  const priorAgeDays = prior ? ageDays(prior.date, priorTargetDate) : null;
+  const status = relative.status !== 'OK' ? 'CURRENT_INCOMPLETE'
+    : !prior ? 'MISSING_PRIOR'
+      : priorAgeDays > PREREGISTRATION.freshness.WRESBAL ? 'STALE_PRIOR_WRESBAL' : 'OK';
   return {
     status,
     currentAsOf: relative.reserveAsOf,
+    priorTargetDate,
     priorAsOf: prior?.date ?? null,
+    priorAgeDays,
     horizonCalendarDays: 91,
     value: status === 'OK' ? relative.reserveB - prior.value / 1_000 : null,
   };

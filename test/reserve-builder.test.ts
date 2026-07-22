@@ -19,7 +19,7 @@ describe('dynamic reserve adequacy weekly builder', () => {
     expect(feature.decisionStatus).toBe('OK');
     expect(feature.relativeReserves).toMatchObject({ status: 'OK', reserveAsOf: '2024-04-03', reserveAgeDays: 2, gdpAsOf: '2024-01-01', gdpAgeDays: 95, reserveB: 3_400, gdpB: 28_500 });
     expect(feature.relativeReserves.value).toBeCloseTo(11.92982456);
-    expect(feature.reserveChange13).toMatchObject({ status: 'OK', currentAsOf: '2024-04-03', priorAsOf: '2024-01-03', value: -100 });
+    expect(feature.reserveChange13).toMatchObject({ status: 'OK', currentAsOf: '2024-04-03', priorTargetDate: '2024-01-05', priorAsOf: '2024-01-03', priorAgeDays: 2, value: -100 });
     expect(feature.sofrIorb).toMatchObject({ status: 'OK', pairCount: 3, latestPairDate: '2024-04-03', ageDays: 2, medianBps: -8, p95Bps: -7.1 });
     expect(feature.auxiliaryFunding).toMatchObject({ status: 'OK', effrPairCount: 3, tgcrPairCount: 3, srfCount: 2, latestEffrPairDate: '2024-04-03', latestTgcrPairDate: '2024-04-03', latestSrfDate: '2024-04-03', effrMedianBps: -7, tgcrMedianBps: -9, srfMaxB: 2 });
     expect(feature.provenance).toMatchObject({ evidenceClass: 'RESEARCH_CURRENT_VINTAGE', source: 'FRED_AND_NYFED_CURRENT_VINTAGE' });
@@ -49,6 +49,17 @@ describe('dynamic reserve adequacy weekly builder', () => {
     const [first, next] = buildWeeklyReserveFeatures(input, ['2024-04-05', '2024-04-12']);
     expect(first.auxiliaryFunding.srfMaxB).toBe(50);
     expect(next.auxiliaryFunding.srfMaxB).toBe(0);
+  });
+
+  it('fails closed instead of indefinitely forward-filling a stale 13-week prior reserve', () => {
+    const input = base();
+    input.WRESBAL = [row('2020-01-01', 3_500_000), row('2024-04-03', 3_400_000)];
+    const [feature] = buildWeeklyReserveFeatures(input, ['2024-04-05']);
+    expect(feature.reserveChange13).toMatchObject({
+      status: 'STALE_PRIOR_WRESBAL', priorTargetDate: '2024-01-05',
+      priorAsOf: '2020-01-01', priorAgeDays: 1465, value: null,
+    });
+    expect(feature.decisionStatus).toBe('DATA_INCOMPLETE');
   });
 
   it.each([

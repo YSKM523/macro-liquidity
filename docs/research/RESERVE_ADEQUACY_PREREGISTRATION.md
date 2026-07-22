@@ -16,7 +16,7 @@ Primary FRED CSV series are exactly `WRESBAL`, `GDP`, `SOFR`, `IORB`, `EFFR`, `T
 
 The canonical snapshot and manifest must agree byte-for-byte and object-for-object and record schema, source, evidence class, exact FRED IDs/URLs, exact NY Fed endpoint/parameters, retrieval time, row/date ranges, per-source hashes, and whole-file SHA-256. No unavailable identifier or endpoint may be silently replaced.
 
-This is current-vintage FRED evidence, not ALFRED/PIT. GDP is quarterly current-vintage data; this study makes no historical release-date or historical-vintage claim.
+This is current-vintage evidence, not ALFRED/PIT. Diagnostics are current-vintage retrospective pseudo-OOS. GDP observation-date alignment is not release-aware; the study makes no historical release-date or historical-vintage claim.
 
 ## A-001 primary-source correction (before full fetch)
 

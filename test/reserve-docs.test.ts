@@ -7,6 +7,8 @@ describe('PR-12 research documentation contract', () => {
     const read = (path: string) => readFileSync(path, 'utf8');
     const algorithm = read('docs/ALGORITHM.md');
     expect(read('public/algorithm.md')).toBe(algorithm);
+    expect(algorithm).toContain('current-vintage retrospective pseudo-OOS');
+    expect(algorithm).toContain('GDP observation-date alignment is not release-aware');
     for (const path of ['README.md', 'CHANGELOG.md', 'docs/ALGORITHM.md', 'public/algorithm.md', 'public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md']) {
       const content = read(path);
       for (const phrase of ['PR-12', 'DROP_RESEARCH', 'RESEARCH_CURRENT_VINTAGE', 'replacementEligible=false', 'Champion']) expect(content).toContain(phrase);

@@ -105,7 +105,16 @@ function validateEnvelope(snapshot) {
   if (snapshot.request.nyFedUrl !== nyFedRepoUrl(SRF_LAUNCH_DATE, snapshot.request.endDate)) throw new Error('NY Fed snapshot URL mismatch');
   if (!sameKeys(snapshot.series, SERIES)) throw new Error('snapshot series set mismatch');
   for (const id of SERIES) validateRows(id, snapshot.series[id]);
-  if (snapshot.series.NYFED_SRF_ACCEPTED[0].date < SRF_LAUNCH_DATE) throw new Error('NY Fed normalized series begins before SRF launch');
+  for (const id of FRED_IDS) {
+    const rows = snapshot.series[id];
+    if (rows[0].date < FRED_START_DATE || rows.at(-1).date > snapshot.request.endDate) {
+      throw new Error(`${id} normalized rows are outside request range`);
+    }
+  }
+  const nyFedRows = snapshot.series.NYFED_SRF_ACCEPTED;
+  if (nyFedRows[0].date < SRF_LAUNCH_DATE || nyFedRows.at(-1).date > snapshot.request.endDate) {
+    throw new Error('NY Fed normalized rows are outside request range');
+  }
 }
 
 export async function buildReserveManifest(snapshot, snapshotText, responseHashes) {

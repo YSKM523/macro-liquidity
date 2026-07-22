@@ -174,7 +174,7 @@ Agreement-confirmed moving-block bootstrap 95% CI 为 [0.1019, 0.4455]、p=0.001
 
 PR-12 在 Champion 之外冻结了四组件动态分数：相对准备金 30%、13 周准备金变化 25%、SOFR−IORB 周中位数/p95 逆分位 25%、EFFR−IORB/TGCR−IORB 周中位数与 SRF 周最大用量逆分位 20%。所有分位严格只读至少 52 个 prior complete weeks；组件分别记录 as-of、age、pair count 和 freshness，缺失或陈旧即 `DATA_INCOMPLETE`。状态为 ABUNDANT/AMPLE/TRANSITION/SCARCE/STRESSED；该研究不修改生产 `reserveAdequacy` 因子。
 
-证据版本 `PR12_RESEARCH_V2_SRF_BOUNDARY` 使用 FRED `WRESBAL/GDP/SOFR/IORB/EFFR/TGCRRATE/SP500` 与 NY Fed Repo results。A-001 记录不存在的 FRED ID 修正；A-002 将 NY Fed canonical start 严格固定为 SRF 上线日 `2021-07-29`，v1 因混入此前临时 Repo 而标为 `INVALIDATED_BY_REVIEW`。小额 exercises 因 API 无明确标志而保留，是已知限制。数据均为 `RESEARCH_CURRENT_VINTAGE`，不是 ALFRED/PIT，`replacementEligible=false`。
+证据版本 `PR12_RESEARCH_V2_SRF_BOUNDARY` 使用 FRED `WRESBAL/GDP/SOFR/IORB/EFFR/TGCRRATE/SP500` 与 NY Fed Repo results。A-001 记录不存在的 FRED ID 修正；A-002 将 NY Fed canonical start 严格固定为 SRF 上线日 `2021-07-29`，v1 因混入此前临时 Repo 而标为 `INVALIDATED_BY_REVIEW`。小额 exercises 因 API 无明确标志而保留，是已知限制。数据均为 `RESEARCH_CURRENT_VINTAGE`，不是 ALFRED/PIT，`replacementEligible=false`。这些诊断只能称为 **current-vintage retrospective pseudo-OOS**；**GDP observation-date alignment is not release-aware**，无法证明季度值在历史决策日已经发布。
 
 冻结 v2 报告有 196 个 scored weeks、194 个可对齐 13 周结果；overlapping IC 0.2363，但 interval-non-overlapping IC −0.0071（n=15），仅 3 个固定 fold 为正，最高 quintile 的 10% tail 也差于最低 quintile。未改变的 gate 因此给出 `DROP_RESEARCH`。Champion、正式 API/快照、数据库和仓位全部不变。完整预注册、修订账本、artifact manifest 与报告见 `docs/research/`。
 

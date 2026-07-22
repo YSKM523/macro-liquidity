@@ -38,9 +38,17 @@ Implementation range: `7f64d10..9258a0a`
 - Fresh local migrations at `/tmp/pr12-migrations.CbpWa7`: 0001–0009 passed; immediate second run returned `No migrations to apply!`.
 - Worktree clean before review package generation.
 
+## Review corrections
+
+- Spec review Important — stale 13-week prior WRESBAL: RED command `vitest run test/reserve-builder.test.ts` produced 2 failures / 5 passes because `priorTargetDate/priorAgeDays` were absent and a 1465-day-old baseline remained `OK`. GREEN added the two audit fields, applied the existing 14-day WRESBAL limit, and returns `STALE_PRIOR_WRESBAL`; 7/7 passed.
+- Whole review Important — normalized rows outside request range: RED command `vitest run test/reserve-snapshot.test.ts` produced 3 failures / 5 passes because future/pre-start rows were accepted. GREEN enforces FRED `[2002-01-01,endDate]` and NY Fed `[2021-07-29,endDate]` in the shared envelope used by both manifest build and verify, including cryptographically self-consistent tamper tests.
+- Minor: corrected preregistration metadata `OVERNIGHT_SRP` to `OVERNIGHT_SRF`.
+- Recomputed canonical JSON/Markdown from the same verified v2 artifact. Snapshot identity, sample, every OOS diagnostic, gate, and decision were byte-identical; only `latest.reserveChange13` gained `priorTargetDate=2026-04-17/priorAgeDays=2`, and the disclosure now calls the study current-vintage retrospective pseudo-OOS with non-release-aware GDP alignment.
+
 ## 6. 已知限制
 
 - FRED/NY Fed 均为当前版本，不是 ALFRED/PIT；GDP 存在 revision/publication-date bias。
+- 因此所有 OOS 标签只表示 current-vintage retrospective pseudo-OOS；GDP observation-date alignment is not release-aware。
 - FRED SP500 不含股息；研究是 IC/ranking，不是可交易组合回测。
 - NY Fed small-value exercises 保留，可能高估市场驱动 SRF take-up。
 - 13 周 overlapping targets 相关；non-overlap 仅 15 个。
