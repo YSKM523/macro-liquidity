@@ -18,7 +18,7 @@
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
-| PR-09 | 已完成（本地） | `0764210`–`99e9616` | event-time 首个可交易日收盘、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 499 tests |
+| PR-09 | 已完成（本地） | `0764210`–`eaa4e73` | event-time 首个可交易日收盘、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 500 tests |
 | PR-10～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
@@ -1778,7 +1778,7 @@ feat: point-in-time observation storage
 - [x] weekly/daily PIT cutoff 冻结后，DB trigger 拒绝 backdated 或 equal-cutoff 的新 raw vintage；初始历史装载与同主键幂等 replay 保持可用，违规 activation 原子回滚且不切换 ACTIVE
 - [x] strict canonical ISO/epoch 比较与 SQL `julianday` cutoff/排序，覆盖混合毫秒精度及不存在日期
 - [x] legacy 一次升级；任何既有 PIT 正式快照均冻结，包括异常 `data_run_id IS NULL` 行；迟滞锚点按完整 decision week 读取
-- [x] 本地 fresh migration 首次应用与二次幂等检查、477 tests 与 TypeScript strict 验证（实现 commits `07f7c81..bb5c2ff`）
+- [x] 本地 fresh migration 首次应用与二次幂等检查、477 tests 与 TypeScript strict 验证（实现 commits `07f7c81..37fd6c4`）
 
 PR-08 已知限制：ALFRED 历史只提供 vintage 日期时仍使用保守日末发布时间；默认 next-weekday 规则尚未覆盖美股假日。resolver 不再保留全部 frame，但当前服务仍一次加载并排序 cutoff-visible PIT 行；stored timing 异常检查只返回至多一条坏行，不再额外物化全表。`snapshot_inputs` 仅是 endpoint audit index，不应被解释为全部评分行 manifest。这些限制留给 PR-09 的交易日历/执行引擎或独立的流式数据库读取改造，不在 PR-08 扩展模型公式、权重或阈值。
 
@@ -1799,7 +1799,7 @@ refactor: event-time backtest engine
 - [x] BT-04：日频净值、SOFR ACT/360、手续费/滑点、高波动额外滑点与 >100% 融资支持
 - [x] `/api/backtest` 提供正式 `event_time` 与 typed `DATA_INCOMPLETE`；旧周频策略标记 `LEGACY_WEEKLY`
 - [x] 页面披露执行时间、现金、成本、VIX 保守政策与 legacy/event-time 区别
-- [x] fresh 0001–0009 migration 与二次 no-op、29 files / 499 tests、TypeScript strict、diff-check
+- [x] fresh 0001–0009 migration 与二次 no-op、29 files / 500 tests、TypeScript strict、diff-check
 - [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）
 - [ ] BT-05：公平基准与尾部指标（PR-10）
 

@@ -4,7 +4,7 @@ Base: `37fd6c4`
 
 Branch: `codex/pr-09-event-time-backtest`
 
-Implementation commits: `0764210..99e9616`
+Implementation commits: `0764210..eaa4e73`
 
 ## Outcome
 
@@ -33,7 +33,8 @@ Implementation commits: `0764210..99e9616`
 - Task 4 RED: repository loader and API `event_time` were absent. GREEN retained diagnostics, added formal performance, and returned typed incomplete results.
 - Task 5 RED: dashboard had no event-time disclosure. GREEN added the formal-performance card and fail-closed assumptions display (missing API assumptions render as unknown, never frontend defaults).
 - First full-suite run exposed old migration fixtures stopping at 0008 and a DOM-less main harness invoking the new loader: 28/29 files, 497/499 tests, 2 failures and 3 unhandled errors. The fixture-only correction was committed as `99e9616`; focused rerun passed 3/3 files and 29/29 tests without unhandled errors.
-- Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 499/499 tests, exit 0**.
+- Final self-review added a no-lookahead regression proving a same-date 99% SOFR fixing was incorrectly visible at interval start; the RED cash return was 0.00825. The strict-prior-date fix in `eaa4e73` restored the expected 5% Fri→Mon carry of 0.0004166667 and documents the conservative date-only availability rule.
+- Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 500/500 tests, exit 0**.
 - Fresh final `env -u NODE_OPTIONS npx tsc --noEmit`: **exit 0**.
 - `git diff --check 37fd6c4..HEAD`: **exit 0**.
 - Fresh local `npm exec wrangler -- d1 migrations apply macro_liquidity --local --persist-to /tmp/pr09-d1-e1yvC9`: migrations **0001–0009 applied successfully**; immediate second invocation returned **No migrations to apply!**.
