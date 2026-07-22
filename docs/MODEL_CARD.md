@@ -45,7 +45,7 @@ The eight scoring-factor weights sum to 1.00. The persisted `vol` field is a FRE
 
 The formal PR-10 event-time framework uses next-tradable execution, daily SPX, SOFR cash, explicit costs, and four fair benchmarks. Historical diagnostics show a useful but modest ranking signal, not reliable directional timing. PR-11 was `INCONCLUSIVE / DROP_RESEARCH`; PR-12 was `DROP_RESEARCH`. Neither met the frozen promotion gates.
 
-PR-15 adds `PURGED_VALIDATION_V1` without altering the Champion. Thirteen-week labels expose signal/outcome dates, training labels are purged when their outcomes reach the next test interval, and a 91-calendar-day embargo is applied. Reports separate score direction, persisted formal verdict, existing dashboard target-exposure risk calls, Spearman IC, and fold-training-only q10 tail detection. The genuinely forward holdout is permanently registered from `2026-07-23`; it remains `PENDING_MATURITY` until enough post-registration labels mature and historical rows are never renamed as unseen holdout evidence.
+PR-15 adds `PURGED_VALIDATION_V1` without altering the Champion. Formal thirteen-week labels enter at the first eligible PIT daily close after `tradableAt` and exit at the first actual PIT daily close on or after entry plus 91 calendar days; model, decision, tradable, entry, and exit dates are exposed. Training labels are purged by outcome date before the next test interval and then receive a 91-calendar-day embargo. Reports separate score direction, persisted formal verdict, existing dashboard target-exposure risk calls, Spearman IC, and fold-training-only q10 tail detection. The genuinely forward holdout was registered at `2026-07-22T19:37:28Z` from commit `75c93d526bf6073440335d3c90a7d5c0b90ea58b`, begins on execution date `2026-07-23`, and remains `PENDING_MATURITY` until enough labels mature. No truthful tail threshold existed at registration, so prospective tail metrics remain `UNAVAILABLE_AT_REGISTRATION`; historical rows are never renamed as unseen evidence.
 
 ## Failed regimes and monitoring
 
@@ -56,7 +56,7 @@ Known weak areas include market drift overwhelming direction accuracy, publicati
 - Release rules remain conservative approximations and do not encode every US market holiday.
 - Live cache is per Worker isolate; it is an upstream-load guard, not a globally coherent quote store.
 - Staging identifiers and remote secrets are intentionally not committed. A local dry-run is not evidence that staging or production deployment succeeded.
-- Historical rows backfilled by migration 0010 are explicitly `LEGACY_UNVERSIONED`. Versioned APIs report the governed/legacy union without inventing identity. PR-15 retrospective validation labels this cohort `PARTIAL_LEGACY`; legacy q10 calibration remains null as `PARTIAL_LEGACY_CALIBRATION`, while malformed/non-PIT inputs and legacy post-holdout signals fail closed.
+- Historical rows backfilled by migration 0010 are explicitly `LEGACY_UNVERSIONED`. Versioned APIs report the governed/legacy union without inventing identity. PR-15 retrospective validation labels this cohort `PARTIAL_LEGACY`; legacy q10 calibration remains null as `PARTIAL_LEGACY_CALIBRATION`. Malformed/non-PIT inputs, incomplete daily price provenance, mixed governed model/config cohorts, and legacy post-holdout signals fail closed.
 - The local restore fixture proves the mechanism and invariants, not restoration of a real production backup.
 
 ## Governance and promotion
@@ -65,4 +65,4 @@ A challenger must be preregistered, point-in-time, no-lookahead, positive in mos
 
 ## Rollback
 
-Revert PR-13 application/config/docs commits to return to the prior API and operation behavior. Migration 0010 is additive: never drop its columns or audit tables on a remote database. Stop new writes or roll application behavior forward. Snapshot scores, formulas, weights, thresholds, hysteresis, and portfolio policy were not changed by PR-13.
+Revert the PR-15 commit range after base `780e125` to remove the additive validation API/UI behavior. PR-15 has no migration and wrote no database data, so no data rollback is required. Migration 0010 from PR-13 remains additive and must not be dropped on a remote database. Snapshot scores, formulas, weights, thresholds, hysteresis, and portfolio policy were not changed by PR-15.

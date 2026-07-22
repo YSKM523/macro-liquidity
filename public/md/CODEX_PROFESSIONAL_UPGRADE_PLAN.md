@@ -24,6 +24,7 @@
 | PR-12 | 已完成（本地） | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
 | PR-13 | 已完成（本地） | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；未部署 |
 | PR-14 | 本地实现与验证完成，待独立复审 | `3638c55`–候选 HEAD | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，TypeScript、ESLint 与 correctness gates 通过；Champion 及既有研究诊断数值不变，未部署 |
+| PR-15 | 本地实现与验证完成，待独立复审 | `710bb30`–候选 HEAD | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、固定 Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 752 tests、TypeScript、ESLint 与全部本地 gates 通过；未部署、未修改远程数据库 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -920,7 +921,7 @@ Sortino
 
 ## BT-06 Purged Walk-Forward
 
-> **PR-15 本地完成（2026-07-22）**：`PURGED_VALIDATION_V1` 使用 13 周日期区间标签、先按 outcome 与 test 起点 purge、再做 91 个日历日 embargo；同时报告重叠和贪心区间非重叠样本。完全前瞻 holdout 固定从 `2026-07-23` 开始，成熟前只返回 `PENDING_MATURITY`，不把历史尾部伪装成 unseen。
+> **PR-15 本地实现（2026-07-22）**：`PURGED_VALIDATION_V1` 以 `tradableAt` 后第一条合资格 PIT 日收盘入场、entry+91 日后第一条实际 PIT 日收盘出场；先按 outcome 与 test 起点 purge，再对 outcome 做 91 个日历日 embargo，同时报告重叠和最早 exit 贪心的半开区间非重叠样本。完全前瞻 holdout 按 execution date 固定从 `2026-07-23` 开始；非 tail 指标成熟前返回 `PENDING_MATURITY`，前瞻 tail 因登记时无诚实阈值永久为 `UNAVAILABLE_AT_REGISTRATION`，不把历史尾部伪装成 unseen。
 
 同时报告：
 
@@ -929,7 +930,7 @@ Sortino
 非重叠 IC
 Bootstrap CI
 Purged walk-forward
-完全冻结 holdout
+预登记完全前瞻 holdout
 ```
 
 不要把重叠窗口数量当成独立样本量。
@@ -938,7 +939,7 @@ Purged walk-forward
 
 ## BT-07 修正命中率定义
 
-> **PR-15 本地完成（2026-07-22）**：方向使用持久化 score，正式 verdict 直接读取正式快照，风险调用复用 `DASHBOARD_EXPOSURE_TIERS_V1` target，IC 使用 Spearman，尾部阈值只取各 fold 训练集 q10；不足样本、零方差、缺正式信号和 legacy calibration 均返回 typed null。
+> **PR-15 本地实现（2026-07-22）**：方向使用持久化 score，正式 verdict 与 `DASHBOARD_EXPOSURE_TIERS_V1` target 直接读取正式信号，IC 使用 Spearman，回溯尾部阈值只取各 fold 训练集 q10；风险 precision 把 flat risk call 计为 false positive，tail recall/precision 分别要求至少 3 个 tail event/risk call。不足样本、零方差、缺正式信号、legacy calibration 与登记时不可得 tail 均返回 typed null。
 
 分别报告：
 
@@ -1958,7 +1959,7 @@ feat: model versioning, CI, staging, observability and backup
 - [x] 成本纳入
 - [x] 与相同 Beta 基准比较（PR-10：仅按实际承担收益区间的 exposure 匹配）
 - [x] overlapping 和 non-overlapping 分开（PR-11 shadow current-vintage research）
-- [x] purged walk-forward（PR-15：日期区间 purge + 91 日 embargo + 固定 2026-07-23 holdout；holdout 尚待真实前瞻标签成熟）
+- [x] purged walk-forward（PR-15：正式 event-time entry/exit、按 outcome purge + 91 日 embargo、固定 2026-07-23 execution-date holdout；非 tail 指标尚待真实前瞻标签成熟，tail 为登记时不可得）
 - [ ] 分数桶大体单调
 - [ ] 极端事件压力测试
 
