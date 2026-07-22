@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import * as snapshotDb from '../src/db';
 import {
+  reserveAdminRateLimit,
   loadBacktestRows,
   loadEventBacktestInputs,
   officialSnapshotBefore,
@@ -12,6 +13,7 @@ import {
   officialSnapshotOnOrBefore,
   upsertOfficialSnapshot,
 } from '../src/db';
+import { Miniflare } from 'miniflare';
 
 const testSnapshot = {
   date: '2024-07-24', walcl: 6000, tga: 700, rrp: 100, repo: 0, netliq: 5200,
@@ -47,6 +49,21 @@ describe('officialSnapshotBefore', () => {
     const sql = (prepare.mock.calls as unknown as [[string]])[0][0];
     expect(sql).toContain("decision_status = 'OK'");
     expect(sql).toContain('verdict IS NOT NULL');
+  });
+});
+
+describe('atomic admin attempt reservation', () => {
+  it('admits at most the configured limit under concurrent unauthorized or authorized attempts', async () => {
+    const mf = new Miniflare({ modules: true, script: 'export default { fetch(){return new Response()} }', d1Databases: ['DB'] });
+    const db = await mf.getD1Database('DB') as unknown as D1Database;
+    await db.prepare(`CREATE TABLE admin_rate_limit_buckets (
+      bucket_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL,
+      attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL
+    )`).run();
+    const reservations = await Promise.all(Array.from({ length: 20 }, () =>
+      reserveAdminRateLimit(db, 'admin-source:test', '2026-07-22T00:00:00Z', 5, 60)));
+    expect(reservations.filter(Boolean)).toHaveLength(5);
+    await mf.dispose();
   });
 });
 

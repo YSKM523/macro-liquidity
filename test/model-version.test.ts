@@ -58,5 +58,6 @@ describe('Champion model identity', () => {
       expect(sql).toMatch(new RegExp(`UPDATE ${table}[^;]+LEGACY_UNVERSIONED`, 's'));
     }
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS admin_audit_log');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS admin_rate_limit_buckets');
   });
 });

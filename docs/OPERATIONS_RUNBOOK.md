@@ -14,7 +14,9 @@ Use the protected manual workflow. It applies all remote production D1 migration
 
 ## Admin refresh
 
-Use either legacy `Authorization: Bearer …` or exact Cloudflare Access service-token headers. Prefer Access in managed environments and rotate tokens outside the repository. Every attempt is audited without storing credentials. An incremental refresh is:
+Use either legacy `Authorization: Bearer …` or exact Cloudflare Access service-token headers. Prefer Access in managed environments and rotate tokens outside the repository. The Cloudflare Access service-token policy must be scoped to the production hostname, exact `/api/admin/refresh` path, and `POST`; the Worker recognizes only the configured service-token header pair and does not infer roles or trust identity headers/JWT claims. Deployment and backup API tokens are separate roles and must not be accepted by the application route.
+
+Every attempt, authorized or not, first consumes an atomic D1 rate-limit reservation keyed by a SHA-256 digest of `CF-Connecting-IP` (or one shared `unknown` bucket when absent). Authorization and audit writes occur only after that reservation; a rejected reservation is audited as `NOT_EVALUATED`. Credentials, raw IPs, and request tokens are never bucket keys or audit fields. An incremental refresh is:
 
 ```text
 POST /api/admin/refresh

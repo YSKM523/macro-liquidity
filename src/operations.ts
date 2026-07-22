@@ -1,3 +1,5 @@
+import { sha256Hex } from './model-version';
+
 export type AdminAuthMethod = 'LEGACY_BEARER' | 'ACCESS_SERVICE_TOKEN';
 
 export interface AdminBindings {
@@ -20,6 +22,11 @@ export function authenticateAdmin(req: Request, env: AdminBindings): AdminAuthMe
 
 export function fullRebuildConfirmed(req: Request): boolean {
   return req.headers.get('x-confirm-full-rebuild') === 'FULL_REBUILD';
+}
+
+export function adminRateLimitBucket(req: Request): string {
+  const source = (req.headers.get('cf-connecting-ip') ?? 'unknown').trim().slice(0, 128);
+  return `admin-source:${sha256Hex(source || 'unknown')}`;
 }
 
 const SECRET_KEY = /(?:authorization|token|secret|api.?key|password)/i;

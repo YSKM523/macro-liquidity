@@ -13,7 +13,7 @@ import {
   loadEventBacktestInputs,
   exportOfficialSnapshots,
   recordAdminAudit,
-  adminRateLimitAllowed,
+  reserveAdminRateLimit,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -38,6 +38,7 @@ import { presentModelDescriptor, resolveModelIdentity } from './model-version';
 import {
   LiveDataCache,
   SLO_TARGETS,
+  adminRateLimitBucket,
   authenticateAdmin,
   fullRebuildConfirmed,
   structuredLog,
@@ -421,12 +422,27 @@ export default {
     }
     if (p === '/api/admin/refresh' && req.method === 'POST') {
       const attemptedAt = new Date().toISOString();
-      const authMethod = authenticateAdmin(req, env);
       const rebuildAll = url.searchParams.get('all') === '1';
       const confirmed = !rebuildAll || fullRebuildConfirmed(req);
+      const action = rebuildAll ? 'FULL_REBUILD' : 'INCREMENTAL_REFRESH';
+      const reservation = await reserveAdminRateLimit(
+        env.DB, adminRateLimitBucket(req), attemptedAt,
+      );
+      if (!reservation) {
+        await recordAdminAudit(env.DB, {
+          auditId: `${requestId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          attemptedAt, action, authMethod: 'NOT_EVALUATED', authorized: false,
+          confirmed, outcome: 'RATE_LIMITED', requestId,
+        });
+        structuredLog('admin_refresh', {
+          request_id: requestId, auth_method: 'NOT_EVALUATED', rebuild_all: rebuildAll, outcome: 'RATE_LIMITED',
+        });
+        return json({ error: 'rate_limited', error_code: 'ADMIN_RATE_LIMITED', request_id: requestId, retry_after_seconds: 60 }, 429);
+      }
+      const authMethod = authenticateAdmin(req, env);
       const audit = async (outcome: string) => recordAdminAudit(env.DB, {
         auditId: `${requestId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        attemptedAt, action: rebuildAll ? 'FULL_REBUILD' : 'INCREMENTAL_REFRESH',
+        attemptedAt, action,
         authMethod: authMethod ?? 'NONE', authorized: authMethod != null, confirmed,
         outcome, requestId,
       });
@@ -434,13 +450,6 @@ export default {
         await audit('UNAUTHORIZED');
         structuredLog('admin_refresh', { request_id: requestId, authorized: false, rebuild_all: rebuildAll, outcome: 'UNAUTHORIZED' });
         return errorJson(requestId, 'unauthorized', 'ADMIN_UNAUTHORIZED', 401);
-      }
-      if (!await adminRateLimitAllowed(env.DB, attemptedAt)) {
-        await audit('RATE_LIMITED');
-        structuredLog('admin_refresh', {
-          request_id: requestId, auth_method: authMethod, rebuild_all: rebuildAll, outcome: 'RATE_LIMITED',
-        });
-        return json({ error: 'rate_limited', error_code: 'ADMIN_RATE_LIMITED', request_id: requestId, retry_after_seconds: 60 }, 429);
       }
       if (!confirmed) {
         await audit('CONFIRMATION_REQUIRED');

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   LiveDataCache,
+  adminRateLimitBucket,
   authenticateAdmin,
   deliverAlert,
   fullRebuildConfirmed,
@@ -50,6 +51,14 @@ describe('production operations controls', () => {
       headers: { 'x-confirm-full-rebuild': 'FULL_REBUILD' },
     }))).toBe(true);
     expect(fullRebuildConfirmed(new Request('https://x'))).toBe(false);
+  });
+
+  it('derives a bounded opaque rate-limit bucket from the transport source only', () => {
+    const bucket = adminRateLimitBucket(new Request('https://x', { headers: {
+      'cf-connecting-ip': '203.0.113.9', authorization: 'Bearer must-not-enter-key',
+    } }));
+    expect(bucket).toMatch(/^admin-source:[a-f0-9]{64}$/);
+    expect(bucket).not.toMatch(/203\.0\.113\.9|must-not-enter-key/);
   });
 
   it('serves bounded stale data during a short failure and fails closed after the stale limit', async () => {

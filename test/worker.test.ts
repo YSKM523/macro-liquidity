@@ -58,7 +58,7 @@ vi.mock('../src/db', () => ({
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
   recordAdminAudit: vi.fn(async () => undefined),
-  adminRateLimitAllowed: vi.fn(async () => dbState.adminRateAllowed),
+  reserveAdminRateLimit: vi.fn(async () => dbState.adminRateAllowed),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
   ingestRunSummary: vi.fn(async () => ({
@@ -278,6 +278,15 @@ describe('/api/admin/refresh contention', () => {
     dbState.adminRateAllowed = false;
     const response = await worker.fetch(new Request('https://example.test/api/admin/refresh', {
       method: 'POST', headers: { authorization: 'Bearer test' },
+    }), env);
+    expect(response.status).toBe(429);
+    expect(runIngest).not.toHaveBeenCalled();
+  });
+
+  it('reserves capacity before authentication so unauthorized attempts share the same limit', async () => {
+    dbState.adminRateAllowed = false;
+    const response = await worker.fetch(new Request('https://example.test/api/admin/refresh', {
+      method: 'POST', headers: { 'cf-connecting-ip': '203.0.113.10' },
     }), env);
     expect(response.status).toBe(429);
     expect(runIngest).not.toHaveBeenCalled();

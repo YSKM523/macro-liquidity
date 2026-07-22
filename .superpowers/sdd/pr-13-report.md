@@ -73,6 +73,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - GREEN: operations/worker tests passed 2 files / 39 tests; typecheck, lint, and diff check passed.
 - Structured logging now recursively sanitizes nested values and redacts bearer/key/token/password/secret content, not only secret-shaped field names. Unexpected and schema/DB errors emit stable server `error_code` values and return generic client errors with `request_id`; raw exception text is never returned. Static asset fetch is awaited inside the error boundary.
 
+### Review remediation 6 — atomic pre-authentication admin throttling
+
+- RED: focused operations/DB/worker tests failed because no opaque source bucket or atomic reservation existed and unauthorized attempts bypassed the old audit-count limit.
+- GREEN: focused tests passed 3 files / 56 tests, including 20 concurrent reservations admitting exactly 5. Typecheck, lint, migrations 0001–0010 plus second no-op, restore drill, and diff check passed.
+- Migration 0010 now creates `admin_rate_limit_buckets`; one UPSERT/RETURNING statement atomically reserves capacity before authentication and audit work. All attempts share the limit, and bucket keys are SHA-256 digests of the transport source only. The runbook now defines the Access hostname/path/method boundary, exact service-token semantics, and separation from deploy/backup roles.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

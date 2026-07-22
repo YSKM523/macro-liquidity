@@ -831,17 +831,37 @@ export async function recordAdminAudit(db: D1Database, entry: {
   ).run();
 }
 
-export async function adminRateLimitAllowed(
+export async function reserveAdminRateLimit(
   db: D1Database,
+  bucketKey: string,
   now: string,
   limit = 5,
+  windowSeconds = 60,
 ): Promise<boolean> {
   requireIsoTimestamp(now, 'admin rate-limit clock');
+  if (!/^admin-source:[a-f0-9]{64}$/.test(bucketKey) && bucketKey !== 'admin-source:test') {
+    throw new Error('invalid admin rate-limit bucket');
+  }
+  if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(windowSeconds) || windowSeconds < 1) {
+    throw new Error('invalid admin rate-limit policy');
+  }
   const row = await db.prepare(
-    `SELECT COUNT(*) AS n FROM admin_audit_log
-     WHERE authorized=1 AND julianday(attempted_at)>julianday(?,'-60 seconds')`,
-  ).bind(now).first<{ n: number }>();
-  return (row?.n ?? 0) < limit;
+    `INSERT INTO admin_rate_limit_buckets (bucket_key,window_start,attempt_count,updated_at)
+     VALUES (?,unixepoch(?),1,?)
+     ON CONFLICT(bucket_key) DO UPDATE SET
+       window_start=CASE
+         WHEN admin_rate_limit_buckets.window_start <= unixepoch(excluded.updated_at)-?
+         THEN unixepoch(excluded.updated_at) ELSE admin_rate_limit_buckets.window_start END,
+       attempt_count=CASE
+         WHEN admin_rate_limit_buckets.window_start <= unixepoch(excluded.updated_at)-?
+         THEN 1 ELSE admin_rate_limit_buckets.attempt_count+1 END,
+       updated_at=excluded.updated_at
+     WHERE admin_rate_limit_buckets.window_start <= unixepoch(excluded.updated_at)-?
+        OR admin_rate_limit_buckets.attempt_count < ?
+     RETURNING attempt_count`,
+  ).bind(bucketKey, now, now, windowSeconds, windowSeconds, windowSeconds, limit)
+    .first<{ attempt_count: number }>();
+  return row != null;
 }
 
 export async function recordAlertDelivery(db: D1Database, entry: {

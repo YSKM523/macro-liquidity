@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
 CREATE INDEX IF NOT EXISTS idx_admin_audit_attempted_at
   ON admin_audit_log(attempted_at DESC);
 
+CREATE TABLE IF NOT EXISTS admin_rate_limit_buckets (
+  bucket_key TEXT PRIMARY KEY,
+  window_start INTEGER NOT NULL,
+  attempt_count INTEGER NOT NULL CHECK (attempt_count > 0),
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS alert_delivery_log (
   alert_id TEXT PRIMARY KEY,
   attempted_at TEXT NOT NULL,
