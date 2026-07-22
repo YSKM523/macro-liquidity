@@ -21,7 +21,7 @@
 | PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
 | PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
 | PR-11 | 已完成（本地） | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
-| PR-12 | 已完成（本地） | `7f64d10`–`04dc5e2` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，待独立复审；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
+| PR-12 | 已完成（本地） | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
 | PR-13 | 待执行 | — | 按第 11 节顺序实施；独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。

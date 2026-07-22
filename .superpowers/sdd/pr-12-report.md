@@ -44,6 +44,8 @@ Implementation range: `7f64d10..04dc5e2`
 - Whole review Important — normalized rows outside request range: RED command `vitest run test/reserve-snapshot.test.ts` produced 3 failures / 5 passes because future/pre-start rows were accepted. GREEN enforces FRED `[2002-01-01,endDate]` and NY Fed `[2021-07-29,endDate]` in the shared envelope used by both manifest build and verify, including cryptographically self-consistent tamper tests.
 - Minor: corrected preregistration metadata `OVERNIGHT_SRP` to `OVERNIGHT_SRF`.
 - Recomputed canonical JSON/Markdown from the same verified v2 artifact. Snapshot identity, sample, every OOS diagnostic, gate, and decision were byte-identical; only `latest.reserveChange13` gained `priorTargetDate=2026-04-17/priorAgeDays=2`, and the disclosure now calls the study current-vintage retrospective pseudo-OOS with non-release-aware GDP alignment.
+- Final task/spec rereview of `ba74a6c..54daf01`: **Ready — 0 Critical / 0 Important / 0 Minor**.
+- Final whole-branch rereview of `ba74a6c..54daf01`: **Ready — 0 Critical / 0 Important / 0 Minor**.
 
 ## 6. 已知限制
 
