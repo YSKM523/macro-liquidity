@@ -8,10 +8,14 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 - Added append-only ALFRED vintage storage, revision reporting, conservative release metadata, manual release overrides, and next-weekday tradability metadata.
 - Added inclusive vintage checkpoints and atomically promoted PIT rows beside the existing `observations` compatibility view under the existing database lease fence.
-- Added no-lookahead frame resolution and explicit `AVAILABLE`/`MISSING` manifests for every configured series.
-- Froze PIT official snapshots and their exact manifests after a one-time legacy upgrade; nowcasts persist provenance without creating formal manifests.
+- Added lazy no-lookahead frame resolution using ordered per-series active histories; service rebuilds consume frames directly instead of retaining the full frame set.
+- Made frame release/tradability cutoffs cover every scoring-history row and added production-scale coverage for 12×2,500 rows across 500 decision events.
+- Added explicit `AVAILABLE`/`MISSING` endpoint audit-index rows for every configured series; full scoring history is reproduced from raw PIT rows plus `decision_at` and `release_resolution_at`.
+- Froze PIT official snapshots and their endpoint indexes after a one-time legacy upgrade, including abnormal PIT rows with null run provenance; nowcasts persist provenance without creating a formal endpoint index.
 - Lifted each frame's declared tradability to the latest tradability of every scoring-history row and added a second fail-closed manifest gate.
-- Made post-ingest release-calendar overrides effective at read time without mutating raw rows, with strict timestamp/order validation; same-day fetch time now reflects successful HTTP response completion.
+- Loaded all release-calendar validity versions and required every vintage to match exactly one strictly validated interval, failing closed on gaps or overlaps.
+- Versioned release-calendar overrides append-only and resolved the latest version created by each run's fixed `release_resolution_at`, without mutating raw rows; same-day fetch time now reflects successful HTTP response completion.
+- Expanded the final local verification to 27 files / 463 tests, TypeScript strict, diff checks, and fresh local migration first/second-run validation.
 - Added local-only migration `0008_point_in_time_observations.sql`; no deployment, remote D1 access, model formula, weight, threshold, hysteresis, or channel-policy change was made.
 
 ### PR-07 — Source timestamps and provider fallback
