@@ -113,7 +113,7 @@ flowchart TD
 
 ## 验证(诚实的样本外检验)
 
-- **`/api/backtest`** —— 对 4/8/13 周 SPX forward return 算综合分 IC、命中率、逐因子 IC、long/flat 策略 Sharpe。阈值固定 + percentile expanding-window(无前视)。
+- **`/api/backtest`** —— 正式绩效使用 event-time：冻结 PIT 信号在 `tradable_at` 后首个实际 SPX 日收盘执行，日频净值加入 SOFR ACT/360、手续费、滑点和融资；旧周频 long/flat 仅标记为 `LEGACY_WEEKLY` 诊断。4/8/13 周 IC、命中率和逐因子 IC 保持不变。
 - **`/api/walkforward`** —— 扩窗 train → embargo → OOS test 滚动,三臂对比(WF 自动拟合 / 等权 / 当前手调)。**裁决:自动调权过拟合;等权 ≈ 手调;edge 在因子选择不在精确权重。**
 - **综合 IC@13w 轨迹**:`0.127 → 0.195 → 0.208 → 0.227 → 0.255`,**Sharpe 0.83 → 1.10**,每步有回测撑腰。
 - **负结果归档(`docs/ALGORITHM.md` §10)**:测过「全球央行流动性(Fed+ECB+BOJ)领先美股」—— 24 年两种构造都**弱、regime 不稳、不比 Fed-only 强 → 不采用**。离线研究脚本见 [`scripts/`](scripts/)。
@@ -155,7 +155,8 @@ flowchart TD
 src/
   metrics.ts      纯函数打分大脑(computeSnapshot / 各 scoreXxx / buildGuidance)
   config.ts       SERIES / WEIGHTS / 阈值
-  backtest.ts     /api/backtest（IC / 命中率 / Sharpe）
+  backtest.ts     旧周频 IC / 命中率 / LEGACY_WEEKLY 诊断
+  event-backtest.ts  正式 event-time 调度 / 日频 NAV / SOFR / 成本
   walkforward.ts  /api/walkforward（样本外裁决）
   service.ts      FRED staging / 原子激活 / 回填流水线
   worker.ts       路由 + snapshot 组装（display_verdict / live_stress / guidance）
@@ -178,7 +179,7 @@ migrations/       D1 schema（ingest/staging + latest observations + append-only
 | `GET /api/health` | 数据健康度 + 当前 ACTIVE / 最近 FAILED ingest run 与 `PENDING`/`SUCCEEDED`/`FAILED` snapshot 状态；ACTIVE snapshot 非 `SUCCEEDED`（包括 `PENDING`）返回 503 和显式原因 |
 | `GET /api/history?from=YYYY-MM-DD` | 正式周频净流动性 / SPX 历史(画图用) |
 | `GET /api/prices` | 兼容数字字段 + 每个行情的 `sourceTimestamp` / `fetchedAt` / provider / market state / delay / fallback / quality status；`asof` 明确只代表 `FETCH_TIME`。FRED 官方 fallback 显式标记 `OFFICIAL`/延迟：SP500、VIXCLS、DGS10 最长 4 个工作日，DTWEXBGS 最长 7 个工作日 |
-| `GET /api/backtest` | IC / 命中率 / 逐因子 IC / 策略 Sharpe |
+| `GET /api/backtest` | `event_time` 正式日频绩效（或 typed `DATA_INCOMPLETE`）+ 不变的 IC / 逐因子诊断 + `LEGACY_WEEKLY` 旧策略块；页面披露执行、SOFR、费用、滑点与融资假设 |
 | `GET /api/walkforward` | 样本外三臂裁决 |
 | `POST /api/admin/refresh` | 回填(Bearer `ADMIN_TOKEN`;`?all=1` 全量)；已有有效 ingest 租约时返回 `409` |
 

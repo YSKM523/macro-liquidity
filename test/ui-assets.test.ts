@@ -128,7 +128,7 @@ describe('static UI assets', () => {
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
     expect(html).toContain('/styles.css?v=0721d');
-    expect(html).toContain('/app.js?v=0721e');
+    expect(html).toContain('/app.js?v=0722a');
   });
 
   it('renders market time separately from fetch and provider quality metadata', () => {
@@ -145,6 +145,22 @@ describe('static UI assets', () => {
     expect(js).toContain("status === 'DIVERGENT'");
     expect(js).toContain('SOURCE_DIVERGENCE');
     expect(js).not.toContain('行情同次抓取');
+  });
+
+  it('discloses event-time execution, carry, costs, and incomplete-data status', () => {
+    const html = read('public/index.html');
+    const js = read('public/app.js');
+    expect(html).toContain('id="event-backtest-card"');
+    expect(js).toContain("fetch('/api/backtest')");
+    expect(js).toContain('日频收盘');
+    expect(js).toContain('SOFR ACT/360');
+    expect(js).toContain('手续费');
+    expect(js).toContain('基础滑点');
+    expect(js).toContain('高波动额外滑点');
+    expect(js).toContain('LEGACY_WEEKLY');
+    expect(js).toContain("event.status === 'DATA_INCOMPLETE'");
+    expect(js).toContain('数据不完整，不展示绩效');
+    expect(js).not.toMatch(/assumptions\.[A-Za-z]+\s*\?\?\s*\d/);
   });
 
   it('escapes adversarial provider provenance before inserting it as HTML', () => {

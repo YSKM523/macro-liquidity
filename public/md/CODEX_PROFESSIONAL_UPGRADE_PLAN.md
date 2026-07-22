@@ -1793,10 +1793,17 @@ refactor: event-time backtest engine
 
 内容：
 
-- next tradable time
-- 日频价格
-- 日频净值
-- 现金收益和成本
+- [x] BT-01：正式 PIT 信号按 `tradable_at` 后首个实际日收盘执行；同收盘取最新 decision，末端信号显式未执行
+- [x] BT-02：SPX/VIX 日频表、SOFR 现金表、既有 observations 可审计 backfill 与 ingest activation 原子物化
+- [x] BT-04：日频净值、SOFR ACT/360、手续费/滑点、高波动额外滑点与 >100% 融资支持
+- [x] `/api/backtest` 提供正式 `event_time` 与 typed `DATA_INCOMPLETE`；旧周频策略标记 `LEGACY_WEEKLY`
+- [x] 页面披露执行时间、现金、成本、VIX 保守政策与 legacy/event-time 区别
+- [ ] BT-03：dashboard exposure tiers 仓位状态机（PR-10）
+- [ ] BT-05：公平基准与尾部指标（PR-10）
+
+PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，`totalReturn=null`，不会退回零现金收益。
+
+PR-09 回滚：完整本地代码可从 PR-09 base `37fd6c4` 对后续提交做单独 revert；0009 仅在本地临时数据库验证且未部署。若未来已应用到共享数据库，不应直接删除新增表，应先停止依赖写入并用向前 migration 迁移/停用；本地验证库可丢弃对应临时 `--persist-to` 目录后从 0001 重建。
 
 ---
 
