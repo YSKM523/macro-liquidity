@@ -17,9 +17,9 @@ The target asset is the S&P 500. The primary diagnostic horizon is 13 weeks. Off
 
 ## Sources
 
-FRED/ALFRED supplies macro series and immutable vintages. Yahoo, Stooq, and named FRED series supply live market readings with provenance, fallback, divergence, freshness, and fail-closed status. Exact series definitions and freshness rules are part of the canonical config hash.
+FRED/ALFRED supplies macro series and immutable vintages. Yahoo, Stooq, and named FRED series supply live market readings with provenance, fallback, divergence, freshness, and fail-closed status. Their HTTP calls retry only transport failures, 429, and 5xx under a three-attempt capped exponential-backoff policy; other 4xx and parse/validation failures fail immediately. Exact series definitions and freshness rules are part of the canonical config hash.
 
-## Factors and Weights
+## Eight scoring factors and one independent live-risk overlay
 
 | Factor | Weight |
 |---|---:|
@@ -31,9 +31,8 @@ FRED/ALFRED supplies macro series and immutable vintages. Yahoo, Stooq, and name
 | Balance-sheet impulse | 0.05 |
 | Rates | 0.05 |
 | Funding | 0.04 |
-| Volatility in score | 0.00 |
 
-Weights sum to 1.00. Volatility belongs to the live stress overlay, not the macro score.
+The eight scoring-factor weights sum to 1.00. Volatility belongs to the independent live-risk overlay, not the macro score.
 
 ## Thresholds and policy
 

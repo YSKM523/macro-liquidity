@@ -376,7 +376,7 @@ describe('reserveAdequacy integration', () => {
     expect(WEIGHTS.reserveAdequacy).toBeGreaterThan(0);
   });
 
-  it('all 9 WEIGHTS sum to exactly 1.00', () => {
+  it('the scoring weight map sums to exactly 1.00 including the legacy zero-vol entry', () => {
     const sum = (Object.values(WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
     expect(sum).toBeCloseTo(1.00, 10);
   });

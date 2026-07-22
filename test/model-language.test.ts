@@ -1,3 +1,4 @@
+// @ts-ignore Node test runtime import.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
