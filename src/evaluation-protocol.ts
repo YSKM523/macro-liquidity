@@ -1,7 +1,7 @@
 import { addDays, spearman } from './backtest';
 import { sha256Hex } from './model-version';
-import { scheduleExecutions } from './event-backtest';
 import type { EventBacktestInputs, EventSignal, ScheduledExecution } from './event-backtest';
+import { buildFormalEventOutcomes } from './formal-event-outcomes';
 import { isoTimestampMs } from './pit';
 import { evaluateValidationMetrics, quantile } from './validation-metrics';
 import type { ValidationMetrics } from './validation-metrics';
@@ -233,40 +233,25 @@ function prepareFormal(input: EventBacktestInputs): {
     if (fetchedMs > activatedMs) throw new Error('formal validation price fetched after activation');
     if (activatedMs >= cutoffMs) throw new Error('formal validation price not visible at cutoff');
   }
-  const schedule = scheduleExecutions(input.signals, input.prices);
-  const executionCoverage = {
-    signalCount: input.signals.length,
-    executionCount: schedule.executions.length,
-    supersededCount: schedule.superseded.length,
-    unexecutedCount: schedule.unexecuted.length,
-  };
-  if (schedule.unexecuted.length > 0 || (input.signals.length > 0 && schedule.executions.length === 0)) {
+  const formal = buildFormalEventOutcomes(input, [13], VALIDATION_PROTOCOL.outcomeToleranceDays);
+  if (formal.executionCoverage.unexecutedCount > 0 || formal.executionCoverage.executionCount === 0) {
     throw new Error('formal validation has unexecuted signal coverage');
   }
-  const prices = [...input.prices].sort((left, right) => left.date.localeCompare(right.date));
-  const pairs: ForwardPair[] = [];
-  for (let startIdx = 0; startIdx < schedule.executions.length; startIdx++) {
-    const execution = schedule.executions[startIdx];
-    const target = addDays(execution.executionDate, VALIDATION_PROTOCOL.horizonWeeks * 7);
-    const exit = prices.find(price => price.date >= target);
-    if (!exit) continue;
-    const lag = (dateMs(exit.date) - dateMs(target)) / 86_400_000;
-    if (lag > VALIDATION_PROTOCOL.outcomeToleranceDays) continue;
-    pairs.push({
-      startIdx, endIdx: prices.findIndex(price => price.date === exit.date),
-      signalDate: execution.executionDate, outcomeDate: exit.date,
-      modelDate: execution.signalDate, decisionAt: execution.decisionAt, tradableAt: execution.tradableAt,
-      entryDate: execution.executionDate, exitDate: exit.date,
-      score: execution.score, fwd: exit.adjustedClose / execution.price - 1,
-      verdict: execution.verdict === 'BULLISH' || execution.verdict === 'BEARISH' || execution.verdict === 'NEUTRAL'
-        ? execution.verdict : null,
-      targetExposure: execution.targetExposure ?? null,
-      factors: execution.factors ?? {}, pitStatus: 'PIT', provenanceStatus: formalProvenance(execution),
-      modelVersion: execution.modelVersion, configHash: execution.configHash,
-      codeCommitSha: execution.codeCommitSha, dataRunId: execution.dataRunId,
-    });
-  }
-  return { pairs, executions: schedule.executions, executionCoverage };
+  const pairs: ForwardPair[] = formal.outcomes.filter(outcome => outcome.status === 'OK').map((outcome, startIdx) => {
+    const execution = formal.executions.find(row => row.signalDate === outcome.modelDate
+      && row.executionDate === outcome.entryDate && row.decisionAt === outcome.decisionAt)!;
+    return {
+      startIdx, endIdx: input.prices.findIndex(price => price.date === outcome.exitDate),
+      signalDate: outcome.entryDate!, outcomeDate: outcome.exitDate!,
+      modelDate: outcome.modelDate, decisionAt: outcome.decisionAt, tradableAt: outcome.tradableAt,
+      entryDate: outcome.entryDate!, exitDate: outcome.exitDate!,
+      score: outcome.score, fwd: outcome.totalReturn!, verdict: outcome.verdict,
+      targetExposure: outcome.targetExposure, factors: execution.factors ?? {}, pitStatus: 'PIT',
+      provenanceStatus: formalProvenance(execution), modelVersion: outcome.modelVersion,
+      configHash: outcome.configHash, codeCommitSha: outcome.codeCommitSha, dataRunId: outcome.dataRunId,
+    };
+  });
+  return { pairs, executions: formal.executions, executionCoverage: formal.executionCoverage };
 }
 
 export function buildFormalForwardPairs(input: EventBacktestInputs): ForwardPair[] {

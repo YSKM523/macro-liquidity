@@ -85,7 +85,7 @@ describe('shared formal event-time outcomes', () => {
 
 describe('score buckets', () => {
   const outcome = (score: number, totalReturn: number, entryDate: string, exitDate: string, worstDrawdown = -.1) => ({
-    horizonWeeks: 4 as const, status: 'OK' as const, score, totalReturn, worstDrawdown,
+    horizonWeeks: 4 as const, status: 'OK' as const, reason: null, score, totalReturn, worstDrawdown,
     modelDate: entryDate, decisionAt: `${entryDate}T00:00:00Z`, tradableAt: `${entryDate}T00:00:00Z`,
     entryDate, exitDate, targetDate: exitDate, verdict: 'NEUTRAL' as const, targetExposure: .75,
     priceProvenance: 'PIT_RAW' as const, modelVersion: CHAMPION_MODEL_VERSION,
@@ -107,10 +107,13 @@ describe('score buckets', () => {
       outcome(10, value, addDays('2020-01-01', index * 35), addDays('2020-01-29', index * 35), -.05 - index / 100));
     const buckets = buildScoreBuckets(rows);
     expect(buckets).toHaveLength(21);
-    expect(buckets.find(row => row.bucketId === '0_20' && row.horizonWeeks === 4)).toMatchObject({
-      n: 5, independentN: 5, mean: .04, median: 0, negativeProbability: .4, q10: -.22,
+    const populated = buckets.find(row => row.bucketId === '0_20' && row.horizonWeeks === 4)!;
+    expect(populated).toMatchObject({
+      n: 5, independentN: 5, median: 0, negativeProbability: .4,
       worstEpisodeDrawdown: -.09, status: 'OK', probabilityStatus: 'OK', q10Status: 'OK',
     });
+    expect(populated.mean).toBeCloseTo(.04);
+    expect(populated.q10).toBeCloseTo(-.22);
     expect(buckets.find(row => row.bucketId === '20_35' && row.horizonWeeks === 4)).toMatchObject({
       n: 0, independentN: 0, mean: null, median: null, negativeProbability: null, q10: null,
       worstEpisodeDrawdown: null, status: 'NO_OBSERVATIONS',
@@ -151,7 +154,8 @@ describe('multiplicity', () => {
       observedSharpe: 1.2, trialSharpes: [.2, .4, .6, .8], sampleT: 252, skewness: -.2, kurtosis: 3.5,
     });
     expect(complete.status).toBe('OK');
-    expect(complete.expectedMaximumSharpe).toBeCloseTo(.76053, 4);
+    // Hand check: sample variance=1/15 and the registered Euler–Mascheroni interpolation gives 0.271656945.
+    expect(complete.expectedMaximumSharpe).toBeCloseTo(.271656945, 8);
     expect(complete.value).toBeCloseTo(1, 6);
     expect(deflatedSharpeRatio({
       observedSharpe: 1.2, trialSharpes: [.2, null, .6], sampleT: 252, skewness: 0, kurtosis: 3,
