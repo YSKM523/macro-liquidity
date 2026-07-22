@@ -623,12 +623,14 @@ async function fetchRobust() {
   }
 }
 
-function rbPct(x, d = 1) { return (x * 100).toFixed(d) + '%'; }
+function rbFinite(x) { const n = Number(x); return Number.isFinite(n) ? n : null; }
+function rbPct(x, d = 1) { const n = rbFinite(x); return n == null ? '—' : (n * 100).toFixed(d) + '%'; }
 function rbMaybePct(x, d = 1) { return x == null ? '—' : rbPct(x, d); }
-function rbMaybeNum(x, d = 2) { return x == null ? '—' : Number(x).toFixed(d); }
-function rbValidationRate(metric, d = 1) { return metric.value == null ? '—' : rbPct(metric.value, d); }
-function rbIcCls(x) { return x >= 0 ? 'rb-pos' : 'rb-neg'; }
-function rbEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function rbMaybeNum(x, d = 2) { const n = rbFinite(x); return n == null ? '—' : n.toFixed(d); }
+function rbCount(x) { const n = rbFinite(x); return n == null ? '—' : String(Math.max(0, Math.trunc(n))); }
+function rbValidationRate(metric, d = 1) { return metric?.value == null ? '—' : rbPct(metric.value, d); }
+function rbIcCls(x) { const n = rbFinite(x); return n != null && n >= 0 ? 'rb-pos' : 'rb-neg'; }
+function rbEsc(s) { return String(s ?? '—').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 function renderRobust(r) {
   const ic = r.ic, st = r.strategy, b = ic.bootstrap, sh = st.sharpe;
@@ -659,27 +661,39 @@ function renderRobust(r) {
 function renderPurgedValidation(validation) {
   if (!validation) return '';
   const protocol = validation.protocol || {};
+  const provenance = validation.provenance || {};
+  const statusText = rbEsc(validation.status || '—');
+  const provenanceText = `${rbEsc(provenance.completeness || '—')} · governed ${rbCount(provenance.governedCount)} / legacy ${rbCount(provenance.legacyCount)} / invalid ${rbCount(provenance.invalidCount)}`;
   if (validation.status === 'DATA_INCOMPLETE') {
     return `<div class="rb-sub">${rbEsc(protocol.protocol || 'PURGED_VALIDATION_V1')}</div>`
-      + '<p class="rb-note">PIT / provenance 不完整，专业验证指标已关闭；旧版诊断仍单独展示。</p>';
+      + `<p class="rb-note">状态 ${statusText} · ${provenanceText}</p>`
+      + `<p class="rb-note">PIT / provenance 不完整（${rbEsc(validation.reason || '未分类')}），专业验证指标已关闭；旧版诊断仍单独展示。</p>`;
   }
   const metrics = validation.aggregateMetrics;
   const holdout = validation.holdout || {};
   const holdoutText = holdout.status === 'PENDING_MATURITY'
-    ? `PENDING_MATURITY（固定自 ${rbEsc(holdout.frozen?.holdoutFrom || '—')}，不把历史尾部伪称 unseen）`
+    ? `PENDING_MATURITY（登记自 ${rbEsc(holdout.registration?.holdoutFrom || '—')}，不把历史尾部伪称 unseen）`
     : rbEsc(holdout.status || '—');
   if (!metrics) {
     return `<div class="rb-sub">${rbEsc(protocol.protocol || 'PURGED_VALIDATION_V1')}</div>`
-      + `<p class="rb-note">回溯样本不足 · 前瞻 holdout ${holdoutText}</p>`;
+      + `<p class="rb-note">状态 ${statusText} · ${provenanceText}</p>`
+      + `<p class="rb-note">回溯样本不足 · 前瞻 holdout ${holdoutText} · 尾部 ${rbEsc(holdout.tailStatus || '—')}</p>`;
   }
   const status = metric => rbEsc(metric?.status || '—');
+  const foldTail = (validation.folds || []).map(fold => `${rbEsc(fold.tailCalibrationStatus || '—')}/${status(fold.metrics?.tail?.recall)}`).join(' · ') || '—';
+  const holdoutMetrics = holdout.metrics;
+  const holdoutMetricText = holdoutMetrics
+    ? ` · 方向 ${rbValidationRate(holdoutMetrics.direction)} (${status(holdoutMetrics.direction)}) · IC ${rbMaybeNum(holdoutMetrics.ic?.value, 3)} (${status(holdoutMetrics.ic)})`
+    : '';
   return `<div class="rb-sub">${rbEsc(protocol.protocol || 'PURGED_VALIDATION_V1')} · purged walk-forward</div>`
-    + `<div class="rb-stat"><span class="k">方向命中</span><span class="v">${rbValidationRate(metrics.direction)} · n=${metrics.direction.n} · ${status(metrics.direction)}</span></div>`
-    + `<div class="rb-stat"><span class="k">正式 verdict 命中</span><span class="v">${rbValidationRate(metrics.formalVerdict)} · n=${metrics.formalVerdict.n} · ${status(metrics.formalVerdict)}</span></div>`
+    + `<div class="rb-stat"><span class="k">验证状态 / provenance</span><span class="v">${statusText} · ${provenanceText}</span></div>`
+    + `<div class="rb-stat"><span class="k">方向命中</span><span class="v">${rbValidationRate(metrics.direction)} · n=${rbCount(metrics.direction?.n)} · ${status(metrics.direction)}</span></div>`
+    + `<div class="rb-stat"><span class="k">正式 verdict 命中</span><span class="v">${rbValidationRate(metrics.formalVerdict)} · n=${rbCount(metrics.formalVerdict?.n)} · ${status(metrics.formalVerdict)}</span></div>`
     + `<div class="rb-stat"><span class="k">风险精确率 / 下行召回</span><span class="v">${rbValidationRate(metrics.risk.precision)} / ${rbValidationRate(metrics.risk.downsideRecall)} · ${status(metrics.risk.precision)}</span></div>`
-    + `<div class="rb-stat"><span class="k">IC（Spearman）</span><span class="v">${rbMaybeNum(metrics.ic.value, 3)} · n=${metrics.ic.n} · ${status(metrics.ic)}</span></div>`
-    + `<div class="rb-stat"><span class="k">尾部风险 q10 召回 / 精确率</span><span class="v">${rbValidationRate(metrics.tail.recall)} / ${rbValidationRate(metrics.tail.precision)} · fold-training-only</span></div>`
-    + `<p class="rb-note">重叠 n=${validation.overlappingN ?? 0} · 区间非重叠 n=${validation.independentN ?? 0} · 前瞻 holdout ${holdoutText}</p>`;
+    + `<div class="rb-stat"><span class="k">IC（Spearman）</span><span class="v">${rbMaybeNum(metrics.ic?.value, 3)} · n=${rbCount(metrics.ic?.n)} · ${status(metrics.ic)}</span></div>`
+    + `<div class="rb-stat"><span class="k">尾部风险 q10 召回 / 精确率</span><span class="v">${rbValidationRate(metrics.tail.recall)} (${status(metrics.tail.recall)}) / ${rbValidationRate(metrics.tail.precision)} (${status(metrics.tail.precision)}) · fold-training-only</span></div>`
+    + `<p class="rb-note">fold 尾部校准/指标状态：${foldTail}</p>`
+    + `<p class="rb-note">重叠 n=${rbCount(validation.overlappingN)} · 区间非重叠 n=${rbCount(validation.independentN)} · 前瞻 holdout ${holdoutText} · 尾部 ${rbEsc(holdout.tailStatus || '—')}${holdoutMetricText}</p>`;
 }
 
 function robustConclusion(r) {

@@ -128,7 +128,7 @@ describe('static UI assets', () => {
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
     expect(html).toContain('/styles.css?v=0721d');
-    expect(html).toContain('/app.js?v=0722d');
+    expect(html).toContain('/app.js?v=0722e');
   });
 
   it('renders market time separately from fetch and provider quality metadata', () => {
@@ -200,11 +200,35 @@ describe('static UI assets', () => {
     const js = read('public/app.js');
     expect(html).toContain('PURGED_VALIDATION_V1');
     expect(js).toContain('renderPurgedValidation');
-    expect(js).toContain("metric.value == null ? '—'");
+    expect(js).toContain("metric?.value == null ? '—'");
     expect(js).toContain('PENDING_MATURITY');
     expect(js).toContain('正式 verdict');
     expect(js).toContain('下行召回');
     expect(js).toContain('尾部风险');
+  });
+
+  it('renders adversarial validation status and all-null metrics without unsafe HTML or exceptions', () => {
+    const js = read('public/app.js');
+    const start = js.indexOf('function rbFinite');
+    const end = js.indexOf('function robustConclusion');
+    const render = new Function(`${js.slice(start, end)}; return renderPurgedValidation;`)() as (value: unknown) => string;
+    const malicious = '<img src=x onerror=globalThis.pwned=true>';
+    const rate = { value: null, n: malicious, status: malicious };
+    const html = render({
+      status: malicious, protocol: { protocol: malicious },
+      provenance: { completeness: malicious, governedCount: malicious, legacyCount: null, invalidCount: undefined },
+      aggregateMetrics: {
+        direction: rate, formalVerdict: rate, risk: { precision: rate, downsideRecall: rate },
+        ic: { value: null, n: malicious, status: malicious },
+        tail: { recall: rate, precision: rate },
+      },
+      folds: [{ tailCalibrationStatus: malicious, metrics: { tail: { recall: rate } } }],
+      overlappingN: malicious, independentN: null,
+      holdout: { status: malicious, tailStatus: malicious, metrics: null },
+    });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+    expect(html).toContain('—');
   });
 
   it('escapes adversarial provider provenance before inserting it as HTML', () => {
