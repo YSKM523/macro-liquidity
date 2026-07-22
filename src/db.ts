@@ -1,6 +1,7 @@
 import type { Obs, SeriesMap, Snapshot, Verdict } from './metrics';
 import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
+import { validateReleaseOverride } from './pit';
 
 export async function maxObsDate(db: D1Database, seriesId: string): Promise<string | null> {
   const row = await db.prepare('SELECT MAX(date) AS d FROM observations WHERE series_id = ?')
@@ -355,30 +356,67 @@ export async function activateIngestRun(
 
 export async function loadPitObservations(db: D1Database): Promise<PitObservation[]> {
   const rows = await db.prepare(
-    `SELECT series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
-            source,checksum,release_time_status,value
-     FROM observations_pit ORDER BY released_at,series_id,observation_date,vintage_date`,
+    `SELECT raw.series_id,raw.observation_date,raw.vintage_date,
+            COALESCE(overrides.released_at,raw.released_at) AS released_at,
+            raw.fetched_at,
+            COALESCE(overrides.tradable_at,raw.tradable_at) AS tradable_at,
+            raw.source,raw.checksum,
+            CASE WHEN overrides.series_id IS NOT NULL THEN 'OVERRIDE'
+                 ELSE raw.release_time_status END AS release_time_status,
+            overrides.released_at AS override_released_at,
+            overrides.tradable_at AS override_tradable_at,
+            raw.value
+     FROM observations_pit raw
+     LEFT JOIN release_calendar_overrides overrides
+       ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
+     ORDER BY released_at,raw.series_id,raw.observation_date,raw.vintage_date`,
   ).all<any>();
-  return (rows.results ?? []).map(row => ({
-    seriesId: row.series_id, observationDate: row.observation_date, vintageDate: row.vintage_date,
-    releasedAt: row.released_at, fetchedAt: row.fetched_at, tradableAt: row.tradable_at,
-    source: row.source, checksum: row.checksum, releaseTimeStatus: row.release_time_status,
-    value: row.value,
-  } as PitObservation));
+  return (rows.results ?? []).map(row => {
+    if (row.override_released_at != null || row.override_tradable_at != null) {
+      validateReleaseOverride({
+        releasedAt: row.override_released_at,
+        tradableAt: row.override_tradable_at,
+      });
+    }
+    return {
+      seriesId: row.series_id, observationDate: row.observation_date, vintageDate: row.vintage_date,
+      releasedAt: row.released_at, fetchedAt: row.fetched_at, tradableAt: row.tradable_at,
+      source: row.source, checksum: row.checksum, releaseTimeStatus: row.release_time_status,
+      value: row.value,
+    } as PitObservation;
+  });
 }
 
 export async function officialPitDecisionEvents(db: D1Database): Promise<PitDecisionEvent[]> {
   const rows = await db.prepare(
     `WITH ranked AS (
-       SELECT observation_date,released_at,tradable_at,
-              ROW_NUMBER() OVER (PARTITION BY observation_date ORDER BY vintage_date,released_at) AS n
-       FROM observations_pit WHERE series_id='WALCL'
+       SELECT raw.observation_date,
+              COALESCE(overrides.released_at,raw.released_at) AS released_at,
+              COALESCE(overrides.tradable_at,raw.tradable_at) AS tradable_at,
+              overrides.released_at AS override_released_at,
+              overrides.tradable_at AS override_tradable_at,
+              ROW_NUMBER() OVER (
+                PARTITION BY raw.observation_date ORDER BY raw.vintage_date,raw.released_at
+              ) AS n
+       FROM observations_pit raw
+       LEFT JOIN release_calendar_overrides overrides
+         ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
+       WHERE raw.series_id='WALCL'
      )
-     SELECT observation_date,released_at,tradable_at FROM ranked WHERE n=1 ORDER BY released_at`,
-  ).all<{ observation_date: string; released_at: string; tradable_at: string }>();
-  return (rows.results ?? []).map(row => ({
-    modelDate: row.observation_date, decisionAt: row.released_at, tradableAt: row.tradable_at,
-  }));
+     SELECT observation_date,released_at,tradable_at,override_released_at,override_tradable_at
+     FROM ranked WHERE n=1 ORDER BY released_at`,
+  ).all<{
+    observation_date: string; released_at: string; tradable_at: string;
+    override_released_at: string | null; override_tradable_at: string | null;
+  }>();
+  return (rows.results ?? []).map(row => {
+    if (row.override_released_at != null || row.override_tradable_at != null) {
+      validateReleaseOverride({
+        releasedAt: row.override_released_at!, tradableAt: row.override_tradable_at!,
+      });
+    }
+    return { modelDate: row.observation_date, decisionAt: row.released_at, tradableAt: row.tradable_at };
+  });
 }
 
 function fencedMetaStatement(
@@ -564,7 +602,12 @@ export interface SnapshotProvenance {
   inputs: SnapshotInput[];
 }
 
-function validateSnapshotInputs(inputs: SnapshotInput[], decisionAt: string, snapshotDate: string): void {
+function validateSnapshotInputs(
+  inputs: SnapshotInput[],
+  decisionAt: string,
+  snapshotDate: string,
+  provenanceTradableAt: string,
+): void {
   if (inputs.length !== SERIES_IDS.length) throw new Error('official PIT manifest is incomplete');
   const bySeries = new Map(inputs.map(input => [input.seriesId, input]));
   if (bySeries.size !== SERIES_IDS.length || SERIES_IDS.some(id => !bySeries.has(id))) {
@@ -576,6 +619,9 @@ function validateSnapshotInputs(inputs: SnapshotInput[], decisionAt: string, sna
     }
     if (input.inputStatus === 'AVAILABLE' && input.observationDate > snapshotDate) {
       throw new Error(`future observation date in official manifest: ${input.seriesId}`);
+    }
+    if (input.inputStatus === 'AVAILABLE' && input.tradableAt > provenanceTradableAt) {
+      throw new Error(`PIT input is not tradable by official snapshot time: ${input.seriesId}`);
     }
   }
 }
@@ -589,7 +635,7 @@ export async function upsertOfficialSnapshot(
 ): Promise<'INSERTED' | 'UPGRADED_LEGACY' | 'FROZEN' | void> {
   if (provenance) {
     if (provenance.dataRunId !== runId) throw new Error('official snapshot provenance run mismatch');
-    validateSnapshotInputs(provenance.inputs, provenance.decisionAt, s.date);
+    validateSnapshotInputs(provenance.inputs, provenance.decisionAt, s.date, provenance.tradableAt);
     const week = decisionWeek(s.date);
     const existing = await db.prepare(
       'SELECT pit_status,data_run_id FROM model_snapshot_weekly WHERE decision_week=?',

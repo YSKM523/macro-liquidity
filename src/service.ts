@@ -131,6 +131,7 @@ export async function runIngest(
         failedStep = 'fetch';
         const fetched = await fetchFredSeriesPit(
           id, env.START_DATE, realtimeStart, nowIso, env.FRED_API_KEY, releaseRule, overrides,
+          () => new Date().toISOString(),
         );
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);

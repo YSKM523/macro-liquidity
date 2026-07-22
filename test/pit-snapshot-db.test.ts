@@ -106,6 +106,19 @@ describe('official PIT snapshot persistence', () => {
     await mf.dispose();
   }, 15000);
 
+  it('rejects an official manifest input that is not tradable by the declared snapshot time', async () => {
+    const { mf, db } = await migratedDb();
+    const inputs = manifest();
+    const walcl = inputs[0];
+    if (walcl.inputStatus === 'AVAILABLE') walcl.tradableAt = '2024-01-08T14:30:00Z';
+    await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, {
+      dataRunId: 'run-1', dataCutoff: null, decisionAt: '2024-01-05T00:00:00Z',
+      tradableAt: '2024-01-05T14:30:00Z', inputs,
+    })).rejects.toThrow(/tradable/i);
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM model_snapshot_weekly').first()).toEqual({ n: 0 });
+    await mf.dispose();
+  }, 15000);
+
   it('upgrades a legacy row once and rolls the snapshot update back when its manifest insert fails', async () => {
     const { mf, db } = await migratedDb();
     await db.prepare("INSERT INTO model_snapshot_weekly (date,decision_week,score,pit_status) VALUES ('2024-01-03','2024-01-01',50,'LEGACY_NON_PIT')").run();

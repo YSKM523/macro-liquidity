@@ -53,6 +53,14 @@ function requireIso(value: string, field: string): void {
   if (!ISO_RE.test(value) || !Number.isFinite(Date.parse(value))) throw new Error(`invalid ${field}`);
 }
 
+export function validateReleaseOverride(override: ReleaseOverride): void {
+  requireIso(override.releasedAt, 'override releasedAt');
+  requireIso(override.tradableAt, 'override tradableAt');
+  if (override.tradableAt < override.releasedAt) {
+    throw new Error('override tradableAt precedes releasedAt');
+  }
+}
+
 function nextWeekday1430(releasedAt: string): string {
   const d = new Date(releasedAt);
   d.setUTCDate(d.getUTCDate() + 1);
@@ -71,9 +79,7 @@ export function deriveReleaseTiming(
   requireIso(fetchedAt, 'fetchedAt');
   if (!TIME_RE.test(expectedReleaseTime)) throw new Error('invalid expected release time');
   if (override) {
-    requireIso(override.releasedAt, 'override releasedAt');
-    requireIso(override.tradableAt, 'override tradableAt');
-    if (override.tradableAt < override.releasedAt) throw new Error('tradableAt precedes releasedAt');
+    validateReleaseOverride(override);
     return { ...override, releaseTimeStatus: 'OVERRIDE' };
   }
   const releasedAt = fetchedAt.slice(0, 10) === vintageDate
@@ -114,11 +120,15 @@ function frameFromActive(
   const seriesMap: SeriesMap = {};
   const inputs: SnapshotInput[] = [];
   let dataCutoff: string | null = null;
+  let frameTradableAt = event.tradableAt;
   for (const seriesId of SERIES_IDS) {
     const rows = [...(active.get(seriesId)?.values() ?? [])]
       .filter(row => row.observationDate <= event.modelDate)
       .sort((a, b) => a.observationDate.localeCompare(b.observationDate));
     seriesMap[seriesId] = rows.map(row => ({ date: row.observationDate, value: row.value }));
+    for (const row of rows) {
+      if (row.tradableAt > frameTradableAt) frameTradableAt = row.tradableAt;
+    }
     const latest = rows.at(-1);
     if (latest) {
       inputs.push({ ...latest, inputStatus: 'AVAILABLE' });
@@ -131,7 +141,12 @@ function frameFromActive(
       });
     }
   }
-  return { event: { ...event }, seriesMap, inputs, dataCutoff: dataCutoff ?? event.decisionAt };
+  return {
+    event: { ...event, tradableAt: frameTradableAt },
+    seriesMap,
+    inputs,
+    dataCutoff: dataCutoff ?? event.decisionAt,
+  };
 }
 
 export function buildPitFrames(rows: PitObservation[], events: PitDecisionEvent[]): PitFrame[] {

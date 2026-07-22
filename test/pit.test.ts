@@ -68,4 +68,14 @@ describe('PIT timeline', () => {
     expect(availableForExecution(row({}), '2024-01-05T00:00:00Z', '2024-01-05T14:29:59Z')).toBe(false);
     expect(availableForExecution(row({}), '2024-01-05T00:00:00Z', '2024-01-05T14:30:00Z')).toBe(true);
   });
+
+  it('lifts the frame tradable time to the latest tradability of every row used by scoring history', () => {
+    const frame = buildPitFrames([
+      row({ observationDate: '2023-12-27', tradableAt: '2024-01-12T14:30:00Z' }),
+      row({ observationDate: '2024-01-03', checksum: 'latest', tradableAt: '2024-01-05T14:30:00Z' }),
+    ], [{
+      modelDate: '2024-01-03', decisionAt: '2024-01-10T00:00:00Z', tradableAt: '2024-01-10T14:30:00Z',
+    }])[0];
+    expect(frame.event.tradableAt).toBe('2024-01-12T14:30:00Z');
+  });
 });

@@ -77,6 +77,7 @@ export async function fetchFredSeriesPit(
   apiKey: string,
   releaseRule: ReleaseRule,
   overrides: Map<string, ReleaseOverride>,
+  observedAt: () => string = () => fetchedAt,
 ): Promise<{ latestRows: Obs[]; vintages: PitObservation[] }> {
   const all: PitObservation[] = [];
   const limit = 100000;
@@ -91,7 +92,8 @@ export async function fetchFredSeriesPit(
     const response = await fetch(url.toString());
     if (!response.ok) throw new Error(`ALFRED ${seriesId} ${response.status}`);
     const json: any = await response.json();
-    all.push(...await parseFredPitJson(seriesId, json, fetchedAt, releaseRule, overrides));
+    const pageFetchedAt = observedAt();
+    all.push(...await parseFredPitJson(seriesId, json, pageFetchedAt, releaseRule, overrides));
     const count = Number(json?.count ?? all.length);
     const pageLimit = Number(json?.limit ?? limit);
     const pageOffset = Number(json?.offset ?? offset);

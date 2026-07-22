@@ -71,4 +71,20 @@ describe('ALFRED vintages', () => {
     expect(result.latestRows.map(row => row.date)).toEqual(['2024-01-03', '2024-01-10']);
     vi.unstubAllGlobals();
   });
+
+  it('timestamps a same-day vintage after the successful response rather than at run start', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      count: 1, limit: 100000, offset: 0,
+      observations: [{ date: '2024-01-10', realtime_start: '2024-01-10', value: '5800000' }],
+    }), { status: 200 })));
+    const result = await fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-10', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), () => '2024-01-10T18:00:05Z',
+    );
+    expect(result.vintages[0]).toMatchObject({
+      fetchedAt: '2024-01-10T18:00:05Z', releasedAt: '2024-01-10T18:00:05Z',
+      releaseTimeStatus: 'OBSERVED_AT_FETCH',
+    });
+    vi.unstubAllGlobals();
+  });
 });
