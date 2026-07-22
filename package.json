@@ -11,7 +11,7 @@
     "test:no-lookahead": "vitest run test/pit.test.ts test/pit-db.test.ts test/pit-snapshot-db.test.ts test/event-backtest-db.test.ts",
     "test:rebuild-consistency": "vitest run test/service.test.ts",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --env production",
+    "deploy": "node scripts/deploy-production.mjs",
     "deploy:dry": "wrangler deploy --dry-run --env staging",
     "backup:dry": "node scripts/backup.mjs --scope=critical",
     "restore:drill": "node scripts/restore-drill.mjs",

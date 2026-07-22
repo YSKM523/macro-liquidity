@@ -55,6 +55,12 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 - GREEN: focused model/metrics/portfolio/service/walk-forward/robustness verification passed 6 files / 130 tests; `npm run typecheck`, `npm run lint`, and `git diff --check` passed.
 - All scoring bounds, blends, lookbacks, quality gates, verdict bands, stress/exposure mappings, freshness, event accounting, and market-data gates now live in one recursively frozen descriptor consumed at runtime. Golden SHA-256 `807a1098f767b6804d38735324c92f9452586aafef77b53667acdbfa6b1e6626` matches Node `crypto`; mutation drift changes the identity. Existing formula-output tests remained green.
 
+### Review remediation 3 — fail-closed production deployment
+
+- RED: production-governance test failed because the workflow had no remote migration gate and `npm run deploy` called Wrangler directly.
+- GREEN: governance tests passed 4/4; typecheck, lint, and diff check passed. An unconfirmed `npm run deploy` returned `REFUSED` with nonzero status and invoked neither migration nor deployment.
+- The protected workflow applies production migrations before deployment, passes `${{ github.sha }}`, and calls a guarded wrapper. The wrapper validates explicit production/schema confirmation, a 40-character commit SHA, credentials, and also reapplies migrations before Wrangler deploy so direct invocation cannot skip schema.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.

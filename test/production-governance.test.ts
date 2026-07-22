@@ -35,6 +35,18 @@ describe('production governance configuration', () => {
     expect(production).toContain('environment: production');
     expect(production).not.toMatch(/schedule:|push:/);
     expect(production).toContain('--env production');
+    const migration = production.indexOf('d1 migrations apply macro_liquidity --remote --env production');
+    const deploy = production.indexOf('npm run deploy -- --execute');
+    expect(migration).toBeGreaterThan(-1);
+    expect(deploy).toBeGreaterThan(migration);
+    expect(production).toContain('CODE_COMMIT_SHA: ${{ github.sha }}');
+
+    const pkg = JSON.parse(read('package.json'));
+    expect(pkg.scripts.deploy).toBe('node scripts/deploy-production.mjs');
+    const guard = read('scripts/deploy-production.mjs');
+    expect(guard).toContain('--confirm-production=DEPLOY_PRODUCTION');
+    expect(guard).toContain('--schema-confirmed=0010');
+    expect(guard).toContain('CODE_COMMIT_SHA');
   });
 
   it('publishes model governance and operations documentation', () => {

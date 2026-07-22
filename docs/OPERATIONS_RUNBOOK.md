@@ -2,11 +2,15 @@
 
 ## Environment boundaries
 
-`dev`, `staging`, and `production` are explicit Wrangler environments. The staging D1 identifier is intentionally `REPLACE_WITH_STAGING_D1`; replace it through an authorized infrastructure change before any staging deploy. Production deploy is available only through the manual GitHub workflow protected by the `production` environment. A code SHA is injected at deployment; missing/malformed values become `LOCAL_UNCONFIGURED`.
+`dev`, `staging`, and `production` are explicit Wrangler environments. The staging D1 identifier is intentionally `REPLACE_WITH_STAGING_D1`; replace it through an authorized infrastructure change before any staging deploy. Production deploy is available only through the manual GitHub workflow protected by the `production` environment. A code SHA is injected at deployment; the production wrapper refuses missing or malformed SHA values.
 
 ## Local release gates
 
 Run `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:correctness`, `npm run test:no-lookahead`, `npm run test:rebuild-consistency`, `npm run migrate:verify`, `npm run restore:drill`, and `npm run deploy:dry`. The dry deploy validates the bundle only and is not staging evidence.
+
+## Production deployment
+
+Use the protected manual workflow. It applies all remote production D1 migrations before application deployment and injects the immutable `${{ github.sha }}` as `CODE_COMMIT_SHA`. The `npm run deploy` wrapper repeats the migration gate and requires all of `--execute`, `--confirm-production=DEPLOY_PRODUCTION`, and `--schema-confirmed=0010`; direct or partial invocations fail closed. Do not substitute a branch name or local sentinel for the commit SHA.
 
 ## Admin refresh
 
