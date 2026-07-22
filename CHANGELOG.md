@@ -4,6 +4,15 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-14 — Residual correctness and bounded provider retries
+
+- Added one shared bounded full-jitter exponential-backoff policy with injectable sleep/random, a three-attempt default, five-attempt hard ceiling, and 30-second hard delay ceiling.
+- Retried only transport failures, HTTP 429, and HTTP 5xx across FRED/ALFRED plus Yahoo, Stooq, and live FRED provider requests; other 4xx and successful-HTTP parse/validation failures still fail immediately.
+- Preserved per-attempt provider timeouts, fallback order and metadata, terminal status/reason behavior, ingest atomicity, and all Champion scoring behavior.
+- Standardized current documentation and UI language on eight macro scoring factors plus one independent live-risk overlay; volatility remains outside the 0–100 macro score.
+- Added deterministic zero-wait tests for delay/attempt caps, transient recovery, exhaustion, 4xx handling, invalid payloads, provider wiring, and prohibited legacy factor language.
+- Added no migration and changed no formula, weight, freshness rule, verdict/stress threshold, hysteresis, or portfolio policy. No deployment, remote D1/R2 mutation, secret, or real alert action was performed.
+
 ### PR-13 — Model versioning, production governance, and recovery controls
 
 - Added deterministic `champion-v1.0.0` canonical configuration hashing and validated deployment commit identity to every new official/nowcast snapshot; additive migration 0010 labels historical rows `LEGACY_UNVERSIONED` without changing scores.
