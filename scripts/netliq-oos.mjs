@@ -177,7 +177,7 @@ function expandingFolds(pairs) {
     const evaluation = pairs.filter(pair => pair.availableDate >= rangeStart && pair.availableDate < rangeEnd);
     return {
       fold: index + 1,
-      trainN: pairs.filter(pair => pair.availableDate < rangeStart).length,
+      trainN: pairs.filter(pair => pair.endDate <= rangeStart).length,
       evaluationN: evaluation.length,
       evaluationStart: rangeStart,
       evaluationEndExclusive: rangeEnd,

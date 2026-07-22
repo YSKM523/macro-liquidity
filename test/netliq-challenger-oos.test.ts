@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore -- isolated Node research module
 import { alignForwardReturns, decideNetLiquidityResearch, evaluateNetLiquidityOos, evaluateScorePairs, movingBlockBootstrapIc, nonOverlappingPairs } from '../scripts/netliq-oos.mjs';
+// @ts-ignore -- isolated Node research module
+import { buildWeeklyNetLiquidity } from '../scripts/netliq-challenger.mjs';
 
 const pair = (index: number, score = index, forwardReturn = index / 100) => ({
   availableDate: new Date(Date.parse('2020-01-03T00:00:00Z') + index * 7 * 86_400_000).toISOString().slice(0, 10),
@@ -22,18 +24,18 @@ const historicPair = (index: number) => {
 };
 
 describe('continuous net-liquidity OOS evaluator', () => {
-  it('starts at the first SPX close on/after nominal Friday and ends 13 weeks later', () => {
+  it('starts at the first SPX close on/after the explicit conservative bound and ends 13 weeks later', () => {
     const aligned = alignForwardReturns([
-      { observationDate: '2024-01-03', availableDate: '2024-01-05', score: 60 },
+      { observationDate: '2024-01-03', availableDate: '2024-01-10', score: 60 },
     ], [
-      { date: '2024-01-04', value: 100 },
-      { date: '2024-01-05', value: 110 },
-      { date: '2024-04-04', value: 120 },
-      { date: '2024-04-08', value: 121 },
+      { date: '2024-01-09', value: 100 },
+      { date: '2024-01-10', value: 110 },
+      { date: '2024-04-09', value: 120 },
+      { date: '2024-04-10', value: 121 },
     ]);
     expect(aligned).toEqual([expect.objectContaining({
-      startDate: '2024-01-05',
-      endDate: '2024-04-08',
+      startDate: '2024-01-10',
+      endDate: '2024-04-10',
     })]);
     expect(aligned[0].forwardReturn).toBeCloseTo(0.1, 12);
   });
@@ -51,6 +53,42 @@ describe('continuous net-liquidity OOS evaluator', () => {
       { date: '2016-07-22', value: 100 },
       { date: '2016-10-24', value: 110 },
     ])).toEqual([]);
+  });
+
+  it.each([
+    {
+      observationDate: '2016-11-23', expectedStart: '2016-11-30', preReleaseFriday: '2016-11-25',
+      rrpDates: ['2016-11-16', '2016-11-17', '2016-11-18', '2016-11-21', '2016-11-23'],
+      targetEnd: '2017-03-01',
+    },
+    {
+      observationDate: '2024-11-27', expectedStart: '2024-12-04', preReleaseFriday: '2024-11-29',
+      rrpDates: ['2024-11-20', '2024-11-21', '2024-11-22', '2024-11-25', '2024-11-27'],
+      targetEnd: '2025-03-05',
+    },
+  ])('does not execute holiday-week observation $observationDate at pre-release Friday', ({ observationDate, expectedStart, preReleaseFriday, rrpDates, targetEnd }) => {
+    const [weekly] = buildWeeklyNetLiquidity({
+      WALCL: [{ date: observationDate, value: 8_100_000 }],
+      WDTGAL: [{ date: observationDate, value: 710_000 }],
+      WTREGEN: [{ date: observationDate, value: 660_000 }],
+      RRPONTSYD: rrpDates.map((date, index) => ({ date, value: 500 - index * 10 })),
+    });
+    const aligned = alignForwardReturns([{ ...weekly, score: 60 }], [
+      { date: preReleaseFriday, value: 100 },
+      { date: expectedStart, value: 110 },
+      { date: targetEnd, value: 121 },
+    ]);
+    expect(aligned[0]).toMatchObject({ startDate: expectedStart, endDate: targetEnd });
+  });
+
+  it('counts only fully matured outcomes in each fold training prefix', () => {
+    const pairs = [
+      { availableDate: '2020-01-03', startDate: '2020-01-03', endDate: '2020-04-03', score: 1, forwardReturn: 0.01 },
+      { availableDate: '2020-12-04', startDate: '2020-12-04', endDate: '2021-03-05', score: 2, forwardReturn: 0.02 },
+      { availableDate: '2021-01-08', startDate: '2021-01-08', endDate: '2021-04-09', score: 3, forwardReturn: 0.03 },
+    ];
+    const fold5 = evaluateScorePairs(pairs, { bootstrapIterations: 0 }).folds[4];
+    expect(fold5.trainN).toBe(1);
   });
 
   it('selects a chronological interval-non-overlapping subset', () => {

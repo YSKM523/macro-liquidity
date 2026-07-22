@@ -79,7 +79,7 @@ export function buildWeeklyNetLiquidity(input) {
     const rrpSma5B = mean(rrpFive);
     points.push({
       observationDate: walcl.date,
-      availableDate: addDays(walcl.date, 2),
+      availableDate: addDays(walcl.date, 7),
       rawLevel: walclB - tgaB - rrpB,
       smoothLevel: walclB - tgaWeekAverageB - rrpSma5B,
       rawComponents: { walclB, tgaB, rrpB },
@@ -151,8 +151,8 @@ function validateWeeklyPoints(points) {
     if (point.observationDate <= previous) {
       throw new Error('weekly points must be strictly sorted without duplicates');
     }
-    if (point.availableDate !== addDays(point.observationDate, 2)) {
-      throw new Error(`weekly point must become available Friday: ${point.observationDate}`);
+    if (point.availableDate !== addDays(point.observationDate, 7)) {
+      throw new Error(`weekly point must respect the seven-day conservative availability bound: ${point.observationDate}`);
     }
     if (!Number.isFinite(point.rawLevel) || !Number.isFinite(point.smoothLevel)) {
       throw new Error('weekly points contain a non-finite level');

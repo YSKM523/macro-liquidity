@@ -25,7 +25,7 @@ describe('continuous net-liquidity research builder', () => {
     expect(points).toHaveLength(1);
     expect(points[0]).toMatchObject({
       observationDate: '2024-01-10',
-      availableDate: '2024-01-12',
+      availableDate: '2024-01-17',
       rawLevel: 6_940,
       smoothLevel: 6_990,
     });
@@ -54,6 +54,19 @@ describe('continuous net-liquidity research builder', () => {
         row('2024-01-09', 460), row('2024-01-10', 450),
       ],
     })).toEqual([]);
+  });
+
+  it.each([
+    ['2016-11-23', '2016-11-30', ['2016-11-16', '2016-11-17', '2016-11-18', '2016-11-21', '2016-11-23']],
+    ['2024-11-27', '2024-12-04', ['2024-11-20', '2024-11-21', '2024-11-22', '2024-11-25', '2024-11-27']],
+  ])('uses a seven-calendar-day conservative availability bound for holiday week %s', (date, availableDate, rrpDates) => {
+    const points = buildWeeklyNetLiquidity({
+      WALCL: [row(date, 8_100_000)],
+      WDTGAL: [row(date, 710_000)],
+      WTREGEN: [row(date, 660_000)],
+      RRPONTSYD: rrpDates.map((rrpDate, index) => row(rrpDate, 500 - index * 10)),
+    });
+    expect(points[0].availableDate).toBe(availableDate);
   });
 
   it.each([

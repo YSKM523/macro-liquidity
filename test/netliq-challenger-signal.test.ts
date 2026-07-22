@@ -9,7 +9,7 @@ function weeklyPoints(count: number) {
     const wave = ((index * 17) % 29) - 14;
     return {
       observationDate: date,
-      availableDate: new Date(Date.parse(`${date}T00:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10),
+      availableDate: new Date(Date.parse(`${date}T00:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10),
       rawLevel: 5_000 + index * 3 + wave * 4,
       smoothLevel: 4_990 + index * 2.7 + wave * 2,
     };
