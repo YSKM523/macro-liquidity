@@ -51,6 +51,14 @@ function retryableStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+export async function releaseResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Connection cleanup is best-effort and must not replace the caller's HTTP outcome.
+  }
+}
+
 export function createHttpAttemptBudget(limit: number): HttpAttemptBudget {
   const boundedLimit = boundedInteger(limit, 1, 1, 10_000);
   let used = 0;
@@ -150,11 +158,7 @@ export async function fetchWithRetry(
       }
       const response = await fetchAttempt(fetchFn, input, init, options);
       if (!retryableStatus(response.status) || attempt === maxAttempts) return response;
-      try {
-        await response.body?.cancel();
-      } catch {
-        // Releasing a retryable response is best-effort; cancellation failure must not mask retry flow.
-      }
+      await releaseResponseBody(response);
     } catch (error) {
       if (error instanceof HttpAttemptBudgetExhaustedError) throw error;
       if (init?.signal?.aborted) throw error;

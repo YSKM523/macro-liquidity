@@ -1,5 +1,10 @@
 import { MARKET_DATA_QUALITY, STRESS } from './config';
-import { HttpAttemptBudgetExhaustedError, HttpAttemptTimeoutError, fetchWithRetry } from './http-retry';
+import {
+  HttpAttemptBudgetExhaustedError,
+  HttpAttemptTimeoutError,
+  fetchWithRetry,
+  releaseResponseBody,
+} from './http-retry';
 import type { HttpRetryOptions } from './http-retry';
 
 export type ProviderStatus = 'OK' | 'STALE' | 'DIVERGENT' | 'FAILED';
@@ -277,7 +282,10 @@ export class YahooMarketDataProvider implements MarketDataProvider {
       const response = await fetchWithRetry(
         this.fetchFn, url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, this.retryOptions,
       );
-      if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      if (!response.ok) {
+        await releaseResponseBody(response);
+        return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      }
       const parsed = parseYahooQuote(await response.json(), fetchedAt);
       if (!parsed) return failedQuote(this.name, fetchedAt, 'INVALID_TIMESTAMP', symbol);
       if (isFutureTimestamp(parsed.sourceTimestamp, fetchedAt)) {
@@ -299,7 +307,10 @@ export class YahooMarketDataProvider implements MarketDataProvider {
       const response = await fetchWithRetry(
         this.fetchFn, url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, this.retryOptions,
       );
-      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      if (!response.ok) {
+        await releaseResponseBody(response);
+        return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      }
       const json: any = await response.json();
       const points = parseYahooDailyObs(json);
       const sourceTimestamp = yahooSourceTimestamp(json);
@@ -333,7 +344,10 @@ export class StooqMarketDataProvider implements MarketDataProvider {
     try {
       const url = `https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&f=sd2t2ohlcv&h&e=csv`;
       const response = await fetchWithRetry(this.fetchFn, url, undefined, this.retryOptions);
-      if (!response.ok) return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      if (!response.ok) {
+        await releaseResponseBody(response);
+        return failedQuote(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      }
       const body = await response.text();
       if (invalidStooqResponse(response, body)) return failedQuote(this.name, fetchedAt, 'INVALID_RESPONSE', symbol);
       const parsed = parseStooqCsv(body, fetchedAt);
@@ -356,7 +370,10 @@ export class StooqMarketDataProvider implements MarketDataProvider {
       const start = new Date(Date.parse(fetchedAt) - 45 * 86400000).toISOString().slice(0, 10).replaceAll('-', '');
       const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&i=d&d1=${start}`;
       const response = await fetchWithRetry(this.fetchFn, url, undefined, this.retryOptions);
-      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      if (!response.ok) {
+        await releaseResponseBody(response);
+        return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      }
       const body = await response.text();
       if (invalidStooqResponse(response, body)) return failedSeries(this.name, fetchedAt, 'INVALID_RESPONSE', symbol);
       const parsed = parseStooqHistory(body);
@@ -397,7 +414,10 @@ export class FredMarketDataProvider implements MarketDataProvider {
       url.searchParams.set('file_type', 'json');
       url.searchParams.set('observation_start', new Date(Date.parse(fetchedAt) - 45 * 86400000).toISOString().slice(0, 10));
       const response = await fetchWithRetry(this.fetchFn, url.toString(), undefined, this.retryOptions);
-      if (!response.ok) return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      if (!response.ok) {
+        await releaseResponseBody(response);
+        return failedSeries(this.name, fetchedAt, 'HTTP_ERROR', symbol);
+      }
       const json: any = await response.json();
       const observations: any[] = Array.isArray(json?.observations) ? json.observations : [];
       const numericObservations = observations.filter((observation: any) => {
