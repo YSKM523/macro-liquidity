@@ -4,7 +4,7 @@ Base: `37fd6c4`
 
 Branch: `codex/pr-09-event-time-backtest`
 
-Candidate implementation range: `37fd6c4..HEAD` (resolve to the reviewed head in the generated review package)
+Implementation commits: `0764210..a1f5b54` (review candidate diff: `37fd6c4..a1f5b54`)
 
 ## Outcome
 

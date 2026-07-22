@@ -18,7 +18,7 @@
 | PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
 | PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
 | PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
-| PR-09 | 待复审（本地候选） | `0764210`–`HEAD` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 517 tests + TypeScript strict 已通过，final rereview 待候选提交 |
+| PR-09 | 待复审（本地候选） | `0764210`–`a1f5b54` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；29 files / 517 tests + TypeScript strict 已通过，final rereview 待完成 |
 | PR-10～PR-13 | 待执行 | — | 按第 11 节顺序实施；每个阶段独立分支、测试、审查和回滚点 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
