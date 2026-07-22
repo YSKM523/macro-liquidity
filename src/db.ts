@@ -27,14 +27,32 @@ async function validateOverrideTimings(db: D1Database, releaseResolutionAt: stri
   }
 }
 
-async function validatePitTimings(db: D1Database): Promise<void> {
-  const rows = await db.prepare('SELECT fetched_at,released_at,tradable_at FROM observations_pit')
-    .all<{ fetched_at: string; released_at: string; tradable_at: string }>();
-  for (const row of rows.results ?? []) {
-    const fetchedAtMs = isoTimestampMs(row.fetched_at, 'raw fetchedAt');
-    if (!Number.isFinite(fetchedAtMs)) throw new Error('invalid raw fetchedAt');
-    validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
-  }
+function invalidSqlTimestamp(column: string): string {
+  const canonical = `strftime('%Y-%m-%dT%H:%M:%fZ',julianday(${column}))`;
+  return `(julianday(${column}) IS NULL OR (${column}<>${canonical}
+    AND ${column}<>replace(${canonical},'.000Z','Z')))`;
+}
+
+async function validateStoredPitTimings(db: D1Database): Promise<void> {
+  const invalidFetchedAt = invalidSqlTimestamp('fetched_at');
+  const invalidReleasedAt = invalidSqlTimestamp('released_at');
+  const invalidTradableAt = invalidSqlTimestamp('tradable_at');
+  const row = await db.prepare(
+    `SELECT CASE
+       WHEN ${invalidFetchedAt} THEN 'fetched'
+       WHEN ${invalidReleasedAt} THEN 'released'
+       WHEN ${invalidTradableAt} THEN 'tradable'
+       WHEN julianday(tradable_at)<julianday(released_at) THEN 'order'
+     END AS issue
+     FROM observations_pit
+     WHERE ${invalidFetchedAt} OR ${invalidReleasedAt} OR ${invalidTradableAt}
+        OR julianday(tradable_at)<julianday(released_at)
+     LIMIT 1`,
+  ).first<{ issue: 'fetched' | 'released' | 'tradable' | 'order' }>();
+  if (row?.issue === 'fetched') throw new Error('invalid raw fetchedAt');
+  if (row?.issue === 'released') throw new Error('invalid raw releasedAt');
+  if (row?.issue === 'tradable') throw new Error('invalid raw tradableAt');
+  if (row?.issue === 'order') throw new Error('raw tradableAt precedes releasedAt');
 }
 
 export async function maxObsDate(db: D1Database, seriesId: string): Promise<string | null> {
@@ -109,6 +127,10 @@ export async function stagePitObservations(
   rows: PitObservation[],
 ): Promise<void> {
   if (rows.length === 0) return;
+  for (const row of rows) {
+    isoTimestampMs(row.fetchedAt, 'raw fetchedAt');
+    validateReleaseOverride({ releasedAt: row.releasedAt, tradableAt: row.tradableAt });
+  }
   const statement = db.prepare(
     `INSERT INTO staging_observations_pit
        (run_id,series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
@@ -422,7 +444,7 @@ export async function loadPitObservations(
 ): Promise<PitObservation[]> {
   requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
   await validateOverrideTimings(db, releaseResolutionAt);
-  await validatePitTimings(db);
+  await validateStoredPitTimings(db);
   const rows = await db.prepare(
     `SELECT raw.series_id,raw.observation_date,raw.vintage_date,
             COALESCE(overrides.released_at,raw.released_at) AS released_at,
@@ -454,6 +476,8 @@ export async function loadPitObservations(
         tradableAt: row.override_tradable_at,
       });
     }
+    isoTimestampMs(row.fetched_at, 'raw fetchedAt');
+    validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
     return {
       seriesId: row.series_id, observationDate: row.observation_date, vintageDate: row.vintage_date,
       releasedAt: row.released_at, fetchedAt: row.fetched_at, tradableAt: row.tradable_at,
@@ -469,7 +493,7 @@ export async function officialPitDecisionEvents(
 ): Promise<PitDecisionEvent[]> {
   requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
   await validateOverrideTimings(db, releaseResolutionAt);
-  await validatePitTimings(db);
+  await validateStoredPitTimings(db);
   const rows = await db.prepare(
     `WITH ranked AS (
        SELECT raw.observation_date,
@@ -506,6 +530,7 @@ export async function officialPitDecisionEvents(
         releasedAt: row.override_released_at!, tradableAt: row.override_tradable_at!,
       });
     }
+    validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
     return { modelDate: row.observation_date, decisionAt: row.released_at, tradableAt: row.tradable_at };
   });
 }
