@@ -53,7 +53,7 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 
 - RED: `npx vitest run test/model-version.test.ts` failed 2/5 because the full frozen descriptor and digest helpers did not exist.
 - GREEN: focused model/metrics/portfolio/service/walk-forward/robustness verification passed 6 files / 130 tests; `npm run typecheck`, `npm run lint`, and `git diff --check` passed.
-- All scoring bounds, blends, lookbacks, quality gates, verdict bands, stress/exposure mappings, freshness, event accounting, and market-data gates now live in one recursively frozen descriptor consumed at runtime. Golden SHA-256 `807a1098f767b6804d38735324c92f9452586aafef77b53667acdbfa6b1e6626` matches Node `crypto`; mutation drift changes the identity. Existing formula-output tests remained green.
+- All scoring bounds, blends, lookbacks, quality gates, verdict bands, stress/exposure mappings, freshness, event accounting, and market-data gates now live in one recursively frozen descriptor consumed at runtime. The initial golden SHA-256 matched Node `crypto`; the expanded final event-backtest identity is recorded under re-review remediation 6. Existing formula-output tests remained green.
 
 ### Review remediation 3 — fail-closed production deployment
 
@@ -116,9 +116,21 @@ Snapshot writer hardening was completed in remediation 1: every official/nowcast
 - Review-load RED evidence: the atomic reservation test exceeded Vitest's default 5-second timeout at approximately 6.5 seconds.
 - The test retains 12 simultaneous reservations against a limit of 5, adds an explicit 30-second integration-test budget, and disposes Miniflare in `finally`.
 
+### Re-review remediation 5 — exact event-time model provenance cohort
+
+- RED: focused worker and event-time D1 tests failed because the v1 response derived `snapshot_models` from unfiltered legacy diagnostic rows and the strict `as_of` signal query omitted model identity columns.
+- GREEN: `env -u NODE_OPTIONS npx vitest run --silent test/worker.test.ts test/event-backtest-db.test.ts` passed 2 files / 40 tests; typecheck, lint, and diff check passed.
+- `loadEventBacktestInputs` now returns each cutoff-visible signal's persisted model/config/commit/data cutoff/creation identity. V1 backtest provenance and governed model identities are derived only from that exact replay cohort; unrelated history cannot leak into the response, while complete legacy triples remain honestly normalized as `LEGACY`.
+
+### Re-review remediation 6 — complete event-backtest configuration identity
+
+- RED: the new model-version regression failed because the descriptor omitted the legacy compatibility threshold, 20/200-session benchmark windows, 10% volatility target, exposure cap, 252-session annualization, ACT/360 and percent/bps conversion constants, and reporting methodologies.
+- GREEN: focused model/event/portfolio/worker verification passed 4 files / 82 tests; typecheck, lint, and diff check passed.
+- Runtime code now consumes every added field, including the zero-volatility cap and formal methodology checks. The recursively frozen canonical descriptor's final SHA-256 is `17ad1ca8854b0fbd8e56d6255b7ee2f4fe8a85ae1a95a328ade46ffdff02a0cf`; Node `crypto` equality and per-field numeric drift are covered. Scores, weights, 45/55 bands, and all existing formula outputs are unchanged.
+
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
 - Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.
 - Live-cache safety RED: focused operations suite failed before collection because `src/live-data.ts` did not exist. Typed non-OK provider results and `UNKNOWN` stress now throw through the cache loader (incrementing the circuit), stale/failed stress is forced to `UNKNOWN`, and an open circuit preserves the typed fail-closed payload. Focused operations/governance tests pass 13/13; worker regression tests pass 26/26; typecheck and ESLint pass.
 - Fresh full suite before the final persisted-identity hardening: 53 files / 667 tests passed. After adding the exact v1 backtest persisted-model identity contract, focused model/DB/worker passed 47/47 and ESLint/typecheck passed. A final all-suite run is recorded below.
-- FINAL REVIEW REMEDIATION: `npm test -- --silent` — 53 files / 680 tests passed. `npm run typecheck`, real `npm run lint`, correctness (79/79), no-lookahead (42/42), rebuild consistency (5/5), migrations 0001–0010 + second no-op, full-schema restore drill, staging deploy dry-run, backup dry-run, and `git diff --check` all passed. Wrangler emitted only its existing version-update warning. No production deploy, remote D1/R2 call, secret change, or real alert occurred.
+- FINAL REVIEW REMEDIATION: `npm test -- --silent` — 53 files / 685 tests passed. `npm run typecheck`, real `npm run lint`, correctness (79/79), no-lookahead (42/42), rebuild consistency (5/5), migrations 0001–0010 + second no-op, full-schema restore drill with identical source/restored SHA-256 `4f34f735723ad38f6746f9382979a84bf7fe5cb9be53a343d758e9f15d08424a`, staging deploy dry-run, backup dry-run, and `git diff --check` all passed. Wrangler emitted only its existing version-update warning. No production deploy, remote D1/R2 call, secret change, or real alert occurred.

@@ -11,6 +11,8 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added secret-redacted structured logs, SLO health fields, auditable alert outcomes, Access service-token support, admin rate limiting, full-rebuild second confirmation, admin audit, short live cache, bounded stale service, and a circuit breaker; typed provider failures count toward the circuit and stale stress is always `UNKNOWN`.
 - Added dry-run-default critical/full backup tooling, explicit production confirmation, protected backup workflow, and an ephemeral local D1 restore drill with table/count/model metadata/content-hash verification.
 - Added dev/staging/production Wrangler environments, reproducible npm gates, CI, manual protected production deployment, Model Card, Champion–Challenger registry, and operations runbook.
+- Bound v1 backtest model provenance to the exact signal cohort selected by its strict `as_of` cutoff, including honest governed/legacy union reporting; unrelated diagnostic rows can no longer leak a different model or data-run identity into the response.
+- Added every event-backtest behavior and reporting constant to the recursively frozen Champion descriptor and runtime path, including compatibility threshold, benchmark windows/target/cap, annualization, ACT/360 and unit conversions, plus named benchmark methodologies.
 - Kept the staging D1 identifier as an unmistakable placeholder. No push, deploy, remote database/R2 access, secret creation, or real alert delivery was performed; staging deployment remains unverified.
 - Champion formulas, weights, 45/55 thresholds, hysteresis, portfolio tiers, and PR-11/PR-12 research results are unchanged.
 
