@@ -31,6 +31,10 @@ FRED GDP is current-vintage quarterly data and is aligned only by observation da
 
 The preregistered nonexistent FRED IDs returned 404 before full fetch. A-001 replaced them with exact FRED \`TGCRRATE\` and the official NY Fed Markets Repo API. The NY Fed daily SRF proxy sums \`totalAmtAccepted\` for same-day \`Repo\` / \`Overnight\` operations into billions. Formula, 0.30/0.25/0.25/0.20 weights, states, freshness, OOS target, gate, and eligibility did not change.
 
+## A-002 SRF launch boundary correction
+
+Independent review invalidated v1 because the Repo endpoint also contains temporary repo operations before the Standing Repo Facility. Canonical v2 requests NY Fed data from exactly **2021-07-29**, rejects earlier returned rows, and never uses v1 results. NY Fed small-value exercises remain included because the operation results API exposes no unambiguous exercise flag; they can overstate market-driven SRF take-up. This corrective run did not change the formula, weights, states, freshness, OOS target, gate, or eligibility.
+
 ## Sample and freshness
 
 | Metric | Value |

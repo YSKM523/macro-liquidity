@@ -18,6 +18,6 @@ describe('reserve challenger report disclosure', () => {
       },
     };
     const markdown = renderReserveReport(report);
-    for (const phrase of ['A-001', 'TGCRRATE', 'NY Fed', 'RESEARCH_CURRENT_VINTAGE', 'not ALFRED/PIT', 'DATA_INCOMPLETE', 'replacementEligible: `false`', 'Champion: unchanged', 'DROP_RESEARCH']) expect(markdown).toContain(phrase);
+    for (const phrase of ['A-001', 'A-002', 'TGCRRATE', 'NY Fed', '2021-07-29', 'small-value exercises', 'RESEARCH_CURRENT_VINTAGE', 'not ALFRED/PIT', 'DATA_INCOMPLETE', 'replacementEligible: `false`', 'Champion: unchanged', 'DROP_RESEARCH']) expect(markdown).toContain(phrase);
   });
 });
