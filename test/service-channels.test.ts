@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SeriesMap, Snapshot, Verdict } from '../src/metrics';
+import { SERIES_IDS } from '../src/config';
 
 const state = vi.hoisted(() => ({
   seriesMap: {} as SeriesMap,
@@ -8,9 +9,12 @@ const state = vi.hoisted(() => ({
   officialWrites: [] as string[],
   nowcastWrites: [] as string[],
   priorVerdict: 'BULLISH' as Verdict | null,
+  frozenAnchors: new Map<string, Verdict>(),
+  pitRowsOverride: null as any[] | null,
+  computedWalcl: new Map<string, number | null>(),
 }));
 
-vi.mock('../src/fred', () => ({ fetchFredSeries: vi.fn(async () => []) }));
+vi.mock('../src/fred', () => ({ fetchFredSeriesPit: vi.fn(async () => ({ latestRows: [], vintages: [] })) }));
 vi.mock('../src/prices', () => ({
   fetchDxyDaily: vi.fn(async () => []),
   spliceSeries: vi.fn((official: unknown[]) => official),
@@ -35,10 +39,23 @@ vi.mock('../src/db', () => ({
     return d.toISOString().slice(0, 10);
   },
   maxObsDate: vi.fn(async () => '2024-01-10'),
-  loadSeriesMap: vi.fn(async () => state.seriesMap),
+  maxPitVintageDate: vi.fn(async () => '2024-01-10'),
+  loadReleaseRules: vi.fn(async () => new Map(SERIES_IDS.map(id => [id, { expectedReleaseTime: '23:59:59' }]))),
+  loadReleaseOverrides: vi.fn(async () => new Map()),
+  stagePitObservations: vi.fn(async () => undefined),
+  loadPitObservations: vi.fn(async () => state.pitRowsOverride ?? Object.entries(state.seriesMap).flatMap(([seriesId, rows]) => rows.map(row => ({
+    seriesId, observationDate: row.date, vintageDate: row.date, releasedAt: `${row.date}T00:00:00Z`,
+    fetchedAt: `${row.date}T00:00:00Z`, tradableAt: `${row.date}T14:30:00Z`, source: 'ALFRED',
+    checksum: `${seriesId}-${row.date}`, releaseTimeStatus: 'OBSERVED_AT_FETCH', value: row.value,
+  })))),
+  officialPitDecisionEvents: vi.fn(async () => (state.seriesMap.WALCL ?? []).map(row => ({
+    modelDate: row.date, decisionAt: `${row.date}T00:00:00Z`, tradableAt: `${row.date}T14:30:00Z`,
+  }))),
   upsertOfficialSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.officialWrites.push(snapshot.date);
+    if (state.frozenAnchors.has(snapshot.date)) return 'FROZEN';
     state.official.set(snapshot.date, structuredClone(snapshot));
+    return 'INSERTED';
   }),
   upsertNowcastSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.nowcastWrites.push(snapshot.date);
@@ -47,18 +64,22 @@ vi.mock('../src/db', () => ({
   setIngestMeta: vi.fn(async () => undefined),
   getAllMeta: vi.fn(async () => ({})),
   officialSnapshotBefore: vi.fn(async () => ({ verdict: state.priorVerdict })),
-  officialVerdictAnchors: vi.fn(async () => []),
+  officialVerdictAnchors: vi.fn(async (_db: unknown, from: string, to: string) => [...state.frozenAnchors]
+    .filter(([date]) => date >= from && date <= to).map(([date, verdict]) => ({ date, verdict }))),
 }));
 vi.mock('../src/metrics', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/metrics')>();
   return {
     ...actual,
-    computeSnapshot: vi.fn((_map: SeriesMap, date: string, prev?: Verdict): Snapshot => ({
+    computeSnapshot: vi.fn((_map: SeriesMap, date: string, prev?: Verdict): Snapshot => {
+      state.computedWalcl.set(date, actual.asOf(_map.WALCL ?? [], date));
+      return ({
       date, walcl: 6000, tga: 700, rrp: 100, repo: 0, netliq: 5200, netliqTrend: 5200,
       sofrIorb: 0, hyOas: 3, dgs10: 4, dxy: 100, vix: 15, bsImpulse: 'FLAT', netliqDir: 'FLAT',
       verdict: actual.verdictFromScore(50, prev), score: 50, factors: {}, factorResults: {}, freshness: {},
       decisionStatus: 'OK', p0: true, p1: true, p2: true, p3: true, reason: 'dead zone', coverage: 1,
-    } as any)),
+      } as any);
+    }),
   };
 });
 
@@ -85,6 +106,9 @@ beforeEach(() => {
   state.officialWrites.length = 0;
   state.nowcastWrites.length = 0;
   state.priorVerdict = 'BULLISH';
+  state.frozenAnchors.clear();
+  state.pitRowsOverride = null;
+  state.computedWalcl.clear();
 });
 
 describe('runIngest snapshot channel routing', () => {
@@ -110,5 +134,26 @@ describe('runIngest snapshot channel routing', () => {
 
     expect(state.official).toEqual(new Map([[official.date, official]]));
     expect(state.nowcasts.get('2024-01-10')?.verdict).toBe('BULLISH');
+  });
+
+  it('carries a frozen official verdict into the next full-rebuild frame', async () => {
+    state.frozenAnchors.set('2024-01-05', 'BEARISH');
+    await runIngest(env, true, new Date('2024-01-10T12:00:00.000Z'));
+    expect(state.official.get('2024-01-10')?.verdict).toBe('BEARISH');
+  });
+
+  it('resolves each incremental date at its own cutoff so later revisions cannot alter earlier frames', async () => {
+    const base = {
+      seriesId: 'WALCL', observationDate: '2024-01-03', fetchedAt: '2024-01-10T12:00:00Z',
+      source: 'ALFRED', releaseTimeStatus: 'CONSERVATIVE_DATE_END',
+      tradableAt: '2024-01-05T14:30:00Z',
+    };
+    state.pitRowsOverride = [
+      { ...base, vintageDate: '2024-01-04', releasedAt: '2024-01-04T23:59:59Z', checksum: 'a', value: 5800 },
+      { ...base, vintageDate: '2024-01-08', releasedAt: '2024-01-08T23:59:59Z', checksum: 'b', value: 5900 },
+    ];
+    await runIngest(env, false, new Date('2024-01-10T12:00:00.000Z'));
+    expect(state.computedWalcl.get('2024-01-05')).toBe(5800);
+    expect(state.computedWalcl.get('2024-01-09')).toBe(5900);
   });
 });

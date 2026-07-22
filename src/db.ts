@@ -1,10 +1,66 @@
 import type { Obs, SeriesMap, Snapshot, Verdict } from './metrics';
 import { SERIES_IDS } from './config';
+import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
 
 export async function maxObsDate(db: D1Database, seriesId: string): Promise<string | null> {
   const row = await db.prepare('SELECT MAX(date) AS d FROM observations WHERE series_id = ?')
     .bind(seriesId).first<{ d: string | null }>();
   return row?.d ?? null;
+}
+
+export async function maxPitVintageDate(db: D1Database, seriesId: string): Promise<string | null> {
+  const row = await db.prepare('SELECT MAX(vintage_date) AS d FROM observations_pit WHERE series_id = ?')
+    .bind(seriesId).first<{ d: string | null }>();
+  return row?.d ?? null;
+}
+
+export async function loadReleaseRules(db: D1Database): Promise<Map<string, ReleaseRule>> {
+  const rows = await db.prepare(
+    `SELECT series_id, expected_release_time FROM release_calendar
+     WHERE date('now') BETWEEN valid_from AND valid_to ORDER BY series_id, valid_from DESC`,
+  ).all<{ series_id: string; expected_release_time: string }>();
+  const out = new Map<string, ReleaseRule>();
+  for (const row of rows.results ?? []) {
+    if (!out.has(row.series_id)) out.set(row.series_id, { expectedReleaseTime: row.expected_release_time });
+  }
+  return out;
+}
+
+export async function loadReleaseOverrides(
+  db: D1Database,
+  seriesId: string,
+  fromVintage: string,
+): Promise<Map<string, ReleaseOverride>> {
+  const rows = await db.prepare(
+    `SELECT vintage_date, released_at, tradable_at FROM release_calendar_overrides
+     WHERE series_id = ? AND vintage_date >= ? ORDER BY vintage_date`,
+  ).bind(seriesId, fromVintage).all<{ vintage_date: string; released_at: string; tradable_at: string }>();
+  return new Map((rows.results ?? []).map(row => [row.vintage_date, {
+    releasedAt: row.released_at, tradableAt: row.tradable_at,
+  }]));
+}
+
+export async function stagePitObservations(
+  db: D1Database,
+  runId: string,
+  rows: PitObservation[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const statement = db.prepare(
+    `INSERT INTO staging_observations_pit
+       (run_id,series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
+        source,checksum,release_time_status,value)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(run_id,series_id,observation_date,vintage_date) DO UPDATE SET
+       released_at=excluded.released_at,fetched_at=excluded.fetched_at,tradable_at=excluded.tradable_at,
+       source=excluded.source,checksum=excluded.checksum,
+       release_time_status=excluded.release_time_status,value=excluded.value`,
+  );
+  const writes = rows.map(row => statement.bind(
+    runId, row.seriesId, row.observationDate, row.vintageDate, row.releasedAt, row.fetchedAt,
+    row.tradableAt, row.source, row.checksum, row.releaseTimeStatus, row.value,
+  ));
+  for (let index = 0; index < writes.length; index += 100) await db.batch(writes.slice(index, index + 100));
 }
 
 export type IngestRunState = 'RUNNING' | 'ACTIVE' | 'FAILED' | 'SUPERSEDED';
@@ -205,6 +261,30 @@ export async function activateIngestRun(
   completedAt: string,
 ): Promise<void> {
   const results = await db.batch([
+    db.prepare(
+      `SELECT CASE WHEN NOT EXISTS (
+         SELECT 1 FROM staging_observations_pit staged
+         JOIN observations_pit existing
+           ON existing.series_id=staged.series_id
+          AND existing.observation_date=staged.observation_date
+          AND existing.vintage_date=staged.vintage_date
+         WHERE staged.run_id=? AND existing.checksum<>staged.checksum
+       ) THEN 1 ELSE json('conflicting append-only PIT observation') END AS pit_conflict`
+    ).bind(runId),
+    db.prepare(
+      `INSERT INTO observations_pit
+       (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,
+        checksum,data_run_id,release_time_status,value)
+       SELECT staged.series_id,staged.observation_date,staged.vintage_date,staged.released_at,
+              staged.fetched_at,staged.tradable_at,staged.source,staged.checksum,staged.run_id,
+              staged.release_time_status,staged.value
+       FROM staging_observations_pit staged
+       WHERE staged.run_id=?
+         AND EXISTS (SELECT 1 FROM ingest_runs target WHERE target.run_id=? AND target.state='RUNNING')
+         AND EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
+           AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
+       ON CONFLICT(series_id,observation_date,vintage_date) DO NOTHING`
+    ).bind(runId, runId, runId),
     // Keep the assertion inside the batch: inspecting meta.changes afterward
     // would be too late to roll back success metadata written earlier.
     db.prepare(
@@ -268,9 +348,37 @@ export async function activateIngestRun(
       `ingest run ${runId} activation lease/state fence rejected; target must be RUNNING: ${String((error as any)?.message ?? error)}`,
     );
   });
-  if (Number((results[2]?.meta as any)?.changes ?? 0) !== 1) {
+  if (Number((results[4]?.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest run ${runId} must be RUNNING before activation`);
   }
+}
+
+export async function loadPitObservations(db: D1Database): Promise<PitObservation[]> {
+  const rows = await db.prepare(
+    `SELECT series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
+            source,checksum,release_time_status,value
+     FROM observations_pit ORDER BY released_at,series_id,observation_date,vintage_date`,
+  ).all<any>();
+  return (rows.results ?? []).map(row => ({
+    seriesId: row.series_id, observationDate: row.observation_date, vintageDate: row.vintage_date,
+    releasedAt: row.released_at, fetchedAt: row.fetched_at, tradableAt: row.tradable_at,
+    source: row.source, checksum: row.checksum, releaseTimeStatus: row.release_time_status,
+    value: row.value,
+  } as PitObservation));
+}
+
+export async function officialPitDecisionEvents(db: D1Database): Promise<PitDecisionEvent[]> {
+  const rows = await db.prepare(
+    `WITH ranked AS (
+       SELECT observation_date,released_at,tradable_at,
+              ROW_NUMBER() OVER (PARTITION BY observation_date ORDER BY vintage_date,released_at) AS n
+       FROM observations_pit WHERE series_id='WALCL'
+     )
+     SELECT observation_date,released_at,tradable_at FROM ranked WHERE n=1 ORDER BY released_at`,
+  ).all<{ observation_date: string; released_at: string; tradable_at: string }>();
+  return (rows.results ?? []).map(row => ({
+    modelDate: row.observation_date, decisionAt: row.released_at, tradableAt: row.tradable_at,
+  }));
 }
 
 function fencedMetaStatement(

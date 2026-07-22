@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SeriesMap, Snapshot } from '../src/metrics';
+import { SERIES_IDS } from '../src/config';
 
 const DATE = '2024-07-24';
 const state = vi.hoisted(() => ({
@@ -7,7 +8,7 @@ const state = vi.hoisted(() => ({
   nowcasts: new Map<string, Snapshot>(),
 }));
 
-vi.mock('../src/fred', () => ({ fetchFredSeries: vi.fn(async () => []) }));
+vi.mock('../src/fred', () => ({ fetchFredSeriesPit: vi.fn(async () => ({ latestRows: [], vintages: [] })) }));
 vi.mock('../src/prices', () => ({
   fetchDxyDaily: vi.fn(async () => []),
   spliceSeries: vi.fn((official: unknown[]) => official),
@@ -28,7 +29,18 @@ vi.mock('../src/db', () => ({
   failIngestSnapshots: vi.fn(async () => undefined),
   decisionWeek: (date: string) => date,
   maxObsDate: vi.fn(async () => DATE),
-  loadSeriesMap: vi.fn(async () => state.seriesMap),
+  maxPitVintageDate: vi.fn(async () => DATE),
+  loadReleaseRules: vi.fn(async () => new Map(SERIES_IDS.map(id => [id, { expectedReleaseTime: '23:59:59' }]))),
+  loadReleaseOverrides: vi.fn(async () => new Map()),
+  stagePitObservations: vi.fn(async () => undefined),
+  loadPitObservations: vi.fn(async () => Object.entries(state.seriesMap).flatMap(([seriesId, rows]) => rows.map(row => ({
+    seriesId, observationDate: row.date, vintageDate: row.date, releasedAt: `${row.date}T00:00:00Z`,
+    fetchedAt: `${row.date}T00:00:00Z`, tradableAt: `${row.date}T14:30:00Z`, source: 'ALFRED',
+    checksum: `${seriesId}-${row.date}`, releaseTimeStatus: 'OBSERVED_AT_FETCH', value: row.value,
+  })))),
+  officialPitDecisionEvents: vi.fn(async () => (state.seriesMap.WALCL ?? []).map(row => ({
+    modelDate: row.date, decisionAt: `${row.date}T00:00:00Z`, tradableAt: `${row.date}T14:30:00Z`,
+  }))),
   upsertOfficialSnapshot: vi.fn(async () => undefined),
   upsertNowcastSnapshot: vi.fn(async (_db: unknown, _runId: string, snapshot: Snapshot) => {
     state.nowcasts.set(snapshot.date, structuredClone(snapshot));

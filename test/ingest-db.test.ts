@@ -16,6 +16,12 @@ describe('ingest repository contracts', () => {
     expect(typeof (ingestDb as any).setIngestMeta).toBe('function');
     expect(typeof (ingestDb as any).completeIngestSuccess).toBe('function');
     expect(typeof (ingestDb as any).failIngestSnapshots).toBe('function');
+    expect(typeof (ingestDb as any).maxPitVintageDate).toBe('function');
+    expect(typeof (ingestDb as any).loadReleaseRules).toBe('function');
+    expect(typeof (ingestDb as any).loadReleaseOverrides).toBe('function');
+    expect(typeof (ingestDb as any).stagePitObservations).toBe('function');
+    expect(typeof (ingestDb as any).loadPitObservations).toBe('function');
+    expect(typeof (ingestDb as any).officialPitDecisionEvents).toBe('function');
     expect((ingestDb as any).upsertObservations).toBeUndefined();
   });
 

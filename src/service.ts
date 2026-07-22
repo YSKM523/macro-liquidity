@@ -1,4 +1,4 @@
-import { fetchFredSeries } from './fred';
+import { fetchFredSeriesPit } from './fred';
 import {
   SERIES_IDS,
   MAIN_CRON,
@@ -7,8 +7,6 @@ import {
   INGEST_LOCK_LEASE_SECONDS,
 } from './config';
 import {
-  maxObsDate,
-  loadSeriesMap,
   upsertOfficialSnapshot,
   upsertNowcastSnapshot,
   setIngestMeta,
@@ -30,11 +28,18 @@ import {
   completeIngestSuccess,
   failIngestSnapshots,
   IngestSeriesValidationError,
+  maxPitVintageDate,
+  loadReleaseRules,
+  loadReleaseOverrides,
+  stagePitObservations,
+  loadPitObservations,
+  officialPitDecisionEvents,
 } from './db';
 import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
 import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
 import { spliceSeries, fetchDxyDaily } from './prices';
+import { buildPitFrames } from './pit';
 
 export interface Env {
   DB: D1Database; ASSETS: Fetcher;
@@ -115,19 +120,26 @@ export async function runIngest(
       await startSeriesAttempt(env.DB, runId, id, new Date().toISOString());
       try {
         failedStep = 'series-read';
-        const last = await maxObsDate(env.DB, id);
+        const lastPitVintage = rebuildAll ? null : await maxPitVintageDate(env.DB, id);
+        const releaseRules = await loadReleaseRules(env.DB);
+        const realtimeStart = lastPitVintage ?? env.START_DATE;
+        const releaseRule = releaseRules.get(id);
+        if (!releaseRule) throw new Error(`${id} has no active release calendar rule`);
+        const overrides = await loadReleaseOverrides(env.DB, id, realtimeStart);
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);
-        const from = last ?? env.START_DATE;
         failedStep = 'fetch';
-        const rows = await fetchFredSeries(id, from, env.FRED_API_KEY);
+        const fetched = await fetchFredSeriesPit(
+          id, env.START_DATE, realtimeStart, nowIso, env.FRED_API_KEY, releaseRule, overrides,
+        );
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);
         failedStep = 'structural';
-        validateSeriesRows(id, rows);
+        validateSeriesRows(id, fetched.latestRows);
         failedStep = 'staging';
-        await stageSeriesAttempt(env.DB, runId, id, rows);
-        updated += rows.length;
+        await stagePitObservations(env.DB, runId, fetched.vintages);
+        await stageSeriesAttempt(env.DB, runId, id, fetched.latestRows);
+        updated += fetched.latestRows.length;
       } catch (error) {
         const originalMessage = String((error as any)?.message ?? error);
         try {
@@ -171,7 +183,7 @@ export async function runIngest(
 
     // 3) Rebuild snapshots only from the newly activated production view.
     failedStep = 'snapshot-read';
-    const m = await loadSeriesMap(env.DB);
+    const pitRows = await loadPitObservations(env.DB);
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     // DTWEXBGS 官方发布滞后约一周;用 DXY 日线按比例链到末端参与打分(仅内存,行情失败则跳过)。
@@ -179,15 +191,19 @@ export async function runIngest(
     const dxy = await fetchDxyDaily({ fredApiKey: env.FRED_API_KEY });
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
-    m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], dxy);
-    const lastWalcl = (m.WALCL ?? []).at(-1)?.date;
-    if (lastWalcl) {
-      // Full rebuild emits one official decision per Monday-based WALCL week.
-      // The daily cron emits only provisional nowcasts for the recent window.
-      const currentAsOf = now.toISOString().slice(0, 10);
-      const dates = rebuildAll
-        ? oneDecisionPerWeek((m.WALCL ?? []).map(o => o.date).filter(d => d <= lastWalcl))
-        : eachDay(addDays(currentAsOf, -14), currentAsOf);
+    const currentAsOf = now.toISOString().slice(0, 10);
+    const rawOfficialEvents = rebuildAll ? await officialPitDecisionEvents(env.DB) : [];
+    const officialDates = new Set(oneDecisionPerWeek(rawOfficialEvents.map(event => event.modelDate)));
+    const events = rebuildAll
+      ? rawOfficialEvents.filter(event => officialDates.has(event.modelDate))
+      : eachDay(addDays(currentAsOf, -14), currentAsOf).map(modelDate => {
+          const modelDateEnd = `${modelDate}T23:59:59Z`;
+          const decisionAt = modelDateEnd < nowIso ? modelDateEnd : nowIso;
+          return { modelDate, decisionAt, tradableAt: decisionAt };
+        });
+    const frames = buildPitFrames(pitRows, events);
+    if (frames.length > 0) {
+      const dates = frames.map(frame => frame.event.modelDate);
       let prev: Verdict | undefined;
       let officialAnchors = new Map<string, Verdict>();
       if (!rebuildAll && dates.length > 0) {
@@ -202,9 +218,12 @@ export async function runIngest(
         await renewOwnedLease(env.DB, runId);
         officialAnchors = new Map(anchors.map(anchor => [anchor.date, anchor.verdict]));
       }
-      for (const date of dates) {
+      for (const frame of frames) {
+        const date = frame.event.modelDate;
+        const m = frame.seriesMap;
+        if (!rebuildAll) m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], dxy);
         if (asOf(m.WALCL ?? [], date) == null) continue;
-        if (!rebuildAll) prev = officialAnchors.get(date) ?? prev;
+        prev = officialAnchors.get(date) ?? prev;
         const snap = computeSnapshot(m, date, prev);
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);
