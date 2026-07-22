@@ -45,6 +45,8 @@ The eight scoring-factor weights sum to 1.00. The persisted `vol` field is a FRE
 
 The formal PR-10 event-time framework uses next-tradable execution, daily SPX, SOFR cash, explicit costs, and four fair benchmarks. Historical diagnostics show a useful but modest ranking signal, not reliable directional timing. PR-11 was `INCONCLUSIVE / DROP_RESEARCH`; PR-12 was `DROP_RESEARCH`. Neither met the frozen promotion gates.
 
+PR-15 adds `PURGED_VALIDATION_V1` without altering the Champion. Thirteen-week labels expose signal/outcome dates, training labels are purged when their outcomes reach the next test interval, and a 91-calendar-day embargo is applied. Reports separate score direction, persisted formal verdict, existing dashboard target-exposure risk calls, Spearman IC, and fold-training-only q10 tail detection. The genuinely forward holdout is permanently registered from `2026-07-23`; it remains `PENDING_MATURITY` until enough post-registration labels mature and historical rows are never renamed as unseen holdout evidence.
+
 ## Failed regimes and monitoring
 
 Known weak areas include market drift overwhelming direction accuracy, publication-calendar approximations, crisis source disruption, and limited non-overlapping samples. Health/SLO responses expose ingest and snapshot outcomes. Critical snapshot failure alerting is mandatory, but delivery depends on configured provider secrets and must be monitored through structured `alert_delivery` events and the audit table.
@@ -54,7 +56,7 @@ Known weak areas include market drift overwhelming direction accuracy, publicati
 - Release rules remain conservative approximations and do not encode every US market holiday.
 - Live cache is per Worker isolate; it is an upstream-load guard, not a globally coherent quote store.
 - Staging identifiers and remote secrets are intentionally not committed. A local dry-run is not evidence that staging or production deployment succeeded.
-- Historical rows backfilled by migration 0010 are explicitly `LEGACY_UNVERSIONED`; v1 versioned APIs fail closed rather than inventing provenance.
+- Historical rows backfilled by migration 0010 are explicitly `LEGACY_UNVERSIONED`. Versioned APIs report the governed/legacy union without inventing identity. PR-15 retrospective validation labels this cohort `PARTIAL_LEGACY`; legacy q10 calibration remains null as `PARTIAL_LEGACY_CALIBRATION`, while malformed/non-PIT inputs and legacy post-holdout signals fail closed.
 - The local restore fixture proves the mechanism and invariants, not restoration of a real production backup.
 
 ## Governance and promotion

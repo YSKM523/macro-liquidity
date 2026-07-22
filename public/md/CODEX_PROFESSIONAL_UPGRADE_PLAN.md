@@ -920,6 +920,8 @@ Sortino
 
 ## BT-06 Purged Walk-Forward
 
+> **PR-15 本地完成（2026-07-22）**：`PURGED_VALIDATION_V1` 使用 13 周日期区间标签、先按 outcome 与 test 起点 purge、再做 91 个日历日 embargo；同时报告重叠和贪心区间非重叠样本。完全前瞻 holdout 固定从 `2026-07-23` 开始，成熟前只返回 `PENDING_MATURITY`，不把历史尾部伪装成 unseen。
+
 同时报告：
 
 ```text
@@ -935,6 +937,8 @@ Purged walk-forward
 ---
 
 ## BT-07 修正命中率定义
+
+> **PR-15 本地完成（2026-07-22）**：方向使用持久化 score，正式 verdict 直接读取正式快照，风险调用复用 `DASHBOARD_EXPOSURE_TIERS_V1` target，IC 使用 Spearman，尾部阈值只取各 fold 训练集 q10；不足样本、零方差、缺正式信号和 legacy calibration 均返回 typed null。
 
 分别报告：
 
@@ -1954,7 +1958,7 @@ feat: model versioning, CI, staging, observability and backup
 - [x] 成本纳入
 - [x] 与相同 Beta 基准比较（PR-10：仅按实际承担收益区间的 exposure 匹配）
 - [x] overlapping 和 non-overlapping 分开（PR-11 shadow current-vintage research）
-- [ ] purged walk-forward
+- [x] purged walk-forward（PR-15：日期区间 purge + 91 日 embargo + 固定 2026-07-23 holdout；holdout 尚待真实前瞻标签成熟）
 - [ ] 分数桶大体单调
 - [ ] 极端事件压力测试
 

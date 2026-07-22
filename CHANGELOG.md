@@ -4,6 +4,16 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-15 — Purged validation and outcome taxonomy
+
+- Added `PURGED_VALIDATION_V1`: strict date-ordered 13-week labels, outcome-overlap purging, a 91-calendar-day pre-test embargo, and separate overlapping versus greedily interval-non-overlapping sample counts.
+- Added five typed outcome families without changing the Champion: score direction, persisted formal verdict, existing dashboard target-exposure risk calls, Spearman IC, and fold-training-only q10 tail detection. Undefined rates and correlations are null with explicit status, never zero or `NaN`.
+- Added expanding folds whose weights and q10 calibration use only matured training outcomes. Diagnostic IC-fitted weights/performance remain explicitly separate from Champion metrics and are not promoted.
+- Registered an append-only forward holdout at `2026-07-23` with a frozen protocol digest, 91-day pre-holdout outcome cutoff, frozen pre-period diagnostic weights/q10, and `PENDING_MATURITY` until at least five post-registration 13-week labels mature. Historical tail rows are not relabeled as unseen holdout.
+- Preserved migration-0010 history honestly: legacy PIT rows can contribute retrospective direction/verdict/risk/IC under `PARTIAL_LEGACY`, while legacy tail calibration is null/`PARTIAL_LEGACY_CALIBRATION`; malformed provenance, non-PIT inputs, or any legacy post-holdout signal fail closed.
+- Published the additive validation object through `/api/walkforward`, `/api/robustness`, and `/api/v1/robustness`, and rendered typed-null metrics safely in the dashboard. Every legacy field and value remains unchanged.
+- Added no migration and changed no score, factor weight, 45/55 verdict band, hysteresis rule, stress rule, portfolio target, or snapshot. No push, deployment, remote D1/R2 access, secret, or real alert action was performed.
+
 ### PR-14 — Residual correctness and bounded provider retries
 
 - Added one GET/HEAD-only bounded full-jitter exponential-backoff policy with injectable timers/sleep/random, a three-attempt default, 250 ms production base, five-attempt hard ceiling, and independent 10-second attempt timeout.

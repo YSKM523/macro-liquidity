@@ -5,7 +5,14 @@
 > 部署：`wrangler deploy`（**改前端记得 bump `?v=` 版本号**，否则缓存不更新）
 > API：`/api/health | /api/explain | /api/robustness | /api/global-liquidity`
 
-_最后更新：2026-07-22（PR-13 生产治理仅本地实现；未推送、未部署、未访问远程数据库）_
+_最后更新：2026-07-22（PR-15 purged validation 仅本地实现；未推送、未部署、未访问远程数据库）_
+
+## PR-15 本地状态
+
+- `PURGED_VALIDATION_V1` 已加入 `/api/walkforward`、`/api/robustness` 与 dashboard：13 周日期区间、91 日日历 embargo、重叠/区间非重叠、方向/正式 verdict/风险/IC/尾部 typed metrics。
+- 完全前瞻 holdout 固定从 `2026-07-23` 开始；当前必须是 `PENDING_MATURITY`，不能用历史数据补作 unseen 结果。
+- migration 0010 历史会显示 `PARTIAL_LEGACY`，legacy q10 calibration 为 null；非 PIT、畸形 provenance 与 post-holdout legacy fail closed。
+- Champion 评分、权重、阈值、迟滞、stress 和仓位策略未改变；无 migration、push、部署或远程数据库操作。
 
 ## PR-13 本地状态
 
