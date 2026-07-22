@@ -585,7 +585,9 @@ describe('/api/prices provider metadata', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await worker.fetch(new Request('https://example.test/api/prices'), env);
+    const pendingResponse = worker.fetch(new Request('https://example.test/api/prices'), env);
+    await vi.runAllTimersAsync();
+    const response = await pendingResponse;
     const body = await response.json() as any;
 
     expect(body).toMatchObject({ dxy: 98.2, us10y: 4.25, asofSemantics: 'FETCH_TIME' });

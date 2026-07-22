@@ -19,7 +19,7 @@ The target asset is the S&P 500. The primary diagnostic horizon is 13 weeks. Off
 
 FRED/ALFRED supplies macro series and immutable vintages. Yahoo, Stooq, and named FRED series supply live market readings with provenance, fallback, divergence, freshness, and fail-closed status. Their HTTP calls retry only transport failures, 429, and 5xx under a three-attempt capped exponential-backoff policy; other 4xx and parse/validation failures fail immediately. Exact series definitions and freshness rules are part of the canonical config hash.
 
-## Eight scoring factors and one independent live-risk overlay
+## Eight scoring factors, Weights, and one independent live-risk overlay
 
 | Factor | Weight |
 |---|---:|
