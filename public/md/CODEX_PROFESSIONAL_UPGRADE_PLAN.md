@@ -1912,10 +1912,10 @@ feat: model versioning, CI, staging, observability and backup
 
 ## 回测
 
-- [ ] 信号在 next tradable time 执行
-- [ ] 使用日频价格
-- [ ] 现金收益不为 0
-- [ ] 成本纳入
+- [x] 信号在 next tradable time 执行
+- [x] 使用日频价格
+- [x] 现金收益不为 0
+- [x] 成本纳入
 - [ ] 与相同 Beta 基准比较
 - [ ] overlapping 和 non-overlapping 分开
 - [ ] purged walk-forward
