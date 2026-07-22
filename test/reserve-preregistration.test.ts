@@ -5,9 +5,10 @@ import { PREREGISTRATION } from '../scripts/reserve-preregistration.mjs';
 describe('dynamic reserve adequacy preregistration', () => {
   it('freezes the formula, state boundaries, OOS gate, and exact primary series before fetch', () => {
     expect(PREREGISTRATION).toMatchObject({
-      status: 'PREREGISTERED_BEFORE_FETCH',
+      status: 'AMENDED_BEFORE_FULL_FETCH',
+      methodologyVersion: 'PR12_RESEARCH_V1_SOURCE_CORRECTED',
       evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
-      series: ['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCR', 'SRFONTSYD', 'SP500'],
+      series: ['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCRRATE', 'NYFED_SRF_ACCEPTED', 'SP500'],
       weights: { relativeReserves: 0.30, reserveChange13: 0.25, sofrIorb: 0.25, auxiliaryFunding: 0.20 },
       minimumPriorWeeks: 52,
       states: { abundant: 80, ample: 60, transition: 40, scarce: 20 },
@@ -19,6 +20,15 @@ describe('dynamic reserve adequacy preregistration', () => {
       '2024-01-01', '2025-01-01', '2100-01-01',
     ]);
     expect(PREREGISTRATION.decisionRule).toContain('top score quintile');
+    expect(PREREGISTRATION.amendments).toEqual([expect.objectContaining({
+      id: 'A-001', kind: 'PRIMARY_SOURCE_CORRECTION', tuning: false,
+      formulaChanged: false, replacementEligibleChanged: false,
+    })]);
+    expect(PREREGISTRATION.sources.NYFED_SRF_ACCEPTED).toMatchObject({
+      endpoint: 'https://markets.newyorkfed.org/api/rp/results/search.json',
+      operationTypes: 'Repo',
+      aggregation: 'SUM_TOTAL_AMT_ACCEPTED_BY_OPERATION_DATE_FOR_OVERNIGHT_SRP',
+    });
     expect(Object.isFrozen(PREREGISTRATION)).toBe(true);
   });
 });

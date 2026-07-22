@@ -1,7 +1,7 @@
 # Dynamic Reserve Adequacy Challenger — Preregistration
 
-Status: `PREREGISTERED_BEFORE_FETCH`  
-Methodology: `PR12_RESEARCH_V1`  
+Status: `AMENDED_BEFORE_FULL_FETCH`  
+Methodology: `PR12_RESEARCH_V1_SOURCE_CORRECTED`  
 Evidence: `RESEARCH_CURRENT_VINTAGE`  
 Production eligibility: `replacementEligible=false`
 
@@ -9,9 +9,15 @@ This document freezes PR-12 before any canonical data fetch. The package is shad
 
 ## Exact data contract
 
-Primary FRED CSV series are exactly `WRESBAL`, `GDP`, `SOFR`, `IORB`, `EFFR`, `TGCR`, `SRFONTSYD`, and `SP500`. Canonical URLs contain the exact `id`, `cosd=2002-01-01`, and frozen `coed`. The snapshot and manifest must agree byte-for-byte and object-for-object and record schema, source, evidence class, series set, request URLs, retrieval time, row/date ranges, per-series hashes, and whole-file SHA-256. No unavailable ID may be silently replaced.
+Primary FRED CSV series are exactly `WRESBAL`, `GDP`, `SOFR`, `IORB`, `EFFR`, `TGCRRATE`, and `SP500`. Canonical URLs contain the exact `id`, `cosd=2002-01-01`, and frozen `coed`. Standing Repo Facility accepted amount comes only from the official NY Fed Markets endpoint `https://markets.newyorkfed.org/api/rp/results/search.json?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&operationTypes=Repo`. Each accepted record must expose `operationDate`, `operationType`, `term`, and `totalAmtAccepted`; the normalized daily value is the sum of `totalAmtAccepted` across all same-day `Overnight` Repo operations, in billions. The API documentation is `https://markets.newyorkfed.org/static/docs/markets-api.html`.
+
+The canonical snapshot and manifest must agree byte-for-byte and object-for-object and record schema, source, evidence class, exact FRED IDs/URLs, exact NY Fed endpoint/parameters, retrieval time, row/date ranges, per-source hashes, and whole-file SHA-256. No unavailable identifier or endpoint may be silently replaced.
 
 This is current-vintage FRED evidence, not ALFRED/PIT. GDP is quarterly current-vintage data; this study makes no historical release-date or historical-vintage claim.
+
+## A-001 primary-source correction (before full fetch)
+
+After commit `7f64d10`, a three-day HTTP/schema probe returned valid canonical CSV headers for `WRESBAL`, `GDP`, `SOFR`, `IORB`, `EFFR`, and `SP500`, but FRED returned HTTP 404 for the preregistered `TGCR` and `SRFONTSYD` identifiers. No full snapshot or report had been generated. Primary-source verification established `TGCRRATE` as the FRED series and the official NY Fed Markets Repo results API as the SRF accepted-amount source. This correction is provenance repair, not result-driven tuning: formula, weights, state thresholds, freshness, folds, bootstrap, OOS gate, allowed decisions, and `replacementEligible=false` are unchanged.
 
 ## Frozen weekly formula
 

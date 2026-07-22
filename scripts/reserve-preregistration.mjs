@@ -4,12 +4,24 @@ const boundaries = Object.freeze([
 ]);
 
 export const PREREGISTRATION = Object.freeze({
-  status: 'PREREGISTERED_BEFORE_FETCH',
-  methodologyVersion: 'PR12_RESEARCH_V1',
+  status: 'AMENDED_BEFORE_FULL_FETCH',
+  methodologyVersion: 'PR12_RESEARCH_V1_SOURCE_CORRECTED',
+  originalPreregistration: Object.freeze({ status: 'PREREGISTERED_BEFORE_FETCH', commit: '7f64d10', methodologyVersion: 'PR12_RESEARCH_V1' }),
   evidenceClass: 'RESEARCH_CURRENT_VINTAGE',
-  source: 'FRED_CURRENT_VINTAGE',
-  series: Object.freeze(['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCR', 'SRFONTSYD', 'SP500']),
-  units: Object.freeze({ WRESBAL: 'USD_MILLIONS_DIVIDE_1000_TO_BILLIONS', GDP: 'USD_BILLIONS_ANNUALIZED', rates: 'PERCENTAGE_POINTS', SRFONTSYD: 'USD_BILLIONS' }),
+  source: 'FRED_AND_NYFED_CURRENT_VINTAGE',
+  series: Object.freeze(['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCRRATE', 'NYFED_SRF_ACCEPTED', 'SP500']),
+  sources: Object.freeze({
+    FRED: Object.freeze({ series: Object.freeze(['WRESBAL', 'GDP', 'SOFR', 'IORB', 'EFFR', 'TGCRRATE', 'SP500']), endpoint: 'https://fred.stlouisfed.org/graph/fredgraph.csv' }),
+    NYFED_SRF_ACCEPTED: Object.freeze({
+      endpoint: 'https://markets.newyorkfed.org/api/rp/results/search.json',
+      docs: 'https://markets.newyorkfed.org/static/docs/markets-api.html',
+      operationTypes: 'Repo',
+      requiredFields: Object.freeze(['operationDate', 'operationType', 'term', 'totalAmtAccepted']),
+      aggregation: 'SUM_TOTAL_AMT_ACCEPTED_BY_OPERATION_DATE_FOR_OVERNIGHT_SRP',
+      units: 'USD_BILLIONS',
+    }),
+  }),
+  units: Object.freeze({ WRESBAL: 'USD_MILLIONS_DIVIDE_1000_TO_BILLIONS', GDP: 'USD_BILLIONS_ANNUALIZED', rates: 'PERCENTAGE_POINTS', NYFED_SRF_ACCEPTED: 'USD_BILLIONS' }),
   weights: Object.freeze({ relativeReserves: 0.30, reserveChange13: 0.25, sofrIorb: 0.25, auxiliaryFunding: 0.20 }),
   minimumPriorWeeks: 52,
   states: Object.freeze({ abundant: 80, ample: 60, transition: 40, scarce: 20 }),
@@ -18,6 +30,18 @@ export const PREREGISTRATION = Object.freeze({
   bootstrap: Object.freeze({ method: 'SEEDED_MOVING_BLOCK', seed: 12_012, blockLength: 13, iterations: 2_000 }),
   folds: Object.freeze({ boundaries, emptyFoldPolicy: 'REPORT_EMPTY_NEVER_REDISTRIBUTE' }),
   decisionRule: 'KEEP_SHADOW iff non-overlap IC > 0, at least four fixed folds positive, bootstrap p <= 0.10, non-overlap n >= 10, and top score quintile has no worse mean return or 10% tail than bottom; otherwise DROP_RESEARCH.',
+  amendments: Object.freeze([Object.freeze({
+    id: 'A-001',
+    kind: 'PRIMARY_SOURCE_CORRECTION',
+    chronology: 'Committed after exact-ID short-window validation and before any canonical full fetch or report run.',
+    reason: 'The preregistered FRED IDs TGCR and SRFONTSYD returned HTTP 404.',
+    change: 'Use FRED TGCRRATE and the official NY Fed Markets Repo results endpoint; sum totalAmtAccepted by operationDate across same-day Overnight Repo operations.',
+    tuning: false,
+    formulaChanged: false,
+    weightsChanged: false,
+    thresholdsChanged: false,
+    replacementEligibleChanged: false,
+  })]),
   allowedDecisions: Object.freeze(['KEEP_SHADOW', 'DROP_RESEARCH']),
   replacementEligible: false,
 });
