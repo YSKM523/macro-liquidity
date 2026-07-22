@@ -50,13 +50,14 @@ describe('official PIT snapshot persistence', () => {
     const { mf, db } = await migratedDb();
     const provenance = {
       dataRunId: 'run-1', dataCutoff: '2024-01-04T23:59:59Z',
-      decisionAt: '2024-01-05T00:00:00Z', tradableAt: '2024-01-05T14:30:00Z', inputs: manifest(),
+      decisionAt: '2024-01-05T00:00:00Z', tradableAt: '2024-01-05T14:30:00Z',
+      releaseResolutionAt: '2024-01-10T00:00:00Z', inputs: manifest(),
     };
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, provenance)).resolves.toBe('INSERTED');
     expect(await db.prepare('SELECT COUNT(*) AS n FROM snapshot_inputs').first()).toEqual({ n: SERIES_IDS.length });
-    expect(await db.prepare('SELECT data_run_id,data_cutoff,decision_at,tradable_at,pit_status FROM model_snapshot_weekly').first())
+    expect(await db.prepare('SELECT data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status FROM model_snapshot_weekly').first())
       .toEqual({ data_run_id: 'run-1', data_cutoff: provenance.dataCutoff, decision_at: provenance.decisionAt,
-        tradable_at: provenance.tradableAt, pit_status: 'PIT' });
+        tradable_at: provenance.tradableAt, release_resolution_at: provenance.releaseResolutionAt, pit_status: 'PIT' });
 
     await expect(upsertOfficialSnapshot(db, 'run-1', { ...snapshot, score: 1 }, 1, {
       ...provenance, dataCutoff: '2024-01-09T00:00:00Z',
@@ -66,9 +67,12 @@ describe('official PIT snapshot persistence', () => {
     await upsertNowcastSnapshot(db, 'run-1', { ...snapshot, date: '2024-01-10' }, 4800, {
       dataRunId: 'run-1', dataCutoff: provenance.dataCutoff,
       decisionAt: '2024-01-10T12:00:00Z', tradableAt: '2024-01-10T12:00:00Z',
+      releaseResolutionAt: '2024-01-10T00:00:00Z',
     });
-    expect(await db.prepare('SELECT data_run_id,pit_status FROM nowcast_snapshot_daily').first())
-      .toEqual({ data_run_id: 'run-1', pit_status: 'PIT' });
+    expect(await db.prepare('SELECT data_run_id,release_resolution_at,pit_status FROM nowcast_snapshot_daily').first())
+      .toEqual({
+        data_run_id: 'run-1', release_resolution_at: provenance.releaseResolutionAt, pit_status: 'PIT',
+      });
     expect(await db.prepare('SELECT COUNT(*) AS n FROM snapshot_inputs').first()).toEqual({ n: SERIES_IDS.length });
     await mf.dispose();
   }, 15000);
@@ -80,7 +84,7 @@ describe('official PIT snapshot persistence', () => {
     if (walcl.inputStatus === 'AVAILABLE') walcl.releasedAt = '2024-01-06T00:00:00Z';
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, {
       dataRunId: 'run-1', dataCutoff: null, decisionAt: '2024-01-05T00:00:00Z',
-      tradableAt: '2024-01-05T14:30:00Z', inputs,
+      tradableAt: '2024-01-05T14:30:00Z', releaseResolutionAt: '2024-01-10T00:00:00Z', inputs,
     })).rejects.toThrow(/future/i);
     expect(await db.prepare('SELECT COUNT(*) AS n FROM model_snapshot_weekly').first()).toEqual({ n: 0 });
     await mf.dispose();
@@ -93,15 +97,15 @@ describe('official PIT snapshot persistence', () => {
     if (walcl.inputStatus === 'AVAILABLE') walcl.observationDate = '2024-01-04';
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, {
       dataRunId: 'another-run', dataCutoff: null, decisionAt: '2024-01-05T00:00:00Z',
-      tradableAt: '2024-01-05T14:30:00Z', inputs,
+      tradableAt: '2024-01-05T14:30:00Z', releaseResolutionAt: '2024-01-10T00:00:00Z', inputs,
     })).rejects.toThrow(/run/i);
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, {
       dataRunId: 'run-1', dataCutoff: null, decisionAt: '2024-01-05T00:00:00Z',
-      tradableAt: '2024-01-05T14:30:00Z', inputs,
+      tradableAt: '2024-01-05T14:30:00Z', releaseResolutionAt: '2024-01-10T00:00:00Z', inputs,
     })).rejects.toThrow(/observation/i);
     await expect(upsertNowcastSnapshot(db, 'run-1', snapshot, 4700, {
       dataRunId: 'another-run', dataCutoff: null, decisionAt: '2024-01-05T00:00:00Z',
-      tradableAt: '2024-01-05T14:30:00Z',
+      tradableAt: '2024-01-05T14:30:00Z', releaseResolutionAt: '2024-01-10T00:00:00Z',
     })).rejects.toThrow(/run/i);
     await mf.dispose();
   }, 15000);
@@ -113,7 +117,7 @@ describe('official PIT snapshot persistence', () => {
     if (walcl.inputStatus === 'AVAILABLE') walcl.tradableAt = '2024-01-08T14:30:00Z';
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, {
       dataRunId: 'run-1', dataCutoff: null, decisionAt: '2024-01-05T00:00:00Z',
-      tradableAt: '2024-01-05T14:30:00Z', inputs,
+      tradableAt: '2024-01-05T14:30:00Z', releaseResolutionAt: '2024-01-10T00:00:00Z', inputs,
     })).rejects.toThrow(/tradable/i);
     expect(await db.prepare('SELECT COUNT(*) AS n FROM model_snapshot_weekly').first()).toEqual({ n: 0 });
     await mf.dispose();
@@ -127,7 +131,8 @@ describe('official PIT snapshot persistence', () => {
       VALUES ('OFFICIAL','2024-01-01','2024-01-03','run-1','WALCL','MISSING')`).run();
     const provenance = {
       dataRunId: 'run-1', dataCutoff: '2024-01-04T23:59:59Z',
-      decisionAt: '2024-01-05T00:00:00Z', tradableAt: '2024-01-05T14:30:00Z', inputs: manifest(),
+      decisionAt: '2024-01-05T00:00:00Z', tradableAt: '2024-01-05T14:30:00Z',
+      releaseResolutionAt: '2024-01-10T00:00:00Z', inputs: manifest(),
     };
     await expect(upsertOfficialSnapshot(db, 'run-1', snapshot, 4700, provenance)).rejects.toThrow(/atomic/i);
     expect(await db.prepare("SELECT score,pit_status FROM model_snapshot_weekly WHERE decision_week='2024-01-01'").first())
@@ -140,6 +145,23 @@ describe('official PIT snapshot persistence', () => {
     })).resolves.toBe('UPGRADED_LEGACY');
     expect(await db.prepare("SELECT pit_status FROM model_snapshot_weekly WHERE decision_week='2024-01-08'").first())
       .toEqual({ pit_status: 'PIT' });
+    await mf.dispose();
+  }, 15000);
+
+  it('freezes an existing PIT row even when its data_run_id is abnormally null', async () => {
+    const { mf, db } = await migratedDb();
+    await db.prepare(`INSERT INTO model_snapshot_weekly
+      (date,decision_week,score,pit_status,data_run_id)
+      VALUES ('2024-01-03','2024-01-01',50,'PIT',NULL)`).run();
+    const provenance = {
+      dataRunId: 'run-1', dataCutoff: '2024-01-04T23:59:59Z',
+      decisionAt: '2024-01-05T00:00:00Z', tradableAt: '2024-01-05T14:30:00Z',
+      releaseResolutionAt: '2024-01-10T00:00:00Z', inputs: manifest(),
+    };
+    await expect(upsertOfficialSnapshot(db, 'run-1', { ...snapshot, score: 99 }, 4700, provenance))
+      .resolves.toBe('FROZEN');
+    expect(await db.prepare('SELECT score,data_run_id FROM model_snapshot_weekly').first())
+      .toEqual({ score: 50, data_run_id: null });
     await mf.dispose();
   }, 15000);
 });

@@ -16,7 +16,11 @@ export interface PitObservation {
   value: number;
 }
 
-export interface ReleaseRule { expectedReleaseTime: string }
+export interface ReleaseRule {
+  expectedReleaseTime: string;
+  validFrom?: string;
+  validTo?: string;
+}
 export interface ReleaseOverride { releasedAt: string; tradableAt: string }
 
 export type SnapshotInput =
@@ -113,26 +117,80 @@ export function availableForExecution(
   return row.releasedAt <= decisionAt && row.tradableAt <= executionAt;
 }
 
-function frameFromActive(
-  active: Map<string, Map<string, PitObservation>>,
-  event: PitDecisionEvent,
-): PitFrame {
+interface ActiveSeries {
+  rows: PitObservation[];
+  observations: { date: string; value: number }[];
+  releasedAtMax: string[];
+  tradableAtMax: string[];
+}
+
+function lowerBoundObservation(rows: PitObservation[], observationDate: string): number {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (rows[mid].observationDate < observationDate) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function upperBoundObservation(rows: PitObservation[], modelDate: string): number {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (rows[mid].observationDate <= modelDate) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function activateRow(active: Map<string, ActiveSeries>, row: PitObservation): void {
+  const series = active.get(row.seriesId) ?? {
+    rows: [], observations: [], releasedAtMax: [], tradableAtMax: [],
+  };
+  const index = lowerBoundObservation(series.rows, row.observationDate);
+  const previous = series.rows[index];
+  if (previous?.observationDate === row.observationDate) {
+    if (row.vintageDate < previous.vintageDate) return;
+    series.rows[index] = row;
+    series.observations[index] = { date: row.observationDate, value: row.value };
+  } else {
+    series.rows.splice(index, 0, row);
+    series.observations.splice(index, 0, { date: row.observationDate, value: row.value });
+    series.releasedAtMax.splice(index, 0, row.releasedAt);
+    series.tradableAtMax.splice(index, 0, row.tradableAt);
+  }
+  for (let cursor = index; cursor < series.rows.length; cursor++) {
+    const current = series.rows[cursor];
+    const previousReleasedAt = cursor === 0 ? null : series.releasedAtMax[cursor - 1];
+    const previousTradableAt = cursor === 0 ? null : series.tradableAtMax[cursor - 1];
+    series.releasedAtMax[cursor] = previousReleasedAt != null && previousReleasedAt > current.releasedAt
+      ? previousReleasedAt : current.releasedAt;
+    series.tradableAtMax[cursor] = previousTradableAt != null && previousTradableAt > current.tradableAt
+      ? previousTradableAt : current.tradableAt;
+  }
+  active.set(row.seriesId, series);
+}
+
+function frameFromActive(active: Map<string, ActiveSeries>, event: PitDecisionEvent): PitFrame {
   const seriesMap: SeriesMap = {};
   const inputs: SnapshotInput[] = [];
   let dataCutoff: string | null = null;
   let frameTradableAt = event.tradableAt;
   for (const seriesId of SERIES_IDS) {
-    const rows = [...(active.get(seriesId)?.values() ?? [])]
-      .filter(row => row.observationDate <= event.modelDate)
-      .sort((a, b) => a.observationDate.localeCompare(b.observationDate));
-    seriesMap[seriesId] = rows.map(row => ({ date: row.observationDate, value: row.value }));
-    for (const row of rows) {
-      if (row.tradableAt > frameTradableAt) frameTradableAt = row.tradableAt;
-    }
+    const series = active.get(seriesId);
+    const end = series == null ? 0 : upperBoundObservation(series.rows, event.modelDate);
+    const rows = series?.rows.slice(0, end) ?? [];
+    seriesMap[seriesId] = series?.observations.slice(0, end) ?? [];
+    const releasedAt = end === 0 ? null : series!.releasedAtMax[end - 1];
+    const tradableAt = end === 0 ? null : series!.tradableAtMax[end - 1];
+    if (tradableAt != null && tradableAt > frameTradableAt) frameTradableAt = tradableAt;
+    if (releasedAt != null && (dataCutoff == null || releasedAt > dataCutoff)) dataCutoff = releasedAt;
     const latest = rows.at(-1);
     if (latest) {
       inputs.push({ ...latest, inputStatus: 'AVAILABLE' });
-      if (dataCutoff == null || latest.releasedAt > dataCutoff) dataCutoff = latest.releasedAt;
     } else {
       inputs.push({
         seriesId, inputStatus: 'MISSING', observationDate: null, vintageDate: null,
@@ -149,27 +207,28 @@ function frameFromActive(
   };
 }
 
-export function buildPitFrames(rows: PitObservation[], events: PitDecisionEvent[]): PitFrame[] {
+export function* iteratePitFrames(
+  rows: PitObservation[],
+  events: PitDecisionEvent[],
+): Generator<PitFrame, void, undefined> {
   const releases = rows.slice().sort((a, b) =>
     a.releasedAt.localeCompare(b.releasedAt)
     || a.seriesId.localeCompare(b.seriesId)
     || a.observationDate.localeCompare(b.observationDate)
     || a.vintageDate.localeCompare(b.vintageDate));
   const orderedEvents = events.slice().sort((a, b) => a.decisionAt.localeCompare(b.decisionAt));
-  const active = new Map<string, Map<string, PitObservation>>();
-  const frames: PitFrame[] = [];
+  const active = new Map<string, ActiveSeries>();
   let cursor = 0;
   for (const event of orderedEvents) {
     while (cursor < releases.length && releases[cursor].releasedAt <= event.decisionAt) {
-      const row = releases[cursor++];
-      const byDate = active.get(row.seriesId) ?? new Map<string, PitObservation>();
-      const previous = byDate.get(row.observationDate);
-      if (previous == null || row.vintageDate >= previous.vintageDate) byDate.set(row.observationDate, row);
-      active.set(row.seriesId, byDate);
+      activateRow(active, releases[cursor++]);
     }
-    frames.push(frameFromActive(active, event));
+    yield frameFromActive(active, event);
   }
-  return frames;
+}
+
+export function buildPitFrames(rows: PitObservation[], events: PitDecisionEvent[]): PitFrame[] {
+  return Array.from(iteratePitFrames(rows, events));
 }
 
 export function resolvePitFrame(rows: PitObservation[], event: PitDecisionEvent): PitFrame {

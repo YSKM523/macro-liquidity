@@ -56,9 +56,12 @@ CREATE TABLE IF NOT EXISTS release_calendar_overrides (
   tradable_at TEXT NOT NULL,
   reason TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  PRIMARY KEY (series_id, vintage_date)
+  PRIMARY KEY (series_id, vintage_date, created_at)
 );
 
+-- Endpoint audit index: one latest-as-of row per configured series for a frozen official
+-- snapshot. Full scoring history is reproduced from observations_pit plus the snapshot's
+-- decision_at and release_resolution_at; this table is not a full scoring-row manifest.
 CREATE TABLE IF NOT EXISTS snapshot_inputs (
   snapshot_channel TEXT NOT NULL CHECK (snapshot_channel = 'OFFICIAL'),
   decision_week TEXT NOT NULL,
@@ -93,6 +96,10 @@ CREATE TRIGGER IF NOT EXISTS snapshot_inputs_no_update BEFORE UPDATE ON snapshot
 BEGIN SELECT RAISE(ABORT, 'snapshot_inputs is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS snapshot_inputs_no_delete BEFORE DELETE ON snapshot_inputs
 BEGIN SELECT RAISE(ABORT, 'snapshot_inputs is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS release_calendar_overrides_no_update BEFORE UPDATE ON release_calendar_overrides
+BEGIN SELECT RAISE(ABORT, 'release_calendar_overrides is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS release_calendar_overrides_no_delete BEFORE DELETE ON release_calendar_overrides
+BEGIN SELECT RAISE(ABORT, 'release_calendar_overrides is append-only'); END;
 
 CREATE VIEW IF NOT EXISTS observation_revisions AS
 WITH revisions AS (
@@ -131,6 +138,7 @@ ALTER TABLE model_snapshot_weekly ADD COLUMN data_run_id TEXT;
 ALTER TABLE model_snapshot_weekly ADD COLUMN data_cutoff TEXT;
 ALTER TABLE model_snapshot_weekly ADD COLUMN decision_at TEXT;
 ALTER TABLE model_snapshot_weekly ADD COLUMN tradable_at TEXT;
+ALTER TABLE model_snapshot_weekly ADD COLUMN release_resolution_at TEXT;
 ALTER TABLE model_snapshot_weekly ADD COLUMN pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT'
   CHECK (pit_status IN ('LEGACY_NON_PIT','PIT'));
 
@@ -138,5 +146,6 @@ ALTER TABLE nowcast_snapshot_daily ADD COLUMN data_run_id TEXT;
 ALTER TABLE nowcast_snapshot_daily ADD COLUMN data_cutoff TEXT;
 ALTER TABLE nowcast_snapshot_daily ADD COLUMN decision_at TEXT;
 ALTER TABLE nowcast_snapshot_daily ADD COLUMN tradable_at TEXT;
+ALTER TABLE nowcast_snapshot_daily ADD COLUMN release_resolution_at TEXT;
 ALTER TABLE nowcast_snapshot_daily ADD COLUMN pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT'
   CHECK (pit_status IN ('LEGACY_NON_PIT','PIT'));

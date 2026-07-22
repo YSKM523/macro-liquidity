@@ -39,7 +39,7 @@ import { computeSnapshot, asOf } from './metrics';
 import type { Verdict } from './metrics';
 import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
 import { spliceSeries, fetchDxyDaily } from './prices';
-import { buildPitFrames } from './pit';
+import { iteratePitFrames } from './pit';
 
 export interface Env {
   DB: D1Database; ASSETS: Fetcher;
@@ -124,8 +124,10 @@ export async function runIngest(
         const releaseRules = await loadReleaseRules(env.DB);
         const realtimeStart = lastPitVintage ?? env.START_DATE;
         const releaseRule = releaseRules.get(id);
-        if (!releaseRule) throw new Error(`${id} has no active release calendar rule`);
-        const overrides = await loadReleaseOverrides(env.DB, id, realtimeStart);
+        if (releaseRule == null || releaseRule.length === 0) {
+          throw new Error(`${id} has no release calendar rule`);
+        }
+        const overrides = await loadReleaseOverrides(env.DB, id, realtimeStart, nowIso);
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);
         failedStep = 'fetch';
@@ -184,7 +186,7 @@ export async function runIngest(
 
     // 3) Rebuild snapshots only from the newly activated production view.
     failedStep = 'snapshot-read';
-    const pitRows = await loadPitObservations(env.DB);
+    const pitRows = await loadPitObservations(env.DB, nowIso);
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     // DTWEXBGS 官方发布滞后约一周;用 DXY 日线按比例链到末端参与打分(仅内存,行情失败则跳过)。
@@ -193,7 +195,7 @@ export async function runIngest(
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     const currentAsOf = now.toISOString().slice(0, 10);
-    const rawOfficialEvents = rebuildAll ? await officialPitDecisionEvents(env.DB) : [];
+    const rawOfficialEvents = rebuildAll ? await officialPitDecisionEvents(env.DB, nowIso) : [];
     const officialDates = new Set(oneDecisionPerWeek(rawOfficialEvents.map(event => event.modelDate)));
     const events = rebuildAll
       ? rawOfficialEvents.filter(event => officialDates.has(event.modelDate))
@@ -202,9 +204,10 @@ export async function runIngest(
           const decisionAt = modelDateEnd < nowIso ? modelDateEnd : nowIso;
           return { modelDate, decisionAt, tradableAt: decisionAt };
         });
-    const frames = buildPitFrames(pitRows, events);
-    if (frames.length > 0) {
-      const dates = frames.map(frame => frame.event.modelDate);
+    if (events.length > 0) {
+      const dates = events.slice()
+        .sort((a, b) => a.decisionAt.localeCompare(b.decisionAt))
+        .map(event => event.modelDate);
       let prev: Verdict | undefined;
       let officialAnchors = new Map<string, Verdict>();
       if (!rebuildAll && dates.length > 0) {
@@ -219,7 +222,7 @@ export async function runIngest(
         await renewOwnedLease(env.DB, runId);
         officialAnchors = new Map(anchors.map(anchor => [anchor.date, anchor.verdict]));
       }
-      for (const frame of frames) {
+      for (const frame of iteratePitFrames(pitRows, events)) {
         const date = frame.event.modelDate;
         const m = frame.seriesMap;
         if (!rebuildAll) m.DTWEXBGS = spliceSeries(m.DTWEXBGS ?? [], dxy);
@@ -235,6 +238,7 @@ export async function runIngest(
             dataCutoff: frame.dataCutoff,
             decisionAt: frame.event.decisionAt,
             tradableAt: frame.event.tradableAt,
+            releaseResolutionAt: nowIso,
             inputs: frame.inputs,
           });
           if (outcome === 'FROZEN') {
@@ -249,6 +253,7 @@ export async function runIngest(
             dataCutoff: frame.dataCutoff,
             decisionAt: frame.event.decisionAt,
             tradableAt: frame.event.tradableAt,
+            releaseResolutionAt: nowIso,
           });
         }
         if (snap.verdict != null) prev = snap.verdict;

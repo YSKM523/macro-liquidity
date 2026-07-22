@@ -46,6 +46,45 @@ describe('ALFRED vintages', () => {
     expect(result[0]).toMatchObject({ observationDate: '2024-01-03', vintageDate: '2024-01-04' });
   });
 
+  it('selects the unique release rule covering each vintage date', async () => {
+    const result = await parseFredPitJson('WALCL', {
+      observations: [
+        { date: '2024-01-03', realtime_start: '2024-01-15', value: '5800000' },
+        { date: '2024-02-07', realtime_start: '2024-02-15', value: '5900000' },
+      ],
+    }, '2024-03-01T18:00:00Z', [
+      { expectedReleaseTime: '12:00:00', validFrom: '2024-01-01', validTo: '2024-01-31' },
+      { expectedReleaseTime: '18:00:00', validFrom: '2024-02-01', validTo: '2024-12-31' },
+    ], new Map());
+    expect(result.map(row => row.releasedAt)).toEqual([
+      '2024-01-15T12:00:00Z', '2024-02-15T18:00:00Z',
+    ]);
+  });
+
+  it.each([
+    [[{ expectedReleaseTime: '12:00:00', validFrom: '2024-02-01', validTo: '2024-12-31' }], 'missing'],
+    [[
+      { expectedReleaseTime: '12:00:00', validFrom: '2024-01-01', validTo: '2024-12-31' },
+      { expectedReleaseTime: '18:00:00', validFrom: '2024-01-15', validTo: '2024-01-31' },
+    ], 'overlap'],
+  ] as const)('fails closed when release rules do not have a unique vintage match', async (rules, _kind) => {
+    await expect(parseFredPitJson('WALCL', {
+      observations: [{ date: '2024-01-03', realtime_start: '2024-01-15', value: '5800000' }],
+    }, '2024-03-01T18:00:00Z', [...rules], new Map())).rejects.toThrow(/unique release rule/i);
+  });
+
+  it('rejects malformed or reversed release-rule validity bounds', async () => {
+    const json = {
+      observations: [{ date: '2024-01-03', realtime_start: '2024-01-15', value: '5800000' }],
+    };
+    await expect(parseFredPitJson('WALCL', json, '2024-03-01T18:00:00Z', [{
+      expectedReleaseTime: '12:00:00', validFrom: 'not-a-date', validTo: '2024-12-31',
+    }], new Map())).rejects.toThrow(/release rule/i);
+    await expect(parseFredPitJson('WALCL', json, '2024-03-01T18:00:00Z', [{
+      expectedReleaseTime: '12:00:00', validFrom: '2024-02-01', validTo: '2024-01-01',
+    }], new Map())).rejects.toThrow(/release rule/i);
+  });
+
   it('fetches output_type=3 with an inclusive checkpoint and paginates', async () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

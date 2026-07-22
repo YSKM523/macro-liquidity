@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Miniflare } from 'miniflare';
 import { SERIES_IDS } from '../src/config';
-import { activateIngestRun, loadPitObservations, officialPitDecisionEvents, stagePitObservations } from '../src/db';
+import {
+  activateIngestRun, loadPitObservations, loadReleaseRules, officialPitDecisionEvents,
+  stagePitObservations,
+} from '../src/db';
 
 async function migratedDb() {
   const mf = new Miniflare({
@@ -48,18 +51,42 @@ describe('point-in-time schema', () => {
       VALUES ('OFFICIAL','2024-01-01','2024-01-03','pit-run','SP500','MISSING')`).run();
     await expect(db.prepare("UPDATE snapshot_inputs SET snapshot_date='2024-01-04'").run()).rejects.toThrow(/append-only/i);
     await expect(db.prepare('DELETE FROM snapshot_inputs').run()).rejects.toThrow(/append-only/i);
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL','2024-01-04','2024-01-04T20:00:00Z','2024-01-05T14:30:00Z','verified','2024-01-06T00:00:00Z')`).run();
+    await expect(db.prepare("UPDATE release_calendar_overrides SET reason='changed'").run())
+      .rejects.toThrow(/append-only/i);
+    await expect(db.prepare('DELETE FROM release_calendar_overrides').run())
+      .rejects.toThrow(/append-only/i);
 
     const seeded = await db.prepare('SELECT series_id FROM release_calendar ORDER BY series_id').all<{series_id:string}>();
     expect(seeded.results?.map(row => row.series_id)).toEqual([...SERIES_IDS].sort());
+    await db.prepare(`INSERT INTO release_calendar
+      (series_id,expected_release_time,source_url,valid_from,valid_to)
+      VALUES ('WALCL','12:00:00','https://example.test/future','2100-01-01','2100-12-31')`).run();
+    expect((await loadReleaseRules(db)).get('WALCL')).toEqual([
+      expect.objectContaining({ validFrom: '1776-07-04', validTo: '9999-12-31' }),
+      expect.objectContaining({ validFrom: '2100-01-01', validTo: '2100-12-31' }),
+    ]);
     const columns = await db.prepare("PRAGMA table_info('model_snapshot_weekly')").all<{name:string}>();
     expect(columns.results?.map(row => row.name)).toEqual(expect.arrayContaining([
-      'data_run_id', 'data_cutoff', 'decision_at', 'tradable_at', 'pit_status',
+      'data_run_id', 'data_cutoff', 'decision_at', 'tradable_at', 'release_resolution_at', 'pit_status',
     ]));
     await mf.dispose();
   }, 30_000);
 });
 
 describe('PIT activation repository', () => {
+  it('rejects malformed release-resolution and override creation timestamps', async () => {
+    const { mf, db } = await migratedDb();
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL','2024-01-04','2024-01-04T20:00:00Z','2024-01-05T14:30:00Z','bad clock','not-an-iso-time')`).run();
+    await expect(loadPitObservations(db, 'not-an-iso-time')).rejects.toThrow(/resolution/i);
+    await expect(loadPitObservations(db, '2024-01-11T00:00:00Z')).rejects.toThrow(/created/i);
+    await mf.dispose();
+  }, 30_000);
+
   it('fails closed when a persisted release override is malformed or tradable before release', async () => {
     const { mf, db } = await migratedDb();
     await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('override-run','RUNNING','FULL','2024-01-01T00:00:00Z')").run();
@@ -72,11 +99,23 @@ describe('PIT activation repository', () => {
     await db.prepare(`INSERT INTO release_calendar_overrides
       (series_id,vintage_date,released_at,tradable_at,reason,created_at)
       VALUES ('WALCL','2024-01-04','not-an-iso-time','2024-01-09T14:30:00Z','bad','2024-01-10T00:00:00Z')`).run();
-    await expect(loadPitObservations(db)).rejects.toThrow(/override|released/i);
-    await db.prepare(`UPDATE release_calendar_overrides
-      SET released_at='2024-01-09T15:00:00Z',tradable_at='2024-01-09T14:30:00Z'
-      WHERE series_id='WALCL' AND vintage_date='2024-01-04'`).run();
-    await expect(officialPitDecisionEvents(db)).rejects.toThrow(/tradable|override/i);
+    await expect(loadPitObservations(db, '2024-01-11T00:00:00Z')).rejects.toThrow(/override|released/i);
+    await mf.dispose();
+  }, 30_000);
+
+  it('fails closed when a persisted override is tradable before release', async () => {
+    const { mf, db } = await migratedDb();
+    await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('override-run','RUNNING','FULL','2024-01-01T00:00:00Z')").run();
+    await db.prepare(`INSERT INTO observations_pit
+      (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,
+       checksum,data_run_id,release_time_status,value)
+      VALUES ('WALCL','2023-12-27','2024-01-04','2024-01-04T23:59:59Z',
+       '2024-01-10T00:00:00Z','2024-01-05T14:30:00Z','ALFRED','raw','override-run',
+       'CONSERVATIVE_DATE_END',5800)`).run();
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL','2024-01-04','2024-01-09T15:00:00Z','2024-01-09T14:30:00Z','bad','2024-01-10T00:00:00Z')`).run();
+    await expect(officialPitDecisionEvents(db, '2024-01-11T00:00:00Z')).rejects.toThrow(/tradable|override/i);
     await mf.dispose();
   }, 30_000);
 
@@ -99,8 +138,15 @@ describe('PIT activation repository', () => {
     expect(await db.prepare('SELECT value FROM observations_pit').first()).toEqual({ value: 5800 });
     await db.prepare(`INSERT INTO release_calendar_overrides
       (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('WALCL','2024-01-04','2024-01-07T15:00:00Z','2024-01-08T14:30:00Z','initial verified release','2024-01-09T00:00:00Z')`).run();
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
       VALUES ('WALCL','2024-01-04','2024-01-08T15:00:00Z','2024-01-09T14:30:00Z','verified release','2024-01-10T00:00:00Z')`).run();
-    expect(await loadPitObservations(db)).toEqual([expect.objectContaining({
+    expect(await loadPitObservations(db, '2024-01-09T12:00:00Z')).toEqual([expect.objectContaining({
+      releasedAt: '2024-01-07T15:00:00Z', tradableAt: '2024-01-08T14:30:00Z',
+      releaseTimeStatus: 'OVERRIDE',
+    })]);
+    expect(await loadPitObservations(db, '2024-01-10T12:00:00Z')).toEqual([expect.objectContaining({
       releasedAt: '2024-01-08T15:00:00Z', tradableAt: '2024-01-09T14:30:00Z',
       releaseTimeStatus: 'OVERRIDE',
     })]);
@@ -109,7 +155,7 @@ describe('PIT activation repository', () => {
         released_at: base.releasedAt, tradable_at: base.tradableAt,
         release_time_status: base.releaseTimeStatus,
       });
-    expect(await officialPitDecisionEvents(db)).toEqual([{
+    expect(await officialPitDecisionEvents(db, '2024-01-10T12:00:00Z')).toEqual([{
       modelDate: '2023-12-27', decisionAt: '2024-01-08T15:00:00Z', tradableAt: '2024-01-09T14:30:00Z',
     }]);
     await mf.dispose();

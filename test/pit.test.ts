@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Node test runtime Web Crypto shim.
 import { webcrypto } from 'node:crypto';
-import { availableForExecution, buildPitFrames, deriveReleaseTiming, pitChecksum } from '../src/pit';
+import { availableForExecution, buildPitFrames, deriveReleaseTiming, iteratePitFrames, pitChecksum } from '../src/pit';
 import { SERIES_IDS } from '../src/config';
 import type { PitObservation } from '../src/pit';
 
@@ -78,4 +78,43 @@ describe('PIT timeline', () => {
     }])[0];
     expect(frame.event.tradableAt).toBe('2024-01-12T14:30:00Z');
   });
+
+  it('computes dataCutoff from every scoring-history row, including a late revision of an older observation', () => {
+    const frame = buildPitFrames([
+      row({ observationDate: '2023-12-27', vintageDate: '2024-01-09', releasedAt: '2024-01-09T23:59:59Z' }),
+      row({ observationDate: '2024-01-03', vintageDate: '2024-01-04', releasedAt: '2024-01-04T23:59:59Z', checksum: 'newer-endpoint' }),
+    ], [{ modelDate: '2024-01-03', decisionAt: '2024-01-10T00:00:00Z', tradableAt: '2024-01-10T14:30:00Z' }])[0];
+    expect(frame.inputs.find(input => input.seriesId === 'WALCL')).toMatchObject({
+      observationDate: '2024-01-03', releasedAt: '2024-01-04T23:59:59Z',
+    });
+    expect(frame.dataCutoff).toBe('2024-01-09T23:59:59Z');
+  });
+
+  it('iterates production-scale frames lazily within a bounded budget', () => {
+    const series = SERIES_IDS.slice(0, 12);
+    const rows: PitObservation[] = [];
+    for (const [seriesIndex, seriesId] of series.entries()) {
+      for (let index = 0; index < 2500; index++) {
+        const date = new Date(Date.UTC(2010, 0, 1 + index)).toISOString().slice(0, 10);
+        rows.push(row({
+          seriesId, observationDate: date, vintageDate: date,
+          releasedAt: `${date}T00:00:00Z`, tradableAt: `${date}T14:30:00Z`,
+          checksum: `${seriesIndex}-${index}`, value: index,
+        }));
+      }
+    }
+    const events = Array.from({ length: 500 }, (_, index) => {
+      const date = new Date(Date.UTC(2010, 0, 1 + index * 5)).toISOString().slice(0, 10);
+      return { modelDate: date, decisionAt: `${date}T23:59:59Z`, tradableAt: `${date}T23:59:59Z` };
+    });
+    const started = Date.now();
+    const iterator = iteratePitFrames(rows, events);
+    const first = iterator.next();
+    expect(first.done).toBe(false);
+    expect(first.value?.event.modelDate).toBe(events[0].modelDate);
+    let count = 1;
+    while (!iterator.next().done) count++;
+    expect(count).toBe(500);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  }, 10_000);
 });

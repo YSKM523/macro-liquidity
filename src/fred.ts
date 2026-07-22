@@ -4,6 +4,8 @@ import type { PitObservation, ReleaseOverride, ReleaseRule } from './pit';
 
 export interface Obs { date: string; value: number }
 
+export type ReleaseRules = ReleaseRule | ReleaseRule[];
+
 export function parseFredJson(seriesId: string, json: any): Obs[] {
   const unit = UNIT_BY_ID[seriesId] ?? 'I';
   const rows: Obs[] = [];
@@ -37,15 +39,28 @@ function strictDate(value: unknown, field: string): string {
   return value;
 }
 
+function normalizeReleaseRules(releaseRules: ReleaseRules): ReleaseRule[] {
+  const rules = Array.isArray(releaseRules) ? releaseRules : [releaseRules];
+  for (const rule of rules) {
+    if (rule.validFrom != null) strictDate(rule.validFrom, 'release rule validFrom');
+    if (rule.validTo != null) strictDate(rule.validTo, 'release rule validTo');
+    if (rule.validFrom != null && rule.validTo != null && rule.validFrom > rule.validTo) {
+      throw new Error('invalid ALFRED release rule validity range');
+    }
+  }
+  return rules;
+}
+
 export async function parseFredPitJson(
   seriesId: string,
   json: any,
   fetchedAt: string,
-  releaseRule: ReleaseRule,
+  releaseRules: ReleaseRules,
   overrides: Map<string, ReleaseOverride>,
 ): Promise<PitObservation[]> {
   const unit = UNIT_BY_ID[seriesId] ?? 'I';
   const byKey = new Map<string, PitObservation>();
+  const rules = normalizeReleaseRules(releaseRules);
   for (const raw of (json?.observations ?? [])) {
     if (raw.value === '.' || raw.value == null || raw.value === '') continue;
     let value = Number(raw.value);
@@ -53,8 +68,14 @@ export async function parseFredPitJson(
     if (unit === 'M') value /= 1000;
     const observationDate = strictDate(raw.date, 'observation date');
     const vintageDate = strictDate(raw.realtime_start, 'vintage date');
+    const matchingRules = rules.filter(rule =>
+      vintageDate >= (rule.validFrom ?? '0000-01-01')
+      && vintageDate <= (rule.validTo ?? '9999-12-31'));
+    if (matchingRules.length !== 1) {
+      throw new Error(`${seriesId} vintage ${vintageDate} must match one unique release rule`);
+    }
     const timing = deriveReleaseTiming(
-      vintageDate, fetchedAt, releaseRule.expectedReleaseTime, overrides.get(vintageDate),
+      vintageDate, fetchedAt, matchingRules[0].expectedReleaseTime, overrides.get(vintageDate),
     );
     const checksum = await pitChecksum(seriesId, observationDate, vintageDate, value);
     const row: PitObservation = {
@@ -75,7 +96,7 @@ export async function fetchFredSeriesPit(
   realtimeStart: string,
   fetchedAt: string,
   apiKey: string,
-  releaseRule: ReleaseRule,
+  releaseRules: ReleaseRules,
   overrides: Map<string, ReleaseOverride>,
   observedAt: () => string = () => fetchedAt,
 ): Promise<{ latestRows: Obs[]; vintages: PitObservation[] }> {
@@ -93,7 +114,7 @@ export async function fetchFredSeriesPit(
     if (!response.ok) throw new Error(`ALFRED ${seriesId} ${response.status}`);
     const json: any = await response.json();
     const pageFetchedAt = observedAt();
-    all.push(...await parseFredPitJson(seriesId, json, pageFetchedAt, releaseRule, overrides));
+    all.push(...await parseFredPitJson(seriesId, json, pageFetchedAt, releaseRules, overrides));
     const count = Number(json?.count ?? all.length);
     const pageLimit = Number(json?.limit ?? limit);
     const pageOffset = Number(json?.offset ?? offset);

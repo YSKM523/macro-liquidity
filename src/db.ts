@@ -3,6 +3,18 @@ import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
 import { validateReleaseOverride } from './pit';
 
+const STRICT_ISO_RE = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{3})?Z$/;
+
+function requireIsoTimestamp(value: string, field: string): void {
+  if (!STRICT_ISO_RE.test(value) || !Number.isFinite(Date.parse(value))) throw new Error(`invalid ${field}`);
+}
+
+async function validateOverrideCreationTimes(db: D1Database): Promise<void> {
+  const rows = await db.prepare('SELECT created_at FROM release_calendar_overrides')
+    .all<{ created_at: string }>();
+  for (const row of rows.results ?? []) requireIsoTimestamp(row.created_at, 'override createdAt');
+}
+
 export async function maxObsDate(db: D1Database, seriesId: string): Promise<string | null> {
   const row = await db.prepare('SELECT MAX(date) AS d FROM observations WHERE series_id = ?')
     .bind(seriesId).first<{ d: string | null }>();
@@ -15,14 +27,20 @@ export async function maxPitVintageDate(db: D1Database, seriesId: string): Promi
   return row?.d ?? null;
 }
 
-export async function loadReleaseRules(db: D1Database): Promise<Map<string, ReleaseRule>> {
+export async function loadReleaseRules(db: D1Database): Promise<Map<string, ReleaseRule[]>> {
   const rows = await db.prepare(
-    `SELECT series_id, expected_release_time FROM release_calendar
-     WHERE date('now') BETWEEN valid_from AND valid_to ORDER BY series_id, valid_from DESC`,
-  ).all<{ series_id: string; expected_release_time: string }>();
-  const out = new Map<string, ReleaseRule>();
+    `SELECT series_id, expected_release_time, valid_from, valid_to FROM release_calendar
+     ORDER BY series_id, valid_from`,
+  ).all<{ series_id: string; expected_release_time: string; valid_from: string; valid_to: string }>();
+  const out = new Map<string, ReleaseRule[]>();
   for (const row of rows.results ?? []) {
-    if (!out.has(row.series_id)) out.set(row.series_id, { expectedReleaseTime: row.expected_release_time });
+    const rules = out.get(row.series_id) ?? [];
+    rules.push({
+      expectedReleaseTime: row.expected_release_time,
+      validFrom: row.valid_from,
+      validTo: row.valid_to,
+    });
+    out.set(row.series_id, rules);
   }
   return out;
 }
@@ -31,12 +49,20 @@ export async function loadReleaseOverrides(
   db: D1Database,
   seriesId: string,
   fromVintage: string,
+  releaseResolutionAt: string,
 ): Promise<Map<string, ReleaseOverride>> {
+  requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
   const rows = await db.prepare(
-    `SELECT vintage_date, released_at, tradable_at FROM release_calendar_overrides
-     WHERE series_id = ? AND vintage_date >= ? ORDER BY vintage_date`,
-  ).bind(seriesId, fromVintage).all<{ vintage_date: string; released_at: string; tradable_at: string }>();
-  return new Map((rows.results ?? []).map(row => [row.vintage_date, {
+    `SELECT vintage_date, released_at, tradable_at, created_at FROM release_calendar_overrides
+     WHERE series_id = ? AND vintage_date >= ?
+     ORDER BY vintage_date, created_at`,
+  ).bind(seriesId, fromVintage)
+    .all<{ vintage_date: string; released_at: string; tradable_at: string; created_at: string }>();
+  const eligible = (rows.results ?? []).filter(row => {
+    requireIsoTimestamp(row.created_at, 'override createdAt');
+    return row.created_at <= releaseResolutionAt;
+  });
+  return new Map(eligible.map(row => [row.vintage_date, {
     releasedAt: row.released_at, tradableAt: row.tradable_at,
   }]));
 }
@@ -354,7 +380,12 @@ export async function activateIngestRun(
   }
 }
 
-export async function loadPitObservations(db: D1Database): Promise<PitObservation[]> {
+export async function loadPitObservations(
+  db: D1Database,
+  releaseResolutionAt: string,
+): Promise<PitObservation[]> {
+  requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
+  await validateOverrideCreationTimes(db);
   const rows = await db.prepare(
     `SELECT raw.series_id,raw.observation_date,raw.vintage_date,
             COALESCE(overrides.released_at,raw.released_at) AS released_at,
@@ -369,8 +400,13 @@ export async function loadPitObservations(db: D1Database): Promise<PitObservatio
      FROM observations_pit raw
      LEFT JOIN release_calendar_overrides overrides
        ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
+      AND overrides.created_at=(
+        SELECT MAX(candidate.created_at) FROM release_calendar_overrides candidate
+        WHERE candidate.series_id=raw.series_id AND candidate.vintage_date=raw.vintage_date
+          AND candidate.created_at<=?
+      )
      ORDER BY released_at,raw.series_id,raw.observation_date,raw.vintage_date`,
-  ).all<any>();
+  ).bind(releaseResolutionAt).all<any>();
   return (rows.results ?? []).map(row => {
     if (row.override_released_at != null || row.override_tradable_at != null) {
       validateReleaseOverride({
@@ -387,7 +423,12 @@ export async function loadPitObservations(db: D1Database): Promise<PitObservatio
   });
 }
 
-export async function officialPitDecisionEvents(db: D1Database): Promise<PitDecisionEvent[]> {
+export async function officialPitDecisionEvents(
+  db: D1Database,
+  releaseResolutionAt: string,
+): Promise<PitDecisionEvent[]> {
+  requireIsoTimestamp(releaseResolutionAt, 'release resolutionAt');
+  await validateOverrideCreationTimes(db);
   const rows = await db.prepare(
     `WITH ranked AS (
        SELECT raw.observation_date,
@@ -401,11 +442,16 @@ export async function officialPitDecisionEvents(db: D1Database): Promise<PitDeci
        FROM observations_pit raw
        LEFT JOIN release_calendar_overrides overrides
          ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
+        AND overrides.created_at=(
+          SELECT MAX(candidate.created_at) FROM release_calendar_overrides candidate
+          WHERE candidate.series_id=raw.series_id AND candidate.vintage_date=raw.vintage_date
+            AND candidate.created_at<=?
+        )
        WHERE raw.series_id='WALCL'
      )
      SELECT observation_date,released_at,tradable_at,override_released_at,override_tradable_at
      FROM ranked WHERE n=1 ORDER BY released_at`,
-  ).all<{
+  ).bind(releaseResolutionAt).all<{
     observation_date: string; released_at: string; tradable_at: string;
     override_released_at: string | null; override_tradable_at: string | null;
   }>();
@@ -599,6 +645,7 @@ export interface SnapshotProvenance {
   dataCutoff: string | null;
   decisionAt: string;
   tradableAt: string;
+  releaseResolutionAt: string;
   inputs: SnapshotInput[];
 }
 
@@ -635,28 +682,29 @@ export async function upsertOfficialSnapshot(
 ): Promise<'INSERTED' | 'UPGRADED_LEGACY' | 'FROZEN' | void> {
   if (provenance) {
     if (provenance.dataRunId !== runId) throw new Error('official snapshot provenance run mismatch');
+    requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
     validateSnapshotInputs(provenance.inputs, provenance.decisionAt, s.date, provenance.tradableAt);
     const week = decisionWeek(s.date);
     const existing = await db.prepare(
       'SELECT pit_status,data_run_id FROM model_snapshot_weekly WHERE decision_week=?',
     ).bind(week).first<{ pit_status: string; data_run_id: string | null }>();
-    if (existing?.pit_status === 'PIT' && existing.data_run_id != null) return 'FROZEN';
+    if (existing?.pit_status === 'PIT') return 'FROZEN';
 
-    const placeholders = Array.from({ length: 33 }, () => '?').join(',');
+    const placeholders = Array.from({ length: 34 }, () => '?').join(',');
     const statements: D1PreparedStatement[] = [db.prepare(
       `INSERT INTO model_snapshot_weekly
-       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,pit_status)
+       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status)
        SELECT ${placeholders}
        WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
          AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
        ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,${SNAPSHOT_UPDATE},
          data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
-         decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,pit_status='PIT'
-       WHERE model_snapshot_weekly.pit_status='LEGACY_NON_PIT'
-          OR model_snapshot_weekly.data_run_id IS NULL`,
+         decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,
+         release_resolution_at=excluded.release_resolution_at,pit_status='PIT'
+       WHERE model_snapshot_weekly.pit_status='LEGACY_NON_PIT'`,
     ).bind(
       s.date, week, ...snapshotValues(s, spx), provenance.dataRunId, provenance.dataCutoff,
-      provenance.decisionAt, provenance.tradableAt, 'PIT', runId,
+      provenance.decisionAt, provenance.tradableAt, provenance.releaseResolutionAt, 'PIT', runId,
     )];
     for (const input of provenance.inputs) {
       const available = input.inputStatus === 'AVAILABLE';
@@ -679,14 +727,18 @@ export async function upsertOfficialSnapshot(
     }
     statements.push(db.prepare(
       `SELECT CASE WHEN
-         EXISTS (SELECT 1 FROM model_snapshot_weekly snapshot
-           WHERE snapshot.decision_week=? AND snapshot.pit_status='PIT' AND snapshot.data_run_id=?)
+       EXISTS (SELECT 1 FROM model_snapshot_weekly snapshot
+           WHERE snapshot.decision_week=? AND snapshot.pit_status='PIT' AND snapshot.data_run_id=?
+             AND snapshot.release_resolution_at=?)
          AND (SELECT COUNT(*) FROM snapshot_inputs
               WHERE snapshot_channel='OFFICIAL' AND decision_week=?)=?
          AND EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
            AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
        THEN 1 ELSE json('official PIT snapshot manifest assertion failed') END AS manifest_fence`,
-    ).bind(week, provenance.dataRunId, week, SERIES_IDS.length, runId));
+    ).bind(
+      week, provenance.dataRunId, provenance.releaseResolutionAt,
+      week, SERIES_IDS.length, runId,
+    ));
     await db.batch(statements).catch(error => {
       throw new Error(`official PIT snapshot atomic write rejected: ${String((error as any)?.message ?? error)}`);
     });
@@ -718,19 +770,22 @@ export async function upsertNowcastSnapshot(
 ): Promise<void> {
   if (provenance) {
     if (provenance.dataRunId !== runId) throw new Error('nowcast snapshot provenance run mismatch');
-    const placeholders = Array.from({ length: 33 }, () => '?').join(',');
+    requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
+    const placeholders = Array.from({ length: 34 }, () => '?').join(',');
     const result = await db.prepare(
       `INSERT INTO nowcast_snapshot_daily
-       (date,channel_status,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,pit_status)
+       (date,channel_status,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status)
        SELECT ${placeholders}
        WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
          AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
        ON CONFLICT(date) DO UPDATE SET channel_status='PROVISIONAL',${SNAPSHOT_UPDATE},
          data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
-         decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,pit_status='PIT'`,
+         decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,
+         release_resolution_at=excluded.release_resolution_at,pit_status='PIT'`,
     ).bind(
       s.date, 'PROVISIONAL', ...snapshotValues(s, spx), provenance.dataRunId,
-      provenance.dataCutoff, provenance.decisionAt, provenance.tradableAt, 'PIT', runId,
+      provenance.dataCutoff, provenance.decisionAt, provenance.tradableAt,
+      provenance.releaseResolutionAt, 'PIT', runId,
     ).run();
     if (Number((result.meta as any)?.changes ?? 0) !== 1) {
       throw new Error(`ingest lease fence rejected PIT nowcast snapshot write for run ${runId}`);
