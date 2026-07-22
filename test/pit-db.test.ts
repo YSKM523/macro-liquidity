@@ -15,13 +15,14 @@ async function migratedDb() {
     d1Databases: ['DB'],
   });
   const db = await mf.getD1Database('DB') as unknown as D1Database;
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= 9; i++) {
     const name = String(i).padStart(4, '0');
     const file = ({
       '0001': '0001_init.sql', '0002': '0002_add_coverage.sql', '0003': '0003_meta.sql',
       '0004': '0004_snapshot_quality.sql', '0005': '0005_official_nowcast.sql',
       '0006': '0006_atomic_ingest.sql', '0007': '0007_ingest_snapshot_outcome.sql',
       '0008': '0008_point_in_time_observations.sql',
+      '0009': '0009_event_time_backtest.sql',
     } as Record<string, string>)[name];
     const sql = readFileSync(`migrations/${file}`, 'utf8')
       .replace(/^\s*--.*$/gm, '')
