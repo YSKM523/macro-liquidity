@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// @ts-ignore Vitest executes in Node.
 import { readFileSync } from 'node:fs';
 import { addDays } from '../src/backtest';
 import { buildFormalForwardPairs } from '../src/evaluation-protocol';

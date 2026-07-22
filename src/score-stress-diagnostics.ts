@@ -1,6 +1,7 @@
 import type { EventBacktestInputs } from './event-backtest';
 import { buildFormalEventOutcomes } from './formal-event-outcomes';
 import type { FormalEventOutcome } from './formal-event-outcomes';
+import { sha256Hex } from './model-version';
 
 export const SCORE_STRESS_PROTOCOL = Object.freeze({
   protocol: 'SCORE_STRESS_DIAGNOSTICS_V1' as const,
@@ -93,6 +94,97 @@ export function buildScoreBuckets(outcomes: FormalEventOutcome[]) {
 }
 
 export interface BhInput { hypothesisId: string; family: string; pValue: number | null }
+
+export interface HypothesisLedgerEntry {
+  hypothesisId: string;
+  candidateId: string;
+  evidenceClass: string;
+  family: string;
+  direction: string;
+  windows: string[];
+  canonicalParameters: Record<string, unknown>;
+  parameterHash: string;
+  primaryMetric: string;
+  pValue: number | null;
+  pValueSource: string;
+  formalDailySharpe: number | null;
+  preregisteredThreshold: Record<string, unknown>;
+  registeredAt: string;
+  registrationCommit: string;
+  status: string;
+  supersedes: string | null;
+}
+
+export interface HypothesisLedger {
+  schemaVersion: 'HYPOTHESIS_LEDGER_V1';
+  appendOnly: true;
+  registeredAt: string;
+  registrationCommit: string;
+  entries: HypothesisLedgerEntry[];
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value != null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalize(child)]));
+  }
+  return value;
+}
+
+function canonicalParameterHash(value: unknown): string {
+  return sha256Hex(JSON.stringify(canonicalize(value)));
+}
+
+function requiredString(value: unknown, field: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`invalid hypothesis ledger ${field}`);
+}
+
+export function validateHypothesisLedger(value: unknown): HypothesisLedger {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid hypothesis ledger');
+  const ledger = value as Record<string, unknown>;
+  if (ledger.schemaVersion !== 'HYPOTHESIS_LEDGER_V1' || ledger.appendOnly !== true
+    || !Array.isArray(ledger.entries)) throw new Error('invalid hypothesis ledger header');
+  requiredString(ledger.registeredAt, 'registeredAt');
+  requiredString(ledger.registrationCommit, 'registrationCommit');
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(ledger.registeredAt)
+    || !/^[a-f0-9]{40}$/.test(ledger.registrationCommit)) throw new Error('invalid hypothesis ledger registration');
+  const ids = new Set<string>();
+  const hashes = new Set<string>();
+  const entries = ledger.entries.map((raw, index): HypothesisLedgerEntry => {
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`invalid hypothesis entry ${index}`);
+    const entry = raw as Record<string, unknown>;
+    for (const field of ['hypothesisId', 'candidateId', 'evidenceClass', 'family', 'direction', 'parameterHash',
+      'primaryMetric', 'pValueSource', 'registeredAt', 'registrationCommit', 'status']) requiredString(entry[field], field);
+    if (ids.has(entry.hypothesisId as string)) throw new Error(`duplicate hypothesis id: ${entry.hypothesisId}`);
+    ids.add(entry.hypothesisId as string);
+    if (!Array.isArray(entry.windows) || entry.windows.length === 0
+      || entry.windows.some(window => typeof window !== 'string' || window.length === 0)) throw new Error('invalid hypothesis windows');
+    if (entry.canonicalParameters == null || typeof entry.canonicalParameters !== 'object'
+      || Array.isArray(entry.canonicalParameters)) throw new Error('invalid canonical parameters');
+    if (canonicalParameterHash(entry.canonicalParameters) !== entry.parameterHash) {
+      throw new Error(`parameter hash mismatch: ${entry.hypothesisId}`);
+    }
+    const familyHash = `${entry.family}|${entry.parameterHash}`;
+    if (hashes.has(familyHash)) throw new Error(`duplicate parameter hash in family: ${entry.family}`);
+    hashes.add(familyHash);
+    if (entry.pValue != null && (typeof entry.pValue !== 'number' || !Number.isFinite(entry.pValue)
+      || entry.pValue < 0 || entry.pValue > 1)) throw new Error('invalid hypothesis p-value');
+    if (entry.pValue == null && entry.pValueSource !== 'NOT_AVAILABLE') throw new Error('missing p-value source must be NOT_AVAILABLE');
+    if (entry.formalDailySharpe != null && (typeof entry.formalDailySharpe !== 'number'
+      || !Number.isFinite(entry.formalDailySharpe))) throw new Error('invalid formal daily Sharpe');
+    if (entry.preregisteredThreshold == null || typeof entry.preregisteredThreshold !== 'object'
+      || Array.isArray(entry.preregisteredThreshold)) throw new Error('invalid preregistered threshold');
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(entry.registeredAt as string)
+      || !/^[a-f0-9]{40}$/.test(entry.registrationCommit as string)) throw new Error('invalid hypothesis registration');
+    if (entry.supersedes != null && typeof entry.supersedes !== 'string') throw new Error('invalid supersedes');
+    if (entry.supersedes != null && !ids.has(entry.supersedes)) throw new Error(`supersedes unknown or later hypothesis: ${entry.supersedes}`);
+    return entry as unknown as HypothesisLedgerEntry;
+  });
+  return { schemaVersion: 'HYPOTHESIS_LEDGER_V1', appendOnly: true,
+    registeredAt: ledger.registeredAt, registrationCommit: ledger.registrationCommit, entries };
+}
 
 export function benjaminiHochberg(entries: BhInput[]) {
   const ids = new Set<string>();
