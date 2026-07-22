@@ -29,7 +29,7 @@ describe('date interval labels', () => {
 
   it('purges overlapping outcomes then applies an exact 91-calendar-day embargo', () => {
     const pairs = [
-      { ...buildForwardPairs([snap('2023-09-01', 0), snap('2023-12-01', 1)], 13)[0] },
+      { ...buildForwardPairs([snap('2023-09-30', 0), snap('2024-01-01', 1)], 13)[0] },
       { ...buildForwardPairs([snap('2023-10-02', 0), snap('2024-01-02', 1)], 13)[0] },
       { ...buildForwardPairs([snap('2023-07-01', 0), snap('2023-10-01', 1)], 13)[0] },
     ];

@@ -20,8 +20,8 @@ describe('validation metric taxonomy', () => {
       pair(6, 80, .03, 'BULLISH', 1),
     ];
     const result = evaluateValidationMetrics(pairs, -.05);
-    expect(result.direction).toMatchObject({ value: 4 / 5, hits: 4, n: 5, abstentions: 2, status: 'OK' });
-    expect(result.formalVerdict).toMatchObject({ value: 3 / 5, hits: 3, n: 5, abstentions: 2, status: 'OK' });
+    expect(result.direction).toMatchObject({ value: 3 / 5, hits: 3, n: 5, abstentions: 2, status: 'OK' });
+    expect(result.formalVerdict).toMatchObject({ value: null, hits: 4, n: 4, abstentions: 3, status: 'INSUFFICIENT_SAMPLE' });
   });
 
   it('uses existing target exposure for risk precision and downside recall', () => {
@@ -31,8 +31,8 @@ describe('validation metric taxonomy', () => {
       pair(4, 60, .02, 'BULLISH', 1), pair(5, 60, .01, 'BULLISH', .75),
     ];
     const result = evaluateValidationMetrics(pairs, -.05);
-    expect(result.risk.precision).toMatchObject({ value: 2 / 3, hits: 2, n: 3, status: 'INSUFFICIENT_SAMPLE' });
-    expect(result.risk.downsideRecall).toMatchObject({ value: 2 / 3, hits: 2, n: 3, status: 'INSUFFICIENT_SAMPLE' });
+    expect(result.risk.precision).toMatchObject({ value: null, hits: 2, n: 3, status: 'INSUFFICIENT_SAMPLE' });
+    expect(result.risk.downsideRecall).toMatchObject({ value: null, hits: 2, n: 3, status: 'INSUFFICIENT_SAMPLE' });
   });
 
   it('returns Spearman IC and typed null for zero-variance outcomes', () => {
