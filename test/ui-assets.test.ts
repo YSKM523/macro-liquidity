@@ -173,7 +173,7 @@ describe('static UI assets', () => {
     const docs = readFileSync('docs/ALGORITHM.md', 'utf8');
     const publicDocs = readFileSync('public/algorithm.md', 'utf8');
     expect(publicDocs).toBe(docs);
-    for (const line of docs.split('\n').filter(line => /Sharpe(?:\s*\(?1\.10|\s+vs| 更高)/i.test(line))) {
+    for (const line of docs.split('\n').filter((line: string) => /Sharpe(?:\s*\(?1\.10|\s+vs| 更高)/i.test(line))) {
       expect(line).toContain('LEGACY_WEEKLY');
     }
   });
