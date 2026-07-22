@@ -10,6 +10,8 @@ import {
   officialPortfolioFieldIssue,
   snapshotVixStressStatus,
 } from './portfolio-policy';
+import { resolveModelIdentity } from './model-version';
+import type { ModelIdentity } from './model-version';
 
 function requireIsoTimestamp(value: string, field: string): void {
   isoTimestampMs(value, field);
@@ -896,7 +898,9 @@ export async function upsertOfficialSnapshot(
   s: Snapshot,
   spx: number | null,
   provenance?: SnapshotProvenance,
+  suppliedIdentity?: ModelIdentity,
 ): Promise<'INSERTED' | 'UPGRADED_LEGACY' | 'FROZEN' | void> {
+  const identity = suppliedIdentity ?? await resolveModelIdentity({});
   if (provenance) {
     if (provenance.dataRunId !== runId) throw new Error('official snapshot provenance run mismatch');
     requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
@@ -907,22 +911,26 @@ export async function upsertOfficialSnapshot(
     ).bind(week).first<{ pit_status: string; data_run_id: string | null }>();
     if (existing?.pit_status === 'PIT') return 'FROZEN';
 
-    const placeholders = Array.from({ length: 34 }, () => '?').join(',');
+    const placeholders = Array.from({ length: 37 }, () => '?').join(',');
     const statements: D1PreparedStatement[] = [db.prepare(
       `INSERT INTO model_snapshot_weekly
-       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,recorded_at)
-       SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       (date,decision_week,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,
+        model_version,config_hash,code_commit_sha,created_at,recorded_at)
+       SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')
        WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
          AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
        ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,${SNAPSHOT_UPDATE},
          data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
          decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,
          release_resolution_at=excluded.release_resolution_at,pit_status='PIT',
+         model_version=excluded.model_version,config_hash=excluded.config_hash,
+         code_commit_sha=excluded.code_commit_sha,created_at=excluded.created_at,
          recorded_at=excluded.recorded_at
        WHERE model_snapshot_weekly.pit_status='LEGACY_NON_PIT'`,
     ).bind(
       s.date, week, ...snapshotValues(s, spx), provenance.dataRunId, provenance.dataCutoff,
-      provenance.decisionAt, provenance.tradableAt, provenance.releaseResolutionAt, 'PIT', runId,
+      provenance.decisionAt, provenance.tradableAt, provenance.releaseResolutionAt, 'PIT',
+      identity.modelVersion, identity.configHash, identity.codeCommitSha, runId,
     )];
     for (const input of provenance.inputs) {
       const available = input.inputStatus === 'AVAILABLE';
@@ -963,19 +971,22 @@ export async function upsertOfficialSnapshot(
     return existing ? 'UPGRADED_LEGACY' : 'INSERTED';
   }
   const week = decisionWeek(s.date);
-  const placeholders = Array.from({ length: 28 }, () => '?').join(',');
+  const placeholders = Array.from({ length: 31 }, () => '?').join(',');
   const result = await db.prepare(
-    `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS}, recorded_at)
-     SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    `INSERT INTO model_snapshot_weekly (date, decision_week, ${SNAPSHOT_COLUMNS},
+       model_version,config_hash,code_commit_sha,created_at,recorded_at)
+     SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE EXISTS (
        SELECT 1 FROM ingest_lock lease
        WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
          AND unixepoch(lease.expires_at) > unixepoch('now')
      )
      ON CONFLICT(decision_week) DO UPDATE SET date=excluded.date,
-       ${SNAPSHOT_UPDATE},recorded_at=excluded.recorded_at
+       ${SNAPSHOT_UPDATE},model_version=excluded.model_version,config_hash=excluded.config_hash,
+       code_commit_sha=excluded.code_commit_sha,created_at=excluded.created_at,recorded_at=excluded.recorded_at
      WHERE model_snapshot_weekly.pit_status<>'PIT'`
-  ).bind(s.date, week, ...snapshotValues(s, spx), runId).run();
+  ).bind(s.date, week, ...snapshotValues(s, spx),
+    identity.modelVersion, identity.configHash, identity.codeCommitSha, runId).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
     const frozen = await db.prepare(
       "SELECT 1 AS frozen FROM model_snapshot_weekly WHERE decision_week=? AND pit_status='PIT'",
@@ -991,43 +1002,52 @@ export async function upsertNowcastSnapshot(
   s: Snapshot,
   spx: number | null,
   provenance?: Omit<SnapshotProvenance, 'inputs'>,
+  suppliedIdentity?: ModelIdentity,
 ): Promise<void> {
+  const identity = suppliedIdentity ?? await resolveModelIdentity({});
   if (provenance) {
     if (provenance.dataRunId !== runId) throw new Error('nowcast snapshot provenance run mismatch');
     requireIsoTimestamp(provenance.releaseResolutionAt, 'release resolutionAt');
-    const placeholders = Array.from({ length: 34 }, () => '?').join(',');
+    const placeholders = Array.from({ length: 37 }, () => '?').join(',');
     const result = await db.prepare(
       `INSERT INTO nowcast_snapshot_daily
-       (date,channel_status,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status)
-       SELECT ${placeholders}
+       (date,channel_status,${SNAPSHOT_COLUMNS},data_run_id,data_cutoff,decision_at,tradable_at,release_resolution_at,pit_status,
+        model_version,config_hash,code_commit_sha,created_at)
+       SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
        WHERE EXISTS (SELECT 1 FROM ingest_lock lease WHERE lease.lock_name='fred_ingest'
          AND lease.owner_run_id=? AND unixepoch(lease.expires_at)>unixepoch('now'))
        ON CONFLICT(date) DO UPDATE SET channel_status='PROVISIONAL',${SNAPSHOT_UPDATE},
          data_run_id=excluded.data_run_id,data_cutoff=excluded.data_cutoff,
          decision_at=excluded.decision_at,tradable_at=excluded.tradable_at,
-         release_resolution_at=excluded.release_resolution_at,pit_status='PIT'`,
+         release_resolution_at=excluded.release_resolution_at,pit_status='PIT',
+         model_version=excluded.model_version,config_hash=excluded.config_hash,
+         code_commit_sha=excluded.code_commit_sha,created_at=excluded.created_at`,
     ).bind(
       s.date, 'PROVISIONAL', ...snapshotValues(s, spx), provenance.dataRunId,
       provenance.dataCutoff, provenance.decisionAt, provenance.tradableAt,
-      provenance.releaseResolutionAt, 'PIT', runId,
+      provenance.releaseResolutionAt, 'PIT', identity.modelVersion, identity.configHash,
+      identity.codeCommitSha, runId,
     ).run();
     if (Number((result.meta as any)?.changes ?? 0) !== 1) {
       throw new Error(`ingest lease fence rejected PIT nowcast snapshot write for run ${runId}`);
     }
     return;
   }
-  const placeholders = Array.from({ length: 28 }, () => '?').join(',');
+  const placeholders = Array.from({ length: 31 }, () => '?').join(',');
   const result = await db.prepare(
-    `INSERT INTO nowcast_snapshot_daily (date, channel_status, ${SNAPSHOT_COLUMNS})
-     SELECT ${placeholders}
+    `INSERT INTO nowcast_snapshot_daily (date, channel_status, ${SNAPSHOT_COLUMNS},
+       model_version,config_hash,code_commit_sha,created_at)
+     SELECT ${placeholders},strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE EXISTS (
        SELECT 1 FROM ingest_lock lease
        WHERE lease.lock_name = 'fred_ingest' AND lease.owner_run_id = ?
          AND unixepoch(lease.expires_at) > unixepoch('now')
      )
      ON CONFLICT(date) DO UPDATE SET channel_status='PROVISIONAL',
-       ${SNAPSHOT_UPDATE}`
-  ).bind(s.date, 'PROVISIONAL', ...snapshotValues(s, spx), runId).run();
+       ${SNAPSHOT_UPDATE},model_version=excluded.model_version,config_hash=excluded.config_hash,
+       code_commit_sha=excluded.code_commit_sha,created_at=excluded.created_at`
+  ).bind(s.date, 'PROVISIONAL', ...snapshotValues(s, spx),
+    identity.modelVersion, identity.configHash, identity.codeCommitSha, runId).run();
   if (Number((result.meta as any)?.changes ?? 0) !== 1) {
     throw new Error(`ingest lease fence rejected nowcast snapshot write for run ${runId}`);
   }

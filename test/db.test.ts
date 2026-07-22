@@ -124,8 +124,8 @@ describe('official and nowcast snapshot channels', () => {
     });
     const db = await mf.getD1Database('DB') as unknown as D1Database;
     const extraColumn = channel === 'official'
-      ? "decision_week TEXT UNIQUE, recorded_at TEXT, pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT'"
-      : 'channel_status TEXT';
+      ? "decision_week TEXT UNIQUE, recorded_at TEXT, pit_status TEXT NOT NULL DEFAULT 'LEGACY_NON_PIT', model_version TEXT, config_hash TEXT, code_commit_sha TEXT, created_at TEXT"
+      : 'channel_status TEXT, model_version TEXT, config_hash TEXT, code_commit_sha TEXT, created_at TEXT';
     const table = channel === 'official' ? 'model_snapshot_weekly' : 'nowcast_snapshot_daily';
     await db.batch([
       db.prepare(`CREATE TABLE ${table} (
@@ -320,10 +320,10 @@ describe('snapshot quality persistence', () => {
     expect(preparedSql).toContain('decision_status');
     expect(preparedSql).toContain('factor_quality_json');
     expect(preparedSql).toContain('freshness_json');
-    expect(bind.mock.calls[0].slice(-4)).toEqual([
+    expect(bind.mock.calls[0]).toEqual(expect.arrayContaining([
       'OK', JSON.stringify(factorResults), JSON.stringify(freshness),
-      'run-1',
-    ]);
+      'champion-v1.0.0', 'LOCAL_UNCONFIGURED', 'run-1',
+    ]));
   });
 
   it('defines conservative defaults so pre-migration rows remain readable', () => {

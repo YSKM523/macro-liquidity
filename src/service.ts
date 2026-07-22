@@ -39,11 +39,13 @@ import type { Verdict } from './metrics';
 import { shouldRetryIngest, shouldAlert, buildAlertEmail } from './pipeline';
 import { spliceSeries, fetchDxyDaily } from './prices';
 import { compareIsoTimestamps, isoTimestampMs, iteratePitFrames } from './pit';
+import { resolveModelIdentity } from './model-version';
 
 export interface Env {
   DB: D1Database; ASSETS: Fetcher;
   FRED_API_KEY: string; ADMIN_TOKEN: string; START_DATE: string;
   RESEND_API_KEY?: string; EMAIL_FROM?: string; ALERT_EMAIL_TO?: string;
+  CODE_COMMIT_SHA?: string;
 }
 
 export type IngestResult =
@@ -208,6 +210,7 @@ export async function runIngest(
     failedStep = 'lock';
     await renewOwnedLease(env.DB, runId);
     const currentAsOf = now.toISOString().slice(0, 10);
+    const modelIdentity = await resolveModelIdentity(env);
     const rawOfficialEvents = rebuildAll
       ? await officialPitDecisionEvents(env.DB, releaseResolutionAt) : [];
     const officialDates = new Set(oneDecisionPerWeek(rawOfficialEvents.map(event => event.modelDate)));
@@ -255,7 +258,7 @@ export async function runIngest(
             tradableAt: frame.event.tradableAt,
             releaseResolutionAt,
             inputs: frame.inputs,
-          });
+          }, modelIdentity);
           if (outcome === 'FROZEN') {
             const frozenWeek = decisionWeek(date);
             const frozen = await officialVerdictAnchors(
@@ -272,7 +275,7 @@ export async function runIngest(
             decisionAt: frame.event.decisionAt,
             tradableAt: frame.event.tradableAt,
             releaseResolutionAt,
-          });
+          }, modelIdentity);
         }
         if (snap.verdict != null) prev = snap.verdict;
         snapshots++;
