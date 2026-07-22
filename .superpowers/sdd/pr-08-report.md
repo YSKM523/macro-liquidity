@@ -34,7 +34,7 @@ No deploy, push, remote D1 access, production mutation, Champion formula/weight/
 - Schema RED: `test/pit-db.test.ts` failed because migration `0008_point_in_time_observations.sql` did not exist. GREEN: append-only triggers, revision view, calendar seeds, provenance columns, PIT activation, replay, conflict rollback, and lease fencing pass.
 - ALFRED RED: `parseFredPitJson`, `fetchFredSeriesPit`, and `src/pit.ts` were missing. GREEN: 2 files / 11 tests passed.
 - Ingest RED: PIT repository exports and staging were missing. GREEN coverage proves double staging, inclusive incremental/full checkpoint behavior, same-checksum replay, conflicting-key rollback preserving old ACTIVE, and lost/transferred/expired lease rejection.
-- Snapshot RED: initial Miniflare run exposed a 32-vs-33 nowcast placeholder bug and accepted mismatched run provenance. GREEN: `test/pit-snapshot-db.test.ts` 4/4 passes, including atomic manifest rollback, one-time legacy upgrade, freeze, run mismatch, future release/observation rejection, and nowcast-no-manifest behavior.
+- Snapshot RED: initial Miniflare run exposed a 32-vs-33 nowcast placeholder bug and accepted mismatched run provenance. GREEN: `test/pit-snapshot-db.test.ts` 5/5 passes, including atomic manifest rollback, one-time legacy upgrade, freeze, run mismatch, future release/observation/tradability rejection, and nowcast-no-manifest behavior.
 - Service regressions prove per-date incremental no-lookahead and propagation of a frozen official verdict into the next full-rebuild frame.
 - Review RED/GREEN: frame tradability initially remained `2024-01-10` despite a used row tradable on `2024-01-12`; response-time tests initially stored run-start `18:00:00` instead of post-response `18:00:05`; malformed persisted overrides were initially accepted. The focused GREEN suites now cover all three fixes plus official-manifest tradability rejection.
 
@@ -42,7 +42,7 @@ No deploy, push, remote D1 access, production mutation, Champion formula/weight/
 
 - Controller fresh `env -u NODE_OPTIONS npm test` initially produced a real RED: 4 Miniflare tests timed out at Vitest's five-second default while 446 passed. Every real Miniflare behavior test in the affected ingest/PIT files now has an explicit 30-second budget; no production runtime or global Vitest timeout changed.
 - Focused GREEN after semantic review: `fred.test.ts` 7/7, `pit.test.ts` 6/6, malformed/valid override DB tests 2/2, official tradability gate 1/1, service/atomic group 38/38. Repository total is 27 files / 454 tests.
-- Final fresh full-suite summary is recorded by the controller review gate after the timeout-only stabilization commit; no truncated reporter output is treated as proof.
+- Final controller-fresh `env -u NODE_OPTIONS npm test`: PASS, exit 0, 27/27 files and 454/454 tests. No truncated reporter output is treated as proof.
 - `env -u NODE_OPTIONS npx tsc --noEmit`: PASS, exit 0, no diagnostics.
 - `git diff --check e415f5d..HEAD`: PASS.
 - Local migration first run: `0001` through `0008` applied successfully to worktree-local D1.
@@ -52,7 +52,8 @@ No deploy, push, remote D1 access, production mutation, Champion formula/weight/
 
 - Default tradability skips weekends but not US exchange holidays; PR-09 must provide the real trading calendar before performance claims.
 - ALFRED supplies a date, not guaranteed historical intraday availability. Conservative date-end timing and manual overrides make the limitation explicit but cannot reconstruct unavailable intraday history.
-- Initial PIT population can be materially larger than the compatibility table and requires an authorized full ingest; this PR did not access a remote database.
+- The first ingest with no PIT checkpoint fetches the full configured history even in incremental mode, so initial PIT population can be materially larger than the compatibility table; this PR did not access a remote database.
+- General `release_calendar` rules are selected using the database current date, not each vintage date. Current seeds are permanent conservative rules and date-specific overrides work at read time; historical versioned general-rule selection remains future work.
 - Formal weekly and daily observations coexist as configured series inputs, but manifests and event-time cutoffs prevent mixed future vintages. Frequency redesign is outside PR-08.
 
 ## 7. Migration impact
