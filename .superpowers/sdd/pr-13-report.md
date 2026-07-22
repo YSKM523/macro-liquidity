@@ -45,4 +45,6 @@ No push, deploy, remote D1/R2 access, secret creation, or real alert delivery wa
 
 - First full-suite run: 3 regressions in `pit-snapshot-db.test.ts`; its local database fixture stopped at migration 0009, so new snapshot writers correctly rejected absent 0010 columns. All current-schema fixtures were advanced to 0010.
 - Regression rerun: `env -u NODE_OPTIONS npx vitest run --silent test/pit-snapshot-db.test.ts test/pit-db.test.ts test/event-backtest-db.test.ts` passed.
+- Lint compliance RED: focused governance test rejected `lint` because it aliased `tsc`; an actual ESLint 9 + TypeScript parser/plugin flat config was added. `npm run lint` now performs bounded static analysis across `src` and `test` with zero warnings and passes.
+- Live-cache safety RED: focused operations suite failed before collection because `src/live-data.ts` did not exist. Typed non-OK provider results and `UNKNOWN` stress now throw through the cache loader (incrementing the circuit), stale/failed stress is forced to `UNKNOWN`, and an open circuit preserves the typed fail-closed payload. Focused operations/governance tests pass 13/13; worker regression tests pass 26/26; typecheck and ESLint pass.
 - Fresh final suite and remaining gates: pending.

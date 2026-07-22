@@ -11,6 +11,8 @@ describe('production governance configuration', () => {
       'typecheck','lint','test:correctness','test:no-lookahead','test:rebuild-consistency',
       'migrate:verify','restore:drill','backup:dry','deploy:dry',
     ]) expect(pkg.scripts[script]).toBeTruthy();
+    expect(pkg.scripts.lint).toMatch(/^eslint\b/);
+    expect(pkg.devDependencies.eslint).toBeTruthy();
     expect(pkg.scripts['deploy:dry']).toMatch(/--dry-run.*--env staging/);
   });
 

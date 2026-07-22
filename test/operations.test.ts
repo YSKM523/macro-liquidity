@@ -6,6 +6,7 @@ import {
   fullRebuildConfirmed,
   structuredLog,
 } from '../src/operations';
+import { assertCacheableLivePrices, assertCacheableStress, failClosedCachedStress } from '../src/live-data';
 
 describe('production operations controls', () => {
   it('emits bounded JSON logs and redacts secret-shaped fields', () => {
@@ -55,5 +56,44 @@ describe('production operations controls', () => {
     await expect(deliverAlert({ apiKey: 'k', from: 'a@example.com', to: 'b@example.com' },
       { subject: 'x', text: 'y' }, vi.fn(async () => { throw new Error('network'); })))
       .resolves.toMatchObject({ outcome: 'FAILED' });
+  });
+});
+
+describe('live data fail-closed cache policy', () => {
+  it('counts typed provider failures and UNKNOWN stress as cache loader failures', () => {
+    expect(() => assertCacheableLivePrices({
+      quotes: { spx: { status: 'FAILED' }, vix: { status: 'OK' }, dxy: { status: 'OK' }, us10y: { status: 'OK' } },
+    } as any)).toThrow(/provider/i);
+    expect(() => assertCacheableStress({ status: 'UNKNOWN' } as any)).toThrow(/stress/i);
+  });
+
+  it('never reuses stale NORMAL stress as actionable NORMAL guidance', () => {
+    const stale = failClosedCachedStress({
+      status: 'NORMAL', stressed: false, reasons: [], unavailable: [], signals: {}, thresholds: {},
+    } as any, 'STALE');
+    expect(stale.status).toBe('UNKNOWN');
+    expect(stale.unavailable).toContain('LIVE_STRESS_CACHE_STALE');
+  });
+
+  it('turns a failed stress refresh backed by stale NORMAL cache into UNKNOWN', async () => {
+    const cache = new LiveDataCache<any>({ freshMs: 100, staleMs: 300, failureThreshold: 2, openMs: 100 });
+    await cache.get(async () => assertCacheableStress({
+      status: 'NORMAL', stressed: false, reasons: [], unavailable: [], signals: {}, thresholds: {},
+    } as any), 0);
+    const cached = await cache.get(async () => assertCacheableStress({ status: 'UNKNOWN' } as any), 150);
+    expect(cached.status).toBe('STALE');
+    expect(failClosedCachedStress(cached.value, cached.status).status).toBe('UNKNOWN');
+  });
+
+  it('counts typed provider outcomes toward the circuit threshold', async () => {
+    const cache = new LiveDataCache<any>({ freshMs: 0, staleMs: 0, failureThreshold: 2, openMs: 100 });
+    const failed = { quotes: {
+      spx: { status: 'FAILED' }, vix: { status: 'OK' }, dxy: { status: 'OK' }, us10y: { status: 'OK' },
+    } } as any;
+    await expect(cache.get(async () => assertCacheableLivePrices(failed), 1)).rejects.toThrow(/provider/i);
+    await expect(cache.get(async () => assertCacheableLivePrices(failed), 2)).rejects.toThrow(/provider/i);
+    const loader = vi.fn(async () => ({ quotes: {} }));
+    await expect(cache.get(loader, 3)).rejects.toThrow(/provider/i);
+    expect(loader).not.toHaveBeenCalled();
   });
 });

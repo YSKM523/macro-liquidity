@@ -58,6 +58,8 @@ export class LiveDataCache<T> {
   private failures = 0;
   private openUntil = 0;
   private pending?: Promise<T>;
+  private lastError?: unknown;
+  private lastAttemptAt = 0;
 
   constructor(private readonly policy: CachePolicy) {
     if (policy.freshMs < 0 || policy.staleMs < policy.freshMs
@@ -65,12 +67,18 @@ export class LiveDataCache<T> {
   }
 
   async get(loader: () => Promise<T>, now = Date.now()): Promise<CacheResult<T>> {
+    if (now < this.lastAttemptAt) {
+      this.failures = 0;
+      this.openUntil = 0;
+      this.lastError = undefined;
+    }
+    this.lastAttemptAt = now;
     const hasValue = this.value !== undefined;
     const age = hasValue ? now - this.loadedAt : Number.POSITIVE_INFINITY;
     if (hasValue && age >= 0 && age <= this.policy.freshMs) return { value: this.value!, status: 'FRESH', ageMs: age };
     if (now < this.openUntil) {
       if (hasValue && age >= 0 && age <= this.policy.staleMs) return { value: this.value!, status: 'STALE', ageMs: age };
-      throw new Error('live data circuit open');
+      throw this.lastError ?? new Error('live data circuit open');
     }
     try {
       this.pending ??= loader();
@@ -79,8 +87,10 @@ export class LiveDataCache<T> {
       this.loadedAt = now;
       this.failures = 0;
       this.openUntil = 0;
+      this.lastError = undefined;
       return { value: loaded, status: 'FRESH', ageMs: 0 };
     } catch (error) {
+      this.lastError = error;
       this.failures++;
       if (this.failures >= this.policy.failureThreshold) this.openUntil = now + this.policy.openMs;
       if (hasValue && age >= 0 && age <= this.policy.staleMs) return { value: this.value!, status: 'STALE', ageMs: age };

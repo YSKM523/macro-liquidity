@@ -1,7 +1,7 @@
 import { isoTimestampMs } from './pit';
 import { EVENT_BACKTEST_ASSUMPTIONS } from './config';
 import { officialPortfolioFieldIssue } from './portfolio-policy';
-import type { PortfolioDirection, PortfolioTier, PortfolioVerdict } from './portfolio-policy';
+import type { PortfolioTier } from './portfolio-policy';
 
 export interface EventSignal {
   signalDate: string;

@@ -6,7 +6,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit --pretty false",
+    "lint": "eslint src test --max-warnings=0",
     "test:correctness": "vitest run test/pit.test.ts test/pit-db.test.ts test/event-backtest.test.ts test/event-backtest-db.test.ts test/portfolio-backtest.test.ts",
     "test:no-lookahead": "vitest run test/pit.test.ts test/pit-db.test.ts test/pit-snapshot-db.test.ts test/event-backtest-db.test.ts",
     "test:rebuild-consistency": "vitest run test/service.test.ts",
@@ -23,6 +23,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^9.39.5",
     "miniflare": "3.20250718.3",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0",

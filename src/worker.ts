@@ -35,18 +35,40 @@ import {
   fullRebuildConfirmed,
   structuredLog,
 } from './operations';
+import {
+  TypedLiveDataFailure,
+  assertCacheableLivePrices,
+  assertCacheableStress,
+  failClosedCachedStress,
+} from './live-data';
+import type { LivePrices, LiveStress } from './prices';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 
 async function loadLive(env: Env) {
-  const [prices, stress] = await Promise.all([
-    livePricesCache.get(() => fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY })),
-    liveStressCache.get(() => fetchStressSeries({ fredApiKey: env.FRED_API_KEY }).then(evaluateLiveStress)),
-  ]);
+  const pricesPromise = livePricesCache
+    .get(() => fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY })
+      .then(assertCacheableLivePrices))
+    .catch(error => {
+      if (error instanceof TypedLiveDataFailure) {
+        return { value: error.payload as LivePrices, status: 'FAILED' as const, ageMs: 0 };
+      }
+      throw error;
+    });
+  const stressPromise = liveStressCache
+    .get(() => fetchStressSeries({ fredApiKey: env.FRED_API_KEY })
+      .then(evaluateLiveStress).then(assertCacheableStress))
+    .catch(error => {
+      if (error instanceof TypedLiveDataFailure) {
+        return { value: error.payload as LiveStress, status: 'FAILED' as const, ageMs: 0 };
+      }
+      throw error;
+    });
+  const [prices, stress] = await Promise.all([pricesPromise, stressPromise]);
   return {
     live: prices.value,
-    stress: stress.value,
+    stress: failClosedCachedStress(stress.value, stress.status),
     cache: { prices: prices.status, stress: stress.status, prices_age_ms: prices.ageMs, stress_age_ms: stress.ageMs },
   };
 }
