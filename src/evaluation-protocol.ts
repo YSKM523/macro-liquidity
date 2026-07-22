@@ -49,7 +49,7 @@ export interface ForwardPair {
 const REGISTERED_SCORING_FACTOR_KEYS = Object.freeze([
   'netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve',
 ] as const);
-const FACTOR_KEYS = [...REGISTERED_SCORING_FACTOR_KEYS];
+const FACTOR_KEYS = REGISTERED_SCORING_FACTOR_KEYS;
 
 export const VALIDATION_PROTOCOL = Object.freeze({
   protocol: 'PURGED_VALIDATION_V1' as const,
@@ -220,6 +220,7 @@ function prepareFormal(input: EventBacktestInputs): {
     throw new Error('formal validation requires an explicit as-of cutoff');
   }
   const cutoffMs = isoTimestampMs(input.asOfCutoff, 'formal as-of cutoff');
+  if (input.signals.length === 0) throw new Error('formal validation has no official signal coverage');
   input.signals.forEach(signal => validateFormalSignal(signal, cutoffMs));
   if (input.signals.length > 0 && input.prices.length === 0) throw new Error('formal validation has no execution price coverage');
   for (const price of input.prices) {

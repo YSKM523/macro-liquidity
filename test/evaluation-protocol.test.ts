@@ -92,7 +92,13 @@ describe('date interval labels', () => {
   });
 
   it('fails formal labels closed for non-PIT daily prices', () => {
-    const input: EventBacktestInputs = { asOfCutoff: '2026-12-01T00:00:00Z', signals: [], prices: [
+    const input: EventBacktestInputs = { asOfCutoff: '2026-12-01T00:00:00Z', signals: [{
+      signalDate: '2026-07-22', decisionAt: '2026-07-23T12:00:00Z', tradableAt: '2026-07-23T12:00:00Z',
+      score: 60, verdict: 'BULLISH', targetExposure: 1, factors: { netliqTrend: 60 },
+      modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
+      codeCommitSha: '0123456789abcdef0123456789abcdef01234567', dataRunId: 'run-formal',
+      recordedAt: '2026-07-23T13:00:00Z', dataCutoff: '2026-07-23T11:00:00Z', createdAt: '2026-07-23T13:00:01Z',
+    }], prices: [
       { date: '2026-07-24', adjustedClose: 100, source: 'synthetic', provenanceStatus: 'SYNTHETIC_BACKFILL' },
     ], vix: [], cashRates: [] };
     expect(() => buildFormalForwardPairs(input)).toThrow(/PIT_RAW/);
@@ -120,6 +126,20 @@ describe('date interval labels', () => {
       prices: [{ date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-24T22:00:00Z', dataRunId: 'px', activationRunId: 'act', activatedAt: 'not-a-clock' }], vix: [], cashRates: [],
     });
     expect(badPrice).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'INVALID_FORMAL_INPUT' });
+  });
+
+  it('fails closed when both the official signal cohort and price coverage are empty', () => {
+    const empty = runFormalValidation({ asOfCutoff: '2026-12-01T00:00:00Z', signals: [], prices: [], vix: [], cashRates: [] });
+    expect(empty).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'INVALID_FORMAL_INPUT' });
+  });
+
+  it('fails closed when prices exist but the official signal cohort is empty', () => {
+    const priceOnly = runFormalValidation({
+      asOfCutoff: '2026-12-01T00:00:00Z', signals: [],
+      prices: [{ date: '2026-07-24', adjustedClose: 100, source: 'PIT', provenanceStatus: 'PIT_RAW', fetchedAt: '2026-07-24T22:00:00Z', dataRunId: 'px', activationRunId: 'act', activatedAt: '2026-07-24T23:00:00Z' }],
+      vix: [], cashRates: [],
+    });
+    expect(priceOnly).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'INVALID_FORMAL_INPUT' });
   });
 
   it('validates superseded signals and reports execution accounting', () => {
