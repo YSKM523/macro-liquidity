@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import * as snapshotDb from '../src/db';
 import {
   loadBacktestRows,
+  loadEventBacktestInputs,
   officialSnapshotBefore,
   officialVerdictAnchors,
   officialSnapshotHistory,
@@ -215,6 +216,41 @@ describe('historical snapshot consumers', () => {
     expect(sql).toContain('netliq');
     expect(sql).toContain('walcl');
     expect(bind).toHaveBeenCalledWith('2024-01-01', '2024-12-31');
+  });
+});
+
+describe('event-time backtest repository', () => {
+  it('loads only official OK PIT signals and ordered SPX/VIX/SOFR inputs', async () => {
+    const queries: string[] = [];
+    const results = [
+      [{ signal_date: '2024-01-04', decision_at: '2024-01-05T12:00:00Z', tradable_at: '2024-01-05T20:00:00Z', score: 60 }],
+      [
+        { symbol: 'SPX', date: '2024-01-05', adjusted_close: 100, source: 'FRED:SP500' },
+        { symbol: 'VIX', date: '2024-01-05', adjusted_close: 20, source: 'FRED:VIXCLS' },
+      ],
+      [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+    ];
+    const db = {
+      prepare(sql: string) {
+        queries.push(sql);
+        const rows = results[queries.length - 1];
+        return { all: vi.fn(async () => ({ results: rows })) };
+      },
+    } as unknown as D1Database;
+
+    const loaded = await loadEventBacktestInputs(db);
+
+    expect(queries[0]).toMatch(/model_snapshot_weekly[\s\S]*decision_status='OK'[\s\S]*pit_status='PIT'/i);
+    expect(queries[0]).toMatch(/decision_at IS NOT NULL[\s\S]*tradable_at IS NOT NULL/i);
+    expect(queries[0]).toMatch(/ORDER BY[\s\S]*julianday\(decision_at\)/i);
+    expect(queries[1]).toMatch(/market_prices_daily[\s\S]*ORDER BY date/i);
+    expect(queries[2]).toMatch(/cash_rates_daily[\s\S]*ORDER BY date/i);
+    expect(loaded).toEqual({
+      signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
+      prices: [{ date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500' }],
+      vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
+      cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+    });
   });
 });
 

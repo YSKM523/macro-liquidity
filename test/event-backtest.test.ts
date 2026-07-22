@@ -104,6 +104,7 @@ describe('daily event-time NAV', () => {
     expect(result.status).toBe('DATA_INCOMPLETE');
     expect(result.reason).toMatch(/SOFR.*(?:missing|stale)/i);
     expect(result.nav.length).toBeLessThan(daily.length);
+    expect(result.totals.totalReturn).toBeNull();
   });
 
   it('adds conservative slippage for high, stale, or missing VIX', () => {
@@ -141,5 +142,6 @@ describe('daily event-time NAV', () => {
     const oneSession = runEventTimeBacktest({ signals: [longSignal], prices: daily.slice(0, 1), vix: calmVix, cashRates: sofr });
     expect(oneSession.status).toBe('DATA_INCOMPLETE');
     expect(oneSession.reason).toMatch(/insufficient.*session/i);
+    expect(oneSession.totals.totalReturn).toBeNull();
   });
 });

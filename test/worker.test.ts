@@ -23,6 +23,15 @@ const dbState = vi.hoisted(() => ({
   reference: null as any,
   meta: {} as Record<string, string>,
   activeSnapshotState: 'FAILED' as 'PENDING' | 'SUCCEEDED' | 'FAILED',
+  eventInputs: {
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
+    prices: [
+      { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500' },
+      { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500' },
+    ],
+    vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
+    cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+  } as any,
 }));
 
 vi.mock('../src/service', () => ({
@@ -37,6 +46,7 @@ vi.mock('../src/db', () => ({
   countOfficialSnapshots: vi.fn(async () => 1),
   officialSnapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => []),
+  loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
   officialSnapshotOnOrBefore: vi.fn(async () => dbState.reference),
   loadSeriesMap: vi.fn(async () => ({})),
   ingestRunSummary: vi.fn(async () => ({
@@ -79,6 +89,15 @@ beforeEach(() => {
   dbState.reference = null;
   dbState.meta = {};
   dbState.activeSnapshotState = 'FAILED';
+  dbState.eventInputs = {
+    signals: [{ signalDate: '2024-01-04', decisionAt: '2024-01-05T12:00:00Z', tradableAt: '2024-01-05T20:00:00Z', score: 60 }],
+    prices: [
+      { date: '2024-01-05', adjustedClose: 100, source: 'FRED:SP500' },
+      { date: '2024-01-08', adjustedClose: 101, source: 'FRED:SP500' },
+    ],
+    vix: [{ date: '2024-01-05', value: 20, source: 'FRED:VIXCLS' }],
+    cashRates: [{ date: '2024-01-05', rate: 5, source: 'FRED:SOFR' }],
+  };
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -139,6 +158,29 @@ describe('/api/admin/refresh contention', () => {
 
     expect(response.status).toBe(409);
     expect(body).toEqual({ status: 'conflict', runId: 'run-2' });
+  });
+});
+
+describe('/api/backtest event-time performance', () => {
+  it('adds event-time NAV while preserving diagnostics and marks weekly strategy legacy', async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/backtest'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.event_time.status).toBe('OK');
+    expect(body.event_time.nav).toHaveLength(2);
+    expect(body.horizons).toBeDefined();
+    expect(body.factor_ic_spearman).toBeDefined();
+    expect(body.strategy_long_flat.methodology).toBe('LEGACY_WEEKLY');
+  });
+
+  it('returns typed event-time DATA_INCOMPLETE instead of a 500 or zero return', async () => {
+    dbState.eventInputs = { ...dbState.eventInputs, cashRates: [] };
+    const response = await worker.fetch(new Request('https://example.test/api/backtest'), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body.event_time.status).toBe('DATA_INCOMPLETE');
+    expect(body.event_time.reason).toMatch(/SOFR/i);
+    expect(body.event_time.totals.totalReturn).toBeNull();
   });
 });
 

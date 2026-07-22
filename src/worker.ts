@@ -10,6 +10,7 @@ import {
   officialSnapshotOnOrBefore,
   loadSeriesMap,
   ingestRunSummary,
+  loadEventBacktestInputs,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
@@ -17,6 +18,7 @@ import { policyRegime, deriveDecisionState } from './metrics';
 import { INGEST_STALE_HOURS, COVERAGE_FACTORS } from './config';
 import { assessHealth } from './health';
 import { runBacktest } from './backtest';
+import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
@@ -197,11 +199,19 @@ export default {
       return json(await fetchLivePrices(new Date().toISOString(), { fredApiKey: env.FRED_API_KEY }));
     }
     if (p === '/api/backtest') {
-      const rows = await loadBacktestRows(env.DB);
+      const [rows, eventInputs] = await Promise.all([
+        loadBacktestRows(env.DB),
+        loadEventBacktestInputs(env.DB),
+      ]);
       const snaps = rows
         .filter((r: any) => r.spx != null && r.score != null && r.factors_json)
         .map((r: any) => ({ date: r.date, score: r.score, spx: r.spx, factors: JSON.parse(r.factors_json) }));
-      return json(runBacktest(snaps));
+      const legacy = runBacktest(snaps);
+      return json({
+        ...legacy,
+        strategy_long_flat: { ...legacy.strategy_long_flat, methodology: 'LEGACY_WEEKLY' },
+        event_time: runEventTimeBacktest(eventInputs),
+      });
     }
     if (p === '/api/walkforward') {
       const rows = await loadBacktestRows(env.DB);

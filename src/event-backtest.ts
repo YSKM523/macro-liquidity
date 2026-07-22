@@ -69,7 +69,7 @@ export interface EventBacktestResult {
   nav: EventNavRow[];
   executions: ScheduledExecution[];
   unexecuted: UnexecutedSignal[];
-  totals: { totalReturn: number; tradingCostRate: number; sessions: number };
+  totals: { totalReturn: number | null; tradingCostRate: number; sessions: number };
   assumptions: typeof EVENT_BACKTEST_ASSUMPTIONS;
 }
 
@@ -184,7 +184,7 @@ function incomplete(
   return {
     status: 'DATA_INCOMPLETE', reason, nav,
     executions: schedule.executions, unexecuted: schedule.unexecuted,
-    totals: { totalReturn: nav.at(-1)?.nav != null ? nav.at(-1)!.nav - 1 : 0, tradingCostRate: tradingCost, sessions: nav.length },
+    totals: { totalReturn: null, tradingCostRate: tradingCost, sessions: nav.length },
     assumptions: EVENT_BACKTEST_ASSUMPTIONS,
   };
 }

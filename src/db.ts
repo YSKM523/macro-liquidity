@@ -2,6 +2,7 @@ import type { Obs, SeriesMap, Snapshot, Verdict } from './metrics';
 import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
 import { compareIsoTimestamps, isoTimestampMs, validateReleaseOverride } from './pit';
+import type { EventBacktestInputs } from './event-backtest';
 
 function requireIsoTimestamp(value: string, field: string): void {
   isoTimestampMs(value, field);
@@ -964,6 +965,45 @@ export async function loadBacktestRows(db: D1Database): Promise<any[]> {
     "SELECT date, score, spx, verdict, factors_json, qe_qt_regime, vix_eod FROM model_snapshot_weekly WHERE decision_status = 'OK' AND spx IS NOT NULL ORDER BY date"
   ).all();
   return rs.results ?? [];
+}
+
+export async function loadEventBacktestInputs(db: D1Database): Promise<EventBacktestInputs> {
+  const [signalRows, marketRows, cashRows] = await Promise.all([
+    db.prepare(
+      `SELECT date AS signal_date,decision_at,tradable_at,score
+       FROM model_snapshot_weekly
+       WHERE decision_status='OK' AND pit_status='PIT'
+         AND decision_at IS NOT NULL AND tradable_at IS NOT NULL AND score IS NOT NULL
+       ORDER BY julianday(decision_at),date`,
+    ).all<{ signal_date: string; decision_at: string; tradable_at: string; score: number }>(),
+    db.prepare(
+      `SELECT symbol,date,adjusted_close,source
+       FROM market_prices_daily WHERE symbol IN ('SPX','VIX')
+       ORDER BY date,symbol`,
+    ).all<{ symbol: 'SPX' | 'VIX'; date: string; adjusted_close: number; source: string }>(),
+    db.prepare(
+      `SELECT date,rate,source FROM cash_rates_daily
+       WHERE rate_id='SOFR' ORDER BY date`,
+    ).all<{ date: string; rate: number; source: string }>(),
+  ]);
+  const markets = marketRows.results ?? [];
+  return {
+    signals: (signalRows.results ?? []).map(row => ({
+      signalDate: row.signal_date,
+      decisionAt: row.decision_at,
+      tradableAt: row.tradable_at,
+      score: row.score,
+    })),
+    prices: markets.filter(row => row.symbol === 'SPX').map(row => ({
+      date: row.date, adjustedClose: row.adjusted_close, source: row.source,
+    })),
+    vix: markets.filter(row => row.symbol === 'VIX').map(row => ({
+      date: row.date, value: row.adjusted_close, source: row.source,
+    })),
+    cashRates: (cashRows.results ?? []).map(row => ({
+      date: row.date, rate: row.rate, source: row.source,
+    })),
+  };
 }
 
 export async function countOfficialSnapshots(db: D1Database): Promise<number> {
