@@ -10,20 +10,21 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate ?? '')) {
 }
 
 const retrievedAt = new Date().toISOString();
-const urls = Object.fromEntries(PREREGISTRATION.series.map(seriesId => [seriesId, fredCsvUrl(seriesId)]));
+const urls = Object.fromEntries(PREREGISTRATION.series.map(seriesId => [seriesId, fredCsvUrl(seriesId, snapshotDate)]));
 const results = await Promise.all(PREREGISTRATION.series.map(async seriesId => {
   const response = await fetch(urls[seriesId], { headers: { accept: 'text/csv' } });
   if (!response.ok) throw new Error(`${seriesId} FRED CSV HTTP ${response.status}`);
   return [seriesId, parseFredCsv(await response.text(), seriesId)];
 }));
 
-const snapshotId = `netliq-current-vintage-${snapshotDate}`;
+const snapshotId = `netliq-current-vintage-${snapshotDate}-corrected-v2`;
 const snapshot = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   snapshotId,
   evidenceClass: PREREGISTRATION.evidenceClass,
   retrievedAt,
   source: 'FRED_CURRENT_VINTAGE',
+  request: { startDate: '2002-01-01', endDate: snapshotDate, urls },
   series: Object.fromEntries(results),
 };
 const snapshotText = `${JSON.stringify(snapshot, null, 2)}\n`;

@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 // @ts-ignore -- isolated Node research module
 import { runNetLiquidityResearch } from '../scripts/run-netliq-research.mjs';
 
-const snapshotText = readFileSync('scripts/data/netliq-current-vintage-2026-07-22.json', 'utf8');
+const snapshotText = readFileSync('scripts/data/netliq-current-vintage-2026-07-22-corrected-v2.json', 'utf8');
 const snapshot = JSON.parse(snapshotText);
-const manifest = JSON.parse(readFileSync('scripts/data/netliq-current-vintage-2026-07-22.manifest.json', 'utf8'));
+const manifest = JSON.parse(readFileSync('scripts/data/netliq-current-vintage-2026-07-22-corrected-v2.manifest.json', 'utf8'));
 
 describe('net-liquidity research runner', () => {
   it('verifies the frozen artifact and produces deterministic shadow-only diagnostics', async () => {
@@ -26,5 +26,12 @@ describe('net-liquidity research runner', () => {
   it('rejects a snapshot whose bytes no longer match the manifest', async () => {
     await expect(runNetLiquidityResearch(snapshot, `${snapshotText} `, manifest, { bootstrapIterations: 10 }))
       .rejects.toThrow(/SHA-256/);
+  });
+
+  it('rejects unverified manifest metadata instead of publishing it in the report', async () => {
+    const tampered = structuredClone(manifest);
+    tampered.snapshotId = 'untrusted-id';
+    await expect(runNetLiquidityResearch(snapshot, snapshotText, tampered, { bootstrapIterations: 10 }))
+      .rejects.toThrow(/snapshotId/);
   });
 });

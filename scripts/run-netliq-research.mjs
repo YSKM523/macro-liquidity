@@ -4,23 +4,23 @@ import { PREREGISTRATION } from './netliq-preregistration.mjs';
 import { verifySnapshotManifest } from './netliq-snapshot.mjs';
 
 export async function runNetLiquidityResearch(snapshot, snapshotText, manifest, options = {}) {
-  await verifySnapshotManifest(snapshot, snapshotText, manifest);
-  const actualSeries = Object.keys(snapshot.series).sort();
+  const verified = await verifySnapshotManifest(snapshot, snapshotText, manifest);
+  const actualSeries = Object.keys(verified.snapshot.series).sort();
   const expectedSeries = [...PREREGISTRATION.series].sort();
   if (JSON.stringify(actualSeries) !== JSON.stringify(expectedSeries)) {
     throw new Error('snapshot series do not match preregistration');
   }
 
-  const weekly = buildWeeklyNetLiquidity(snapshot.series);
+  const weekly = buildWeeklyNetLiquidity(verified.snapshot.series);
   const challenger = buildContinuousChallenger(weekly);
-  const oos = evaluateNetLiquidityOos(challenger, snapshot.series.SP500, options);
+  const oos = evaluateNetLiquidityOos(challenger, verified.snapshot.series.SP500, options);
   return {
-    schemaVersion: 1,
+    schemaVersion: verified.schemaVersion,
     preregistrationStatus: PREREGISTRATION.status,
-    evidenceClass: PREREGISTRATION.evidenceClass,
-    snapshotId: manifest.snapshotId,
-    snapshotSha256: manifest.snapshotSha256,
-    retrievedAt: manifest.retrievedAt,
+    evidenceClass: verified.evidenceClass,
+    snapshotId: verified.snapshotId,
+    snapshotSha256: verified.snapshotSha256,
+    retrievedAt: verified.retrievedAt,
     sample: {
       weeklyPointCount: weekly.length,
       firstWeeklyDate: weekly[0]?.observationDate ?? null,
