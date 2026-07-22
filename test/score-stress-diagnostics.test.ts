@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { addDays } from '../src/backtest';
 import { buildFormalForwardPairs } from '../src/evaluation-protocol';
 import type { EventBacktestInputs } from '../src/event-backtest';
@@ -10,6 +11,7 @@ import {
   buildScoreBuckets,
   deflatedSharpeRatio,
   evaluateStressEvents,
+  validateHypothesisLedger,
 } from '../src/score-stress-diagnostics';
 
 function formalInput(): EventBacktestInputs {
@@ -134,6 +136,39 @@ describe('score buckets', () => {
 });
 
 describe('multiplicity', () => {
+  it('validates the append-only ledger full schema, canonical hashes, and supersession graph', () => {
+    const ledger = JSON.parse(readFileSync('docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json', 'utf8'));
+    const validated = validateHypothesisLedger(ledger);
+    expect(validated.entries).toHaveLength(4);
+    expect(validated.entries[0]).toEqual(expect.objectContaining({
+      hypothesisId: expect.any(String), candidateId: expect.any(String), evidenceClass: expect.any(String),
+      direction: expect.any(String), windows: expect.any(Array), canonicalParameters: expect.any(Object),
+      parameterHash: expect.stringMatching(/^[a-f0-9]{64}$/), primaryMetric: expect.any(String),
+      pValue: null, pValueSource: 'NOT_AVAILABLE', formalDailySharpe: null,
+      preregisteredThreshold: expect.any(Object), registeredAt: expect.any(String),
+      registrationCommit: expect.stringMatching(/^[a-f0-9]{40}$/), status: expect.any(String), supersedes: null,
+    }));
+    expect(validated.entries[1].supersedes).toBe(validated.entries[0].hypothesisId);
+  });
+
+  it('rejects duplicate IDs, duplicate parameter hashes in a family, bad hashes, and dangling supersession', () => {
+    const ledger = validateHypothesisLedger(JSON.parse(readFileSync('docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json', 'utf8')));
+    const clone = () => structuredClone(ledger);
+    const duplicateId = clone();
+    duplicateId.entries[1].hypothesisId = duplicateId.entries[0].hypothesisId;
+    expect(() => validateHypothesisLedger(duplicateId)).toThrow(/duplicate hypothesis/i);
+    const duplicateHash = clone();
+    duplicateHash.entries[1].parameterHash = duplicateHash.entries[0].parameterHash;
+    duplicateHash.entries[1].canonicalParameters = duplicateHash.entries[0].canonicalParameters;
+    expect(() => validateHypothesisLedger(duplicateHash)).toThrow(/duplicate parameter hash/i);
+    const badHash = clone();
+    badHash.entries[0].parameterHash = '0'.repeat(64);
+    expect(() => validateHypothesisLedger(badHash)).toThrow(/parameter hash/i);
+    const dangling = clone();
+    dangling.entries[1].supersedes = 'ABSENT';
+    expect(() => validateHypothesisLedger(dangling)).toThrow(/supersedes/i);
+  });
+
   it('runs BH independently by family, stably breaks ties, treats missing p as one, and rejects duplicate ids', () => {
     const result = benjaminiHochberg([
       { hypothesisId: 'b', family: 'F1', pValue: .01 },
