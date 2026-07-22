@@ -12,6 +12,8 @@ const dbState = vi.hoisted(() => ({
     decision_status: 'OK',
     factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
+    data_run_id: 'pit-run', data_cutoff: '2026-07-15T23:59:59Z',
+    decision_at: '2026-07-16T00:00:00Z', tradable_at: '2026-07-16T14:30:00Z', pit_status: 'PIT',
   } as any,
   nowcast: {
     date: '2026-07-21', score: 61, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
@@ -66,6 +68,8 @@ beforeEach(() => {
     reason: 'macro remains bullish', coverage: 1, decision_status: 'OK',
     factor_quality_json: '{"funding":{"score":80,"quality":1,"status":"OK","asOf":"2026-07-15","components":{}}}',
     freshness_json: '{"SOFR":{"value":4.3,"observationDate":"2026-07-15","ageDays":0,"status":"FRESH"}}',
+    data_run_id: 'pit-run', data_cutoff: '2026-07-15T23:59:59Z',
+    decision_at: '2026-07-16T00:00:00Z', tradable_at: '2026-07-16T14:30:00Z', pit_status: 'PIT',
   };
   dbState.nowcast = {
     date: '2026-07-21', score: 61, verdict: 'BULLISH', netliq_dir: 'UP', qe_qt_regime: 'FLAT',
@@ -84,6 +88,10 @@ describe('/api/snapshot explicit channels', () => {
     const body = await response.json() as any;
 
     expect(body.official.date).toBe('2026-07-15');
+    expect(body.official).toMatchObject({
+      data_run_id: 'pit-run', data_cutoff: '2026-07-15T23:59:59Z',
+      decision_at: '2026-07-16T00:00:00Z', tradable_at: '2026-07-16T14:30:00Z', pit_status: 'PIT',
+    });
     expect(body.nowcast.date).toBe('2026-07-21');
     expect(body.nowcast.channel_status).toBe('PROVISIONAL');
     expect(body.snapshot).toBeUndefined();
