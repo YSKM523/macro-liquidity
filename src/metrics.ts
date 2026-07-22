@@ -6,13 +6,25 @@ import type { PortfolioPolicy } from './portfolio-policy';
 export type { Obs };
 export type SeriesMap = Record<string, Obs[]>;
 
-import { QEQT_EPSILON_B, NETLIQ_TREND_WEEKS, WEIGHTS, COVERAGE_FACTORS, RATES_LOOKBACK_DAYS, CREDIT_LOOKBACK_DAYS, VERDICT_BANDS, QT_END_DATE, RESERVE_LOW, RESERVE_HIGH, STRESS_SCORE_CEILING, SERIES } from './config';
+import { CHAMPION_MODEL_CONFIG, SERIES } from './config';
+
+const SCORING = CHAMPION_MODEL_CONFIG.scoring;
+const WEIGHTS = SCORING.weights;
+const COVERAGE_FACTORS = SCORING.coverageFactors;
+const VERDICT_BANDS = SCORING.verdictBands;
+const NETLIQ_TREND_WEEKS = SCORING.netLiquidityTrend.lookbackWeeks;
+const STRESS_SCORE_CEILING = CHAMPION_MODEL_CONFIG.stress.scoreCeiling;
 
 export type Impulse = 'EXPANDING' | 'CONTRACTING' | 'FLAT';
 export type Direction = 'UP' | 'DOWN' | 'FLAT';
 
-export const clamp = (x: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
-export const linMap = (x: number, a: number, b: number) => clamp(((x - a) / (b - a)) * 100);
+export const clamp = (
+  x: number,
+  lo = SCORING.scoreRange.minimum,
+  hi = SCORING.scoreRange.maximum,
+) => Math.max(lo, Math.min(hi, x));
+export const linMap = (x: number, a: number, b: number) =>
+  clamp(((x - a) / (b - a)) * SCORING.scoreRange.maximum);
 
 export function sma(values: number[], n: number): number | null {
   if (values.length < n || n <= 0) return null;
@@ -57,9 +69,12 @@ function recentObservationWindow(series: Obs[], date: string, required: number):
 
 function hasPlausibleCadence(observations: Obs[], frequency: FreshnessRule['expectedFrequency']): boolean {
   if (observations.length < 2) return false;
-  const bounds = frequency === 'DAILY' ? { min: 1, max: 4 }
-    : frequency === 'WEEKLY' ? { min: 5, max: 10 }
-    : frequency === 'MONTHLY' ? { min: 20, max: 45 }
+  const bounds = frequency === 'DAILY'
+    ? { min: SCORING.cadenceGapDays.daily.minimum, max: SCORING.cadenceGapDays.daily.maximum }
+    : frequency === 'WEEKLY'
+      ? { min: SCORING.cadenceGapDays.weekly.minimum, max: SCORING.cadenceGapDays.weekly.maximum }
+      : frequency === 'MONTHLY'
+        ? { min: SCORING.cadenceGapDays.monthly.minimum, max: SCORING.cadenceGapDays.monthly.maximum }
     : null;
   if (bounds == null) return true;
   for (let index = 1; index < observations.length; index++) {
@@ -153,12 +168,13 @@ function changeOverDaysFresh(series: Obs[], date: string, days: number, rule: Fr
 }
 
 export function balanceSheetImpulse(walclWeekly: number[]): Impulse {
-  if (walclWeekly.length < 14) return 'FLAT';
+  const observations = SCORING.qeQt.lookbackWeeks + 1;
+  if (walclWeekly.length < observations) return 'FLAT';
   const latest = walclWeekly[walclWeekly.length - 1];
-  const past = walclWeekly[walclWeekly.length - 14]; // 13 weeks back
+  const past = walclWeekly[walclWeekly.length - observations];
   const d = latest - past;
-  if (d > QEQT_EPSILON_B) return 'EXPANDING';
-  if (d < -QEQT_EPSILON_B) return 'CONTRACTING';
+  if (d > SCORING.qeQt.deadBandBillions) return 'EXPANDING';
+  if (d < -SCORING.qeQt.deadBandBillions) return 'CONTRACTING';
   return 'FLAT';
 }
 
@@ -168,8 +184,8 @@ export function netliqDirection(netliqWeekly: number[]): Direction {
   if (ma == null) return 'FLAT';
   const latest = netliqWeekly[netliqWeekly.length - 1];
   const rel = (latest - ma) / Math.max(1, Math.abs(ma)); // relative gap
-  if (rel > 0.002) return 'UP';
-  if (rel < -0.002) return 'DOWN';
+  if (rel > SCORING.netLiquidityTrend.directionRelativeGap) return 'UP';
+  if (rel < -SCORING.netLiquidityTrend.directionRelativeGap) return 'DOWN';
   return 'FLAT';
 }
 
@@ -190,56 +206,61 @@ export type FactorResults = { [K in keyof Factors]: FactorResult };
 export type DecisionStatus = 'OK' | 'DATA_INCOMPLETE';
 
 export function percentileRank(value: number, history: number[]): number {
-  if (history.length === 0) return 0.5;
+  if (history.length === 0) return SCORING.scoreRange.neutral / SCORING.scoreRange.maximum;
   const below = history.filter(h => h <= value).length;
   return below / history.length;
 }
 
 export function scoreNetliqTrend(netliqWeekly: number[], n = NETLIQ_TREND_WEEKS): number {
-  if (netliqWeekly.length < n + 1) return 50;
+  const config = SCORING.netLiquidityTrend;
+  if (netliqWeekly.length < n + 1) return SCORING.scoreRange.neutral;
   const latest = netliqWeekly[netliqWeekly.length - 1];
   const ma = sma(netliqWeekly, n)!;
-  const aboveMa = latest > ma ? 60 : 40;
-  const idx4 = Math.max(0, netliqWeekly.length - 1 - 4);
+  const aboveMa = latest > ma ? config.aboveMovingAverageScore : config.belowMovingAverageScore;
+  const idx4 = Math.max(0, netliqWeekly.length - 1 - config.slopeLookbackWeeks);
   const slope = latest - netliqWeekly[idx4];       // ~4-week $B change
-  const slopeScore = linMap(slope, -200, 200);
-  return clamp(0.5 * aboveMa + 0.5 * slopeScore);
+  const slopeScore = linMap(slope, config.slopeMinimumBillions, config.slopeMaximumBillions);
+  return clamp(config.levelWeight * aboveMa + config.slopeWeight * slopeScore);
 }
 
 export function scoreImpulse(impulse: Impulse): number {
-  return impulse === 'EXPANDING' ? 80 : impulse === 'CONTRACTING' ? 30 : 55;
+  return impulse === 'EXPANDING' ? SCORING.impulse.expanding
+    : impulse === 'CONTRACTING' ? SCORING.impulse.contracting : SCORING.impulse.flat;
 }
 
 export function scoreCredit(hyLatest: number, hyHistory: number[], delta20: number | null): number {
   const pct      = percentileRank(hyLatest, hyHistory);            // 0 low .. 1 high
-  const calm     = clamp((1 - pct) * 100);                         // level: low OAS → high (original logic)
-  const momentum = delta20 == null ? 50 : linMap(delta20, 1.00, -0.25); // spread tightening (Δ<0) → high; widening (Δ>0) → low
+  const config = SCORING.credit;
+  const calm = clamp((1 - pct) * SCORING.scoreRange.maximum);
+  const momentum = delta20 == null ? config.momentumNeutral
+    : linMap(delta20, config.momentumWidening, config.momentumTightening);
   // fragility: spread at historical extreme low (<15th pct) but starting to widen (Δ>0.20pp) = complacency cracking
-  const fragility = (pct < 0.15 && delta20 != null && delta20 > 0.20) ? 15 : 0;
-  return clamp(0.55 * calm + 0.45 * momentum - fragility);
+  const fragility = (pct < config.fragilityPercentile && delta20 != null
+    && delta20 > config.fragilityWidening) ? config.fragilityPenalty : 0;
+  return clamp(config.levelWeight * calm + config.momentumWeight * momentum - fragility);
 }
 
 function scoreAvailableCredit(hyLatest: number, hyHistory: number[], delta20: number | null): number {
   if (delta20 != null) return scoreCredit(hyLatest, hyHistory, delta20);
   const pct = percentileRank(hyLatest, hyHistory);
-  return clamp((1 - pct) * 100);
+  return clamp((1 - pct) * SCORING.scoreRange.maximum);
 }
 
 export function scoreFunding(sofrIorb: number): number {
   // <=0 calm → 100; rises through +0.10 → 0
-  return linMap(sofrIorb, 0.10, 0.0);
+  return linMap(sofrIorb, SCORING.funding.stressedSpread, SCORING.funding.calmSpread);
 }
 
 export function scoreRates(delta10y: number | null): number {
-  if (delta10y == null) return 50;
+  if (delta10y == null) return SCORING.scoreRange.neutral;
   // +0.5pp over lookback = strong headwind (0); -0.5pp = tailwind (100)
-  return linMap(delta10y, 0.5, -0.5);
+  return linMap(delta10y, SCORING.rates.headwindChange, SCORING.rates.tailwindChange);
 }
 
 export function scoreDollar(dxySeries: Obs[], date: string): number {
-  const n = 200;
+  const n = SCORING.dollar.movingAverageDays;
   const vals = dxySeries.filter(o => o.date <= date).map(o => o.value);
-  if (vals.length < n) return 50;
+  if (vals.length < n) return SCORING.scoreRange.neutral;
   const ma = sma(vals, n)!;
   const slice = vals.slice(vals.length - n);
   const mean = slice.reduce((s, v) => s + v, 0) / n;
@@ -247,13 +268,13 @@ export function scoreDollar(dxySeries: Obs[], date: string): number {
   const latest = vals[vals.length - 1];
   const z = sd > 0 ? (latest - ma) / sd : 0;
   // strong dollar (z high) = headwind; below mean = tailwind
-  return linMap(z, 1.0, -1.0);
+  return linMap(z, SCORING.dollar.headwindZScore, SCORING.dollar.tailwindZScore);
 }
 
 export function scoreVol(vix: number | null): number {
-  if (vix == null) return 50;
+  if (vix == null) return SCORING.scoreRange.neutral;
   // VIX 12 → 100, 30 → 0
-  return linMap(vix, 30, 12);
+  return linMap(vix, SCORING.volatility.stressedVix, SCORING.volatility.calmVix);
 }
 
 /**
@@ -267,10 +288,15 @@ export function scoreReserveAdequacy(
   deltaReserves13w: number | null,
   sofrIorb: number | null,
 ): number {
-  const lvl  = reservesLevel    == null ? 50 : linMap(reservesLevel,    RESERVE_LOW,  RESERVE_HIGH); // abundant → high
-  const mom  = deltaReserves13w == null ? 50 : linMap(deltaReserves13w, -300,          300);           // rising → high
-  const fund = sofrIorb         == null ? 50 : linMap(sofrIorb,          0.10,         0.00);          // calm → high
-  return clamp(0.5 * lvl + 0.3 * mom + 0.2 * fund);
+  const config = SCORING.reserveAdequacy;
+  const neutral = SCORING.scoreRange.neutral;
+  const lvl = reservesLevel == null ? neutral
+    : linMap(reservesLevel, config.lowBillions, config.highBillions);
+  const mom = deltaReserves13w == null ? neutral
+    : linMap(deltaReserves13w, config.momentumMinimumBillions, config.momentumMaximumBillions);
+  const fund = sofrIorb == null ? neutral
+    : linMap(sofrIorb, SCORING.funding.stressedSpread, SCORING.funding.calmSpread);
+  return clamp(config.levelWeight * lvl + config.momentumWeight * mom + config.fundingWeight * fund);
 }
 
 function scoreAvailableReserveAdequacy(
@@ -281,11 +307,15 @@ function scoreAvailableReserveAdequacy(
   if (deltaReserves13w != null && sofrIorb != null) {
     return scoreReserveAdequacy(reservesLevel, deltaReserves13w, sofrIorb);
   }
-  const components = [
-    { score: linMap(reservesLevel, RESERVE_LOW, RESERVE_HIGH), weight: 0.5 },
-    { score: deltaReserves13w == null ? null : linMap(deltaReserves13w, -300, 300), weight: 0.3 },
-    { score: sofrIorb == null ? null : linMap(sofrIorb, 0.10, 0.00), weight: 0.2 },
-  ].filter((component): component is { score: number; weight: number } => component.score != null);
+  const config = SCORING.reserveAdequacy;
+  const components = ([
+    { score: linMap(reservesLevel, config.lowBillions, config.highBillions), weight: config.levelWeight },
+    { score: deltaReserves13w == null ? null
+      : linMap(deltaReserves13w, config.momentumMinimumBillions, config.momentumMaximumBillions), weight: config.momentumWeight },
+    { score: sofrIorb == null ? null
+      : linMap(sofrIorb, SCORING.funding.stressedSpread, SCORING.funding.calmSpread), weight: config.fundingWeight },
+  ] as Array<{ score: number | null; weight: number }>)
+    .filter((component): component is { score: number; weight: number } => component.score != null);
   const availableWeight = components.reduce((sum, component) => sum + component.weight, 0);
   return clamp(components.reduce((sum, component) => sum + component.score * component.weight, 0) / availableWeight);
 }
@@ -296,13 +326,18 @@ function scoreAvailableReserveAdequacy(
  * @param slopeChange20  20-day change in T10Y2Y: -0.3 (flattening) → 0, +0.3 (steepening) → 100
  */
 export function scoreCurve(slope: number | null, slopeChange20: number | null): number {
-  const lvl = slope == null ? 50 : linMap(slope, -0.5, 1.5);
-  const mom = slopeChange20 == null ? 50 : linMap(slopeChange20, -0.3, 0.3);
-  return clamp(0.5 * lvl + 0.5 * mom);
+  const config = SCORING.curve;
+  const lvl = slope == null ? SCORING.scoreRange.neutral
+    : linMap(slope, config.levelMinimum, config.levelMaximum);
+  const mom = slopeChange20 == null ? SCORING.scoreRange.neutral
+    : linMap(slopeChange20, config.changeMinimum, config.changeMaximum);
+  return clamp(config.levelWeight * lvl + config.momentumWeight * mom);
 }
 
 function scoreAvailableCurve(slope: number, slopeChange20: number | null): number {
-  return slopeChange20 == null ? linMap(slope, -0.5, 1.5) : scoreCurve(slope, slopeChange20);
+  return slopeChange20 == null
+    ? linMap(slope, SCORING.curve.levelMinimum, SCORING.curve.levelMaximum)
+    : scoreCurve(slope, slopeChange20);
 }
 
 export function weightedScore(f: Factors): number {
@@ -386,7 +421,7 @@ export function buildGuidance(input: GuidanceInput): Guidance {
       exposure = '基准以下';
       lean = '质量/防御';
     }
-  } else if (score < 50) {
+  } else if (score < CHAMPION_MODEL_CONFIG.portfolio.neutralScoreSplit) {
     tone = 'neutral';
     tierLabel = '中性偏谨慎';
     exposure = '维持基准或略低';
@@ -411,7 +446,7 @@ export function buildGuidance(input: GuidanceInput): Guidance {
     ? {
         label: `分数跌破 ${VERDICT_BANDS.bear} → 主动减一档`,
         detail: '当前 ' + score.toFixed(1) + `,距 ${VERDICT_BANDS.bear} 还有 ` + (score - VERDICT_BANDS.bear).toFixed(1),
-        armed: (score - VERDICT_BANDS.bear) <= 2,
+        armed: (score - VERDICT_BANDS.bear) <= CHAMPION_MODEL_CONFIG.guidance.bearTriggerArmedDistance,
       }
     : {
         label: `分数已在 ${VERDICT_BANDS.bear} 下方 → 维持减仓`,
@@ -530,7 +565,7 @@ export function deriveDecisionState(input: DecisionInput): DecisionState {
 export type PolicyRegime = 'QE' | 'QT' | 'RESERVE_MGMT' | 'NEUTRAL';
 
 export function policyRegime(impulse: Impulse, date: string): PolicyRegime {
-  if (date >= QT_END_DATE) return 'RESERVE_MGMT';   // QT 已结束 → 资产负债表变动是准备金管理/T-bill 再投资,不是 QE/QT
+  if (date >= CHAMPION_MODEL_CONFIG.policyRegime.qtEndDate) return 'RESERVE_MGMT';
   if (impulse === 'EXPANDING') return 'QE';
   if (impulse === 'CONTRACTING') return 'QT';
   return 'NEUTRAL';
@@ -565,7 +600,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     if (unavailable) {
       return {
         score: null,
-        quality: 0,
+        quality: SCORING.factorQuality.missing,
         status: unavailable,
         asOf: oldestAsOf(seriesIds),
         components: components(seriesIds, options.extra),
@@ -573,7 +608,7 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     }
     return {
       score,
-      quality: options.partial ? 0.5 : 1,
+      quality: options.partial ? SCORING.factorQuality.partial : SCORING.factorQuality.complete,
       status: options.partial ? 'PARTIAL' : 'OK',
       asOf: oldestAsOf(seriesIds),
       components: components(seriesIds, options.extra),
@@ -596,9 +631,9 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const sofrIorb = (sofr != null && iorb != null) ? sofr - iorb : null;
   const hyOas = freshness.BAMLH0A0HYM2.value;
   const hyHistory = (m.BAMLH0A0HYM2 ?? []).filter(o => o.date <= date).map(o => o.value);
-  const creditDelta = changeOverDaysFresh(m.BAMLH0A0HYM2 ?? [], date, CREDIT_LOOKBACK_DAYS, SERIES.BAMLH0A0HYM2);
+  const creditDelta = changeOverDaysFresh(m.BAMLH0A0HYM2 ?? [], date, SCORING.credit.lookbackDays, SERIES.BAMLH0A0HYM2);
   const dgs10 = freshness.DGS10.value;
-  const delta10y = changeOverDaysFresh(m.DGS10 ?? [], date, RATES_LOOKBACK_DAYS, SERIES.DGS10);
+  const delta10y = changeOverDaysFresh(m.DGS10 ?? [], date, SCORING.rates.lookbackDays, SERIES.DGS10);
   const dxy = freshness.DTWEXBGS.value;
   const vix = freshness.VIXCLS.value;
 
@@ -606,17 +641,21 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const netliqDir = netliqDirection(netliqWeekly);
 
   const reservesLevel = freshness.WRBWFRBL.value;
-  const deltaReserves13w = changeOverDaysFresh(m.WRBWFRBL ?? [], date, 91, SERIES.WRBWFRBL); // ~13 weeks
+  const deltaReserves13w = changeOverDaysFresh(
+    m.WRBWFRBL ?? [], date, SCORING.reserveAdequacy.lookbackDays, SERIES.WRBWFRBL,
+  );
 
   const curveSlope = freshness.T10Y2Y.value;
-  const curveChange20 = changeOverDaysFresh(m.T10Y2Y ?? [], date, 20, SERIES.T10Y2Y);
+  const curveChange20 = changeOverDaysFresh(m.T10Y2Y ?? [], date, SCORING.curve.lookbackDays, SERIES.T10Y2Y);
 
   const walclCadenceUsable = hasPlausibleCadence(recentWalcl, SERIES.WALCL.expectedFrequency);
   const netliqHistoryUsable = recentNetliq.cadenceObservations === NETLIQ_TREND_WEEKS + 1
     && walclCadenceUsable
     && netliqWeekly.length === recentNetliq.cadenceObservations;
   const impulseHistoryUsable = recentWalcl.length === NETLIQ_TREND_WEEKS + 1 && walclCadenceUsable;
-  const dollarHistoryUsable = hasPlausibleRecentWindow(m.DTWEXBGS ?? [], date, 200, SERIES.DTWEXBGS);
+  const dollarHistoryUsable = hasPlausibleRecentWindow(
+    m.DTWEXBGS ?? [], date, SCORING.dollar.movingAverageDays, SERIES.DTWEXBGS,
+  );
   const fundingUsable = sofrIorb != null;
   const factorResults: FactorResults = {
     netliqTrend: result(
@@ -677,7 +716,8 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
   const aggregateScore = availableWeight === 0 ? null : clamp(
     availableWeightedFactors.reduce((sum, key) => sum + factorResults[key].score! * WEIGHTS[key], 0) / availableWeight,
   );
-  const decisionStatus: DecisionStatus = factorResults.netliqTrend.status === 'OK' ? 'OK' : 'DATA_INCOMPLETE';
+  const decisionStatus: DecisionStatus = factorResults[SCORING.requiredPrimaryFactor].status === 'OK'
+    ? 'OK' : 'DATA_INCOMPLETE';
   const score = decisionStatus === 'OK' ? aggregateScore : null;
   const decision = deriveDecisionState({
     score,
@@ -695,10 +735,13 @@ export function computeSnapshot(m: SeriesMap, date: string, prev?: Verdict): Sna
     date, walcl, tga, rrp, repo, netliq, netliqTrend: sma(netliqWeekly, NETLIQ_TREND_WEEKS),
     sofrIorb, hyOas, dgs10, dxy, vix, bsImpulse, netliqDir, verdict: decision.macroVerdict, score, factors,
     factorResults, freshness, decisionStatus,
-    p0: (factorResults.rates.score ?? -Infinity) >= 50 && (factorResults.funding.score ?? -Infinity) >= 50 && (factorResults.credit.score ?? -Infinity) >= 50,
-    p1: (factorResults.netliqTrend.score ?? -Infinity) >= 50 || (factorResults.impulse.score ?? -Infinity) >= 50,
-    p2: (factorResults.dollar.score ?? -Infinity) >= 50,
-    p3: (factorResults.vol.score ?? -Infinity) >= 50,
+    p0: (factorResults.rates.score ?? -Infinity) >= SCORING.pillarPassingScore
+      && (factorResults.funding.score ?? -Infinity) >= SCORING.pillarPassingScore
+      && (factorResults.credit.score ?? -Infinity) >= SCORING.pillarPassingScore,
+    p1: (factorResults.netliqTrend.score ?? -Infinity) >= SCORING.pillarPassingScore
+      || (factorResults.impulse.score ?? -Infinity) >= SCORING.pillarPassingScore,
+    p2: (factorResults.dollar.score ?? -Infinity) >= SCORING.pillarPassingScore,
+    p3: (factorResults.vol.score ?? -Infinity) >= SCORING.pillarPassingScore,
     reason: decision.reason,
     coverage,
   };

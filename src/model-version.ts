@@ -1,22 +1,6 @@
-import {
-  COVERAGE_FACTORS,
-  CREDIT_LOOKBACK_DAYS,
-  EVENT_BACKTEST_ASSUMPTIONS,
-  MARKET_DATA_QUALITY,
-  NETLIQ_TREND_WEEKS,
-  QEQT_EPSILON_B,
-  QT_END_DATE,
-  RATES_LOOKBACK_DAYS,
-  RESERVE_HIGH,
-  RESERVE_LOW,
-  SERIES,
-  STRESS,
-  STRESS_SCORE_CEILING,
-  VERDICT_BANDS,
-  WEIGHTS,
-} from './config';
+import { CHAMPION_MODEL_CONFIG } from './config';
 
-export const CHAMPION_MODEL_VERSION = 'champion-v1.0.0';
+export const CHAMPION_MODEL_VERSION = CHAMPION_MODEL_CONFIG.modelVersion;
 export const LOCAL_COMMIT_SENTINEL = 'LOCAL_UNCONFIGURED';
 
 export interface ModelIdentity {
@@ -24,34 +8,6 @@ export interface ModelIdentity {
   configHash: string;
   codeCommitSha: string;
 }
-
-const descriptor = {
-  schema: 'macro-liquidity-champion-config/v1',
-  modelVersion: CHAMPION_MODEL_VERSION,
-  scoring: {
-    weights: WEIGHTS,
-    coverageFactors: COVERAGE_FACTORS,
-    verdictBands: VERDICT_BANDS,
-    reserveBoundsBillions: { low: RESERVE_LOW, high: RESERVE_HIGH },
-    qeQtDeadBandBillions: QEQT_EPSILON_B,
-    netLiquidityTrendWeeks: NETLIQ_TREND_WEEKS,
-    creditLookbackDays: CREDIT_LOOKBACK_DAYS,
-    ratesLookbackDays: RATES_LOOKBACK_DAYS,
-    qtEndDate: QT_END_DATE,
-  },
-  freshness: SERIES,
-  stress: { thresholds: STRESS, scoreCeiling: STRESS_SCORE_CEILING },
-  portfolio: {
-    methodology: 'DASHBOARD_EXPOSURE_TIERS_V1',
-    bullish: { upOrFlat: 1, down: 0.9 },
-    neutral: { scoreAtLeast50: 0.75, scoreBelow50: 0.5 },
-    bearish: 0.25,
-    stressed: 0.25,
-    unknownMaximum: 0.75,
-  },
-  eventBacktest: EVENT_BACKTEST_ASSUMPTIONS,
-  marketDataQuality: MARKET_DATA_QUALITY,
-} as const;
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -63,8 +19,8 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-export function canonicalChampionConfig(): string {
-  return JSON.stringify(canonicalize(descriptor));
+export function canonicalChampionConfig(config: unknown = CHAMPION_MODEL_CONFIG): string {
+  return JSON.stringify(canonicalize(config));
 }
 
 export function validateCommitSha(value: string | undefined): string {
@@ -76,7 +32,7 @@ export function validateCommitSha(value: string | undefined): string {
 
 // Small runtime-independent SHA-256 implementation. Keeping this synchronous
 // avoids Node-only imports while producing the same digest in Workers and tests.
-function sha256Hex(value: string): string {
+export function sha256Hex(value: string): string {
   const bytes = [...new TextEncoder().encode(value)];
   const bitLength = bytes.length * 8;
   bytes.push(0x80);
@@ -126,10 +82,18 @@ function sha256Hex(value: string): string {
   return h.map(word => word.toString(16).padStart(8, '0')).join('');
 }
 
+export function hashChampionConfig(config: unknown): string {
+  return sha256Hex(canonicalChampionConfig(config));
+}
+
+export function championConfigDigest(): string {
+  return hashChampionConfig(CHAMPION_MODEL_CONFIG);
+}
+
 export async function resolveModelIdentity(env: { CODE_COMMIT_SHA?: string }): Promise<ModelIdentity> {
   return {
     modelVersion: CHAMPION_MODEL_VERSION,
-    configHash: sha256Hex(canonicalChampionConfig()),
+    configHash: championConfigDigest(),
     codeCommitSha: validateCommitSha(env.CODE_COMMIT_SHA),
   };
 }

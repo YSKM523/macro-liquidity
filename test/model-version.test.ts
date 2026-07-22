@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Vitest executes in Node.
 import { readFileSync } from 'node:fs';
+// @ts-ignore Vitest executes in Node.
+import { createHash } from 'node:crypto';
+import { CHAMPION_MODEL_CONFIG } from '../src/config';
 import {
   CHAMPION_MODEL_VERSION,
   canonicalChampionConfig,
+  championConfigDigest,
+  hashChampionConfig,
   resolveModelIdentity,
   validateCommitSha,
 } from '../src/model-version';
@@ -18,6 +23,21 @@ describe('Champion model identity', () => {
     expect(first.modelVersion).toBe(CHAMPION_MODEL_VERSION);
     expect(first.configHash).toMatch(/^[a-f0-9]{64}$/);
     expect(first.codeCommitSha).toBe('0123456789abcdef0123456789abcdef01234567');
+  });
+
+  it('locks the complete Champion descriptor to a golden digest and Node crypto', () => {
+    const canonical = canonicalChampionConfig();
+    const nodeDigest = createHash('sha256').update(canonical).digest('hex');
+    expect(championConfigDigest()).toBe(nodeDigest);
+    expect(championConfigDigest()).toBe('807a1098f767b6804d38735324c92f9452586aafef77b53667acdbfa6b1e6626');
+    expect(Object.isFrozen(CHAMPION_MODEL_CONFIG)).toBe(true);
+    expect(Object.isFrozen(CHAMPION_MODEL_CONFIG.scoring.credit)).toBe(true);
+  });
+
+  it('changes identity when any governed scoring input drifts', () => {
+    const clone = JSON.parse(canonicalChampionConfig());
+    clone.scoring.credit.fragilityPenalty += 1;
+    expect(hashChampionConfig(clone)).not.toBe(championConfigDigest());
   });
 
   it('never impersonates a commit when the deployment binding is absent or malformed', async () => {

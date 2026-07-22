@@ -1,4 +1,6 @@
-import { STRESS, STRESS_SCORE_CEILING } from './config';
+import { CHAMPION_MODEL_CONFIG } from './config';
+
+const PORTFOLIO = CHAMPION_MODEL_CONFIG.portfolio;
 
 export type PortfolioVerdict = 'BULLISH' | 'NEUTRAL' | 'BEARISH';
 export type PortfolioDirection = 'UP' | 'DOWN' | 'FLAT';
@@ -54,29 +56,30 @@ export function officialPortfolioFieldIssue(input: {
 function basePolicy(input: PortfolioPolicyInput): Pick<PortfolioPolicy, 'targetExposure' | 'tier'> {
   if (input.verdict === 'BULLISH') {
     return input.netliqDir === 'DOWN'
-      ? { targetExposure: 0.9, tier: 'ORDINARY_TAILWIND' }
-      : { targetExposure: 1, tier: 'STRONG_TAILWIND' };
+      ? { targetExposure: PORTFOLIO.bullishDown, tier: 'ORDINARY_TAILWIND' }
+      : { targetExposure: PORTFOLIO.bullishUpOrFlat, tier: 'STRONG_TAILWIND' };
   }
-  if (input.verdict === 'BEARISH') return { targetExposure: 0.25, tier: 'HEADWIND' };
-  return input.score < 50
-    ? { targetExposure: 0.5, tier: 'CAUTIOUS' }
-    : { targetExposure: 0.75, tier: 'NEUTRAL' };
+  if (input.verdict === 'BEARISH') return { targetExposure: PORTFOLIO.bearish, tier: 'HEADWIND' };
+  return input.score < PORTFOLIO.neutralScoreSplit
+    ? { targetExposure: PORTFOLIO.neutralBelowSplit, tier: 'CAUTIOUS' }
+    : { targetExposure: PORTFOLIO.neutralAtOrAboveSplit, tier: 'NEUTRAL' };
 }
 
 export function mapPortfolioPolicy(input: PortfolioPolicyInput): PortfolioPolicy {
   if (!Number.isFinite(input.score)) throw new Error('invalid portfolio policy score');
   const base = basePolicy(input);
-  const stressApplied = input.stressStatus === 'STRESSED' && input.score < STRESS_SCORE_CEILING;
+  const stressApplied = input.stressStatus === 'STRESSED'
+    && input.score < CHAMPION_MODEL_CONFIG.stress.scoreCeiling;
   if (stressApplied) {
-    return { methodology: 'DASHBOARD_EXPOSURE_TIERS_V1', targetExposure: 0.25, tier: 'STRESS_BRAKE', stressApplied };
+    return { methodology: PORTFOLIO.methodology, targetExposure: PORTFOLIO.stressed, tier: 'STRESS_BRAKE', stressApplied };
   }
-  if (input.stressStatus === 'UNKNOWN' && base.targetExposure > 0.75) {
-    return { methodology: 'DASHBOARD_EXPOSURE_TIERS_V1', targetExposure: 0.75, tier: 'UNKNOWN_CAPPED', stressApplied: false };
+  if (input.stressStatus === 'UNKNOWN' && base.targetExposure > PORTFOLIO.unknownMaximum) {
+    return { methodology: PORTFOLIO.methodology, targetExposure: PORTFOLIO.unknownMaximum, tier: 'UNKNOWN_CAPPED', stressApplied: false };
   }
-  return { methodology: 'DASHBOARD_EXPOSURE_TIERS_V1', ...base, stressApplied: false };
+  return { methodology: PORTFOLIO.methodology, ...base, stressApplied: false };
 }
 
 export function snapshotVixStressStatus(vixEod: number | null): PortfolioStressStatus {
   if (vixEod == null || !Number.isFinite(vixEod)) return 'UNKNOWN';
-  return vixEod >= STRESS.vix ? 'STRESSED' : 'NORMAL';
+  return vixEod >= CHAMPION_MODEL_CONFIG.stress.thresholds.vix ? 'STRESSED' : 'NORMAL';
 }
