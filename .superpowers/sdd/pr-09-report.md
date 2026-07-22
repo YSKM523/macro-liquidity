@@ -9,8 +9,8 @@ Implementation commits: `0764210..eaa4e73`
 ## Outcome
 
 - Added strict `market_prices_daily` (SPX/VIX) and `cash_rates_daily` (SOFR) storage with source, fetch-time, and ingest-run provenance.
-- Migration 0009 backfills existing `observations` rows as `SP500→SPX`, `VIXCLS→VIX`, and `SOFR→SOFR` using canonical D1 time, explicit `FRED:*` source labels, and `MIGRATION_0009_BACKFILL` provenance.
-- Successful ingest activation now materializes those inputs in the same fenced D1 batch. Unchanged history retains its original provenance; corrections update value and provenance. A later lease/assertion failure rolls back observations, market/cash inputs, and ACTIVE switching together.
+- Migration 0009 backfills existing `observations` rows as `SP500→SPX`, `VIXCLS→VIX`, and `SOFR→SOFR` using canonical D1 time, explicit `FRED:*` source labels, and `MIGRATION_0009_BACKFILL` provenance; these three fields are explicitly synthetic.
+- Successful ingest activation now materializes those inputs in the same fenced D1 batch and inherits `source/fetched_at/data_run_id` from the latest matching PIT vintage. Legacy/no-PIT rows fall back to the series-attempt completion time and named FRED source. Unchanged real rows retain provenance; corrections update value/provenance; same-value synthetic backfills upgrade only when a real PIT row exists. A later lease/assertion failure rolls back observations, market/cash inputs, and ACTIVE switching together.
 - Frozen official `OK`/`PIT` signals execute at the first observed SPX close (`23:59:59Z`) strictly after `tradable_at`. Same-close signals collapse to the latest epoch `decision_at`; signals beyond the price history remain explicitly unexecuted.
 - Daily NAV uses prior-close exposure, the latest prior-date SOFR fixing (excluding same-date lookahead) with ACT/360 cash carry, 1 bp commission, 2 bps base slippage, conservative 3 bps extra slippage for VIX at/above 28 or stale/missing VIX, and SOFR plus 100 bps financing above 100% exposure.
 - Missing/stale SOFR, no executable signal, or fewer than two executable market sessions returns `DATA_INCOMPLETE` with `totalReturn=null`; it never substitutes zero cash return or publishes partial performance.
@@ -35,6 +35,7 @@ Implementation commits: `0764210..eaa4e73`
 - First full-suite run exposed old migration fixtures stopping at 0008 and a DOM-less main harness invoking the new loader: 28/29 files, 497/499 tests, 2 failures and 3 unhandled errors. The fixture-only correction was committed as `99e9616`; focused rerun passed 3/3 files and 29/29 tests without unhandled errors.
 - Final self-review added a no-lookahead regression proving a same-date 99% SOFR fixing was incorrectly visible at interval start; the RED cash return was 0.00825. The strict-prior-date fix in `eaa4e73` restored the expected 5% Fri→Mon carry of 0.0004166667 and documents the conservative date-only availability rule.
 - Task/spec review found the global mandatory backtest checklist still marked PR-09's four delivered gates incomplete. The review fix checks only next-tradable execution, daily prices, non-zero cash carry, and costs; the remaining five PR-10/later gates stay unchecked.
+- Task rereview found activation stamping daily rows with activation time and generic FRED source instead of raw-vintage provenance. The regression separates PIT `fetched_at` from activation time across SPX/VIX/SOFR, covers a corrected SPX vintage and same-value synthetic upgrade, and preserves unchanged-row/fence behavior.
 - Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 500/500 tests, exit 0**.
 - Fresh final `env -u NODE_OPTIONS npx tsc --noEmit`: **exit 0**.
 - `git diff --check 37fd6c4..HEAD`: **exit 0**.

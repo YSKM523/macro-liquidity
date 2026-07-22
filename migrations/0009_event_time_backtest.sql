@@ -41,7 +41,9 @@ CREATE INDEX IF NOT EXISTS idx_cash_rates_daily_date ON cash_rates_daily(date,ra
 CREATE INDEX IF NOT EXISTS idx_cash_rates_daily_run ON cash_rates_daily(data_run_id);
 
 -- A local, auditable bridge for data already present when 0009 is applied.
--- The next successful activation corrects values and provenance atomically.
+-- Its FRED:* source, migration-time fetched_at and MIGRATION_0009_BACKFILL
+-- run id are explicitly synthetic provenance. The next successful activation
+-- corrects values and provenance atomically from PIT raw rows when available.
 INSERT OR IGNORE INTO market_prices_daily
   (symbol,date,close,adjusted_close,source,fetched_at,data_run_id)
 SELECT CASE series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END,

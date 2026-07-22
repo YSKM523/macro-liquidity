@@ -6,7 +6,7 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ### PR-09 — Event-time daily backtest
 
-- Added `market_prices_daily` and `cash_rates_daily` with strict source/fetch/run provenance, an auditable local backfill from existing SP500/VIXCLS/SOFR observations, and correction-aware materialization inside the ingest activation fence.
+- Added `market_prices_daily` and `cash_rates_daily` with strict source/fetch/run provenance, an explicitly synthetic auditable local backfill from existing SP500/VIXCLS/SOFR observations, and correction-aware materialization from the latest matching PIT vintage inside the ingest activation fence.
 - Scheduled frozen official `OK`/`PIT` signals at the first observed SPX close strictly after `tradable_at`; same-close events collapse to the latest `decision_at`, and late signals remain explicitly unexecuted.
 - Added daily close-to-close NAV with SOFR ACT/360 carry, 1 bp commission, 2 bps base slippage, conservative 3 bps high/stale/missing-VIX slippage, and SOFR plus 100 bps financing support above 100% exposure.
 - Made missing/stale SOFR and insufficient sessions return typed `DATA_INCOMPLETE` with null total performance, while retaining the old weekly long/flat output as `LEGACY_WEEKLY` diagnostics.

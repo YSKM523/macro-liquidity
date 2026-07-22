@@ -113,7 +113,7 @@ flowchart TD
 
 ## 验证(诚实的样本外检验)
 
-- **`/api/backtest`** —— 正式绩效使用 event-time：冻结 PIT 信号在 `tradable_at` 后首个实际 SPX 日收盘执行，日频净值加入 SOFR ACT/360、手续费、滑点和融资；旧周频 long/flat 仅标记为 `LEGACY_WEEKLY` 诊断。4/8/13 周 IC、命中率和逐因子 IC 保持不变。
+- **`/api/backtest`** —— 正式绩效使用 event-time：冻结 PIT 信号在 `tradable_at` 后首个实际 SPX 日收盘执行，日频净值加入 SOFR ACT/360、手续费、滑点和融资；日频市场/现金行继承最新匹配 PIT vintage 的真实 source/fetched/run provenance，migration backfill 则显式标为 synthetic，旧周频 long/flat 仅标记为 `LEGACY_WEEKLY` 诊断。4/8/13 周 IC、命中率和逐因子 IC 保持不变。
 - **`/api/walkforward`** —— 扩窗 train → embargo → OOS test 滚动,三臂对比(WF 自动拟合 / 等权 / 当前手调)。**裁决:自动调权过拟合;等权 ≈ 手调;edge 在因子选择不在精确权重。**
 - **综合 IC@13w 轨迹**:`0.127 → 0.195 → 0.208 → 0.227 → 0.255`,**Sharpe 0.83 → 1.10**,每步有回测撑腰。
 - **负结果归档(`docs/ALGORITHM.md` §10)**:测过「全球央行流动性(Fed+ECB+BOJ)领先美股」—— 24 年两种构造都**弱、regime 不稳、不比 Fed-only 强 → 不采用**。离线研究脚本见 [`scripts/`](scripts/)。

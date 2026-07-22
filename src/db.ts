@@ -392,10 +392,25 @@ export async function activateIngestRun(
     db.prepare(
       `INSERT INTO market_prices_daily
          (symbol,date,close,adjusted_close,source,fetched_at,data_run_id)
-       SELECT CASE series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END,
-              date,value,value,'FRED:' || series_id,?,?
-       FROM observations
-       WHERE series_id IN ('SP500','VIXCLS')
+       SELECT CASE active.series_id WHEN 'SP500' THEN 'SPX' ELSE 'VIX' END,
+              active.date,active.value,active.value,
+              COALESCE(provenance.source,'FRED:' || active.series_id),
+              COALESCE(provenance.fetched_at,
+                (SELECT attempt.completed_at FROM ingest_series_attempts attempt
+                 WHERE attempt.run_id=? AND attempt.series_id=active.series_id
+                   AND attempt.status='SUCCEEDED'),?),
+              COALESCE(provenance.data_run_id,?)
+       FROM observations active
+       LEFT JOIN observations_pit provenance
+         ON provenance.series_id=active.series_id
+        AND provenance.observation_date=active.date
+        AND provenance.value=active.value
+        AND provenance.vintage_date=(
+          SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
+          WHERE candidate.series_id=active.series_id
+            AND candidate.observation_date=active.date
+        )
+       WHERE active.series_id IN ('SP500','VIXCLS')
          AND EXISTS (SELECT 1 FROM ingest_runs target
            WHERE target.run_id=? AND target.state='RUNNING')
          AND EXISTS (SELECT 1 FROM ingest_lock lease
@@ -405,13 +420,41 @@ export async function activateIngestRun(
          close=excluded.close,adjusted_close=excluded.adjusted_close,
          source=excluded.source,fetched_at=excluded.fetched_at,data_run_id=excluded.data_run_id
        WHERE market_prices_daily.close<>excluded.close
-          OR market_prices_daily.adjusted_close<>excluded.adjusted_close`
-    ).bind(completedAt, runId, runId, runId),
+          OR market_prices_daily.adjusted_close<>excluded.adjusted_close
+          OR (market_prices_daily.data_run_id='MIGRATION_0009_BACKFILL'
+            AND EXISTS (
+              SELECT 1 FROM observations_pit real
+              WHERE real.series_id=CASE excluded.symbol
+                    WHEN 'SPX' THEN 'SP500' ELSE 'VIXCLS' END
+                AND real.observation_date=excluded.date
+                AND real.value=excluded.close
+                AND real.vintage_date=(
+                  SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
+                  WHERE candidate.series_id=real.series_id
+                    AND candidate.observation_date=real.observation_date
+                )
+            ))`
+    ).bind(runId, completedAt, runId, runId, runId),
     db.prepare(
       `INSERT INTO cash_rates_daily (rate_id,date,rate,source,fetched_at,data_run_id)
-       SELECT 'SOFR',date,value,'FRED:SOFR',?,?
-       FROM observations
-       WHERE series_id='SOFR'
+       SELECT 'SOFR',active.date,active.value,
+              COALESCE(provenance.source,'FRED:SOFR'),
+              COALESCE(provenance.fetched_at,
+                (SELECT attempt.completed_at FROM ingest_series_attempts attempt
+                 WHERE attempt.run_id=? AND attempt.series_id=active.series_id
+                   AND attempt.status='SUCCEEDED'),?),
+              COALESCE(provenance.data_run_id,?)
+       FROM observations active
+       LEFT JOIN observations_pit provenance
+         ON provenance.series_id=active.series_id
+        AND provenance.observation_date=active.date
+        AND provenance.value=active.value
+        AND provenance.vintage_date=(
+          SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
+          WHERE candidate.series_id=active.series_id
+            AND candidate.observation_date=active.date
+        )
+       WHERE active.series_id='SOFR'
          AND EXISTS (SELECT 1 FROM ingest_runs target
            WHERE target.run_id=? AND target.state='RUNNING')
          AND EXISTS (SELECT 1 FROM ingest_lock lease
@@ -420,8 +463,20 @@ export async function activateIngestRun(
        ON CONFLICT(rate_id,date) DO UPDATE SET
          rate=excluded.rate,source=excluded.source,
          fetched_at=excluded.fetched_at,data_run_id=excluded.data_run_id
-       WHERE cash_rates_daily.rate<>excluded.rate`
-    ).bind(completedAt, runId, runId, runId),
+       WHERE cash_rates_daily.rate<>excluded.rate
+          OR (cash_rates_daily.data_run_id='MIGRATION_0009_BACKFILL'
+            AND EXISTS (
+              SELECT 1 FROM observations_pit real
+              WHERE real.series_id='SOFR'
+                AND real.observation_date=excluded.date
+                AND real.value=excluded.rate
+                AND real.vintage_date=(
+                  SELECT MAX(candidate.vintage_date) FROM observations_pit candidate
+                  WHERE candidate.series_id=real.series_id
+                    AND candidate.observation_date=real.observation_date
+                )
+            ))`
+    ).bind(runId, completedAt, runId, runId, runId),
     db.prepare(
       `UPDATE ingest_runs SET state = 'SUPERSEDED'
        WHERE state = 'ACTIVE' AND run_id <> ?
