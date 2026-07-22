@@ -4,7 +4,7 @@ Base: `37fd6c4`
 
 Branch: `codex/pr-09-event-time-backtest`
 
-Implementation commits: `0764210..c8c08ec`
+Implementation commits: `0764210..f07552f`
 
 ## Outcome
 
@@ -13,7 +13,7 @@ Implementation commits: `0764210..c8c08ec`
 - Successful ingest activation now materializes those inputs in the same fenced D1 batch and inherits `source/fetched_at/data_run_id` from the latest matching PIT vintage. Legacy/no-PIT rows fall back to the series-attempt completion time and named FRED source. Unchanged real rows retain provenance; corrections update value/provenance; same-value synthetic backfills upgrade only when a real PIT row exists. A later lease/assertion failure rolls back observations, market/cash inputs, and ACTIVE switching together.
 - Frozen official `OK`/`PIT` signals execute at the first observed SPX close (`23:59:59Z`) strictly after `tradable_at`. Same-close signals collapse to the latest epoch `decision_at`; signals beyond the price history remain explicitly unexecuted.
 - Daily NAV uses prior-close exposure, the latest prior-date SOFR fixing (excluding same-date lookahead) with ACT/360 cash carry, 1 bp commission, 2 bps base slippage, conservative 3 bps extra slippage for VIX at/above 28 or stale/missing VIX, and SOFR plus 100 bps financing above 100% exposure.
-- Missing/stale SOFR, no executable signal, or fewer than two executable market sessions returns `DATA_INCOMPLETE` with `totalReturn=null`; it never substitutes zero cash return or publishes partial performance.
+- Missing/stale SOFR, no executable signal, or fewer than two executable market sessions returns `DATA_INCOMPLETE` with empty NAV and all performance totals null; it never substitutes zero cash return or publishes partial performance.
 - `/api/backtest` preserves the existing horizon and factor-IC diagnostics, adds formal `event_time`, and labels the old weekly long/flat result `LEGACY_WEEKLY`.
 - Dashboard and algorithm docs disclose execution timing, index-close semantics, cash day count, costs, high-vol policy, financing, incomplete-data behavior, and the legacy/formal distinction.
 - Champion score formulas, factor weights, 45/50/55 bands, hysteresis, live-stress thresholds, and official/nowcast channel policy were not changed. PR-10 exposure tiers, benchmarks, and tail metrics were not implemented.
@@ -37,7 +37,7 @@ Implementation commits: `0764210..c8c08ec`
 - Task/spec review found the global mandatory backtest checklist still marked PR-09's four delivered gates incomplete. The review fix checks only next-tradable execution, daily prices, non-zero cash carry, and costs; the remaining five PR-10/later gates stay unchecked.
 - Task rereview found activation stamping daily rows with activation time and generic FRED source instead of raw-vintage provenance. The regression separates PIT `fetched_at` from activation time across SPX/VIX/SOFR, covers a corrected SPX vintage and same-value synthetic upgrade, and preserves unchanged-row/fence behavior.
 - Whole-branch review found four Important issues: partial NAV/cost leakage on incomplete cash; no hard active/latest-PIT value fence; mutable-current inputs presented without a compact cutoff/reproducibility warning; and legacy 8.1%/Sharpe 1.10 prose appearing formal. It also noted missing same-close supersession audit. The fix erases incomplete performance, adds the transactional mismatch guard, exposes `CURRENT_REVISION_MUTABLE` provenance with `responseReproducible=false`, labels every legacy metric, and records superseded signals.
-- Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 501/501 tests, exit 0**.
+- Fresh final `env -u NODE_OPTIONS npm test`: **29/29 files, 503/503 tests, exit 0**.
 - Fresh final `env -u NODE_OPTIONS npx tsc --noEmit`: **exit 0**.
 - `git diff --check 37fd6c4..HEAD`: **exit 0**.
 - Fresh local `npm exec wrangler -- d1 migrations apply macro_liquidity --local --persist-to /tmp/pr09-d1-e1yvC9`: migrations **0001–0009 applied successfully**; immediate second invocation returned **No migrations to apply!**.
