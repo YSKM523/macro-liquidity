@@ -167,22 +167,32 @@ describe('dual-horizon PIT inputs', () => {
     await mf.dispose();
   });
 
-  it('replays the complete old-cutoff loader result after a late revision and override arrive', async () => {
+  it('replays the complete old-cutoff result after later malformed raw rows and overrides arrive', async () => {
     const { mf, db } = await migratedDb();
     const oldCutoff = '2024-01-10T00:00:00Z';
     await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 7_000);
 
-    const resultBeforeLateRevision = await loadLiquidityStructureSeries(db, oldCutoff);
+    const resultBeforeLateRevision = await loadDualHorizonLiquiditySeries(db, oldCutoff);
 
     await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-11', '2024-01-12T00:00:00Z', 7_100);
     await db.prepare(
       `INSERT INTO release_calendar_overrides
         (series_id,vintage_date,released_at,tradable_at,reason,created_at)
-       VALUES ('WALCL','2024-01-04','2024-01-15T00:00:00Z','2024-01-15T14:30:00Z',
-               'late verified correction','2024-01-12T00:00:00Z')`,
+       VALUES ('WALCL','2024-01-04','malformed-late-release','malformed-late-tradable',
+               'late malformed correction','2024-01-12T00:00:00Z')`,
+    ).run();
+    await db.prepare(
+      `INSERT INTO observations_pit
+        (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
+         source,checksum,data_run_id,release_time_status,value)
+       VALUES ('SP500','2024-01-03','2024-01-04','malformed-unrelated-release',
+               '2024-01-12T00:00:00Z','malformed-unrelated-tradable','ALFRED',
+               'unrelated-late','dual-horizon-pit','OBSERVED_AT_FETCH',5000)`,
     ).run();
 
-    const resultAfterLateRevisionAtOldCutoff = await loadLiquidityStructureSeries(db, oldCutoff);
+    const resultAfterLateRevisionAtOldCutoff = await loadDualHorizonLiquiditySeries(db, oldCutoff);
+    expect(JSON.stringify(resultAfterLateRevisionAtOldCutoff))
+      .toBe(JSON.stringify(resultBeforeLateRevision));
     expect(resultAfterLateRevisionAtOldCutoff).toEqual(resultBeforeLateRevision);
     await mf.dispose();
   });
