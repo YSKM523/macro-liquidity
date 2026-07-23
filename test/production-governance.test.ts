@@ -24,7 +24,7 @@ function productionTypeScriptFiles(directory = 'src'): string[] {
   });
 }
 
-type ShadowViolationKind = 'NAMESPACE_IMPORT' | 'DEFAULT_IMPORT' | 'DYNAMIC_IMPORT';
+type ShadowViolationKind = 'NAMESPACE_IMPORT' | 'DEFAULT_IMPORT' | 'DYNAMIC_IMPORT' | 'RE_EXPORT';
 
 interface ShadowUsageAnalysis {
   imports: Array<{ file: string; localName: string }>;
@@ -102,6 +102,10 @@ function analyzeDualHorizonShadowUsage(files: Map<string, string>): ShadowUsageA
           }
         }
       }
+      if (ts.isExportDeclaration(node) && node.moduleSpecifier != null && ts.isStringLiteral(node.moduleSpecifier)
+        && isDualHorizonModule(file, node.moduleSpecifier.text)) {
+        violations.push({ file, kind: 'RE_EXPORT' });
+      }
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
@@ -112,7 +116,11 @@ function analyzeDualHorizonShadowUsage(files: Map<string, string>): ShadowUsageA
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
         if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-          violations.push({ file, kind: 'DYNAMIC_IMPORT' });
+          const [moduleSpecifier] = node.arguments;
+          if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)
+            && isDualHorizonModule(file, moduleSpecifier.text)) {
+            violations.push({ file, kind: 'DYNAMIC_IMPORT' });
+          }
         } else if (ts.isIdentifier(node.expression)) {
           const symbol = checker.getSymbolAtLocation(node.expression);
           const binding = bindings.find(candidate => candidate.symbol === symbol);
@@ -301,6 +309,27 @@ describe('production governance configuration', () => {
         shadow.buildDualHorizonShadow();
       `],
       ['/virtual/src/rogue-dynamic.ts', 'void import("./dual-horizon-confidence");'],
+      ['/virtual/src/lazy-feature.ts', 'export const lazy = true;'],
+      ['/virtual/src/allowed-dynamic.ts', 'void import("./lazy-feature");'],
+      ['/virtual/src/shadow-forward.ts', `
+        export { buildDualHorizonShadow } from './dual-horizon-confidence';
+      `],
+      ['/virtual/src/shadow-forward-star.ts', "export * from './dual-horizon-confidence';"],
+      ['/virtual/src/shadow-forward-default.ts', `
+        export { buildDualHorizonShadow as default } from './dual-horizon-confidence';
+      `],
+      ['/virtual/src/rogue-re-export.ts', `
+        import { buildDualHorizonShadow } from './shadow-forward';
+        buildDualHorizonShadow();
+      `],
+      ['/virtual/src/rogue-re-export-star.ts', `
+        import { buildDualHorizonShadow } from './shadow-forward-star';
+        buildDualHorizonShadow();
+      `],
+      ['/virtual/src/rogue-re-export-default.ts', `
+        import compose from './shadow-forward-default';
+        compose();
+      `],
     ]));
 
     expect(analysis.imports).toEqual(expect.arrayContaining([
@@ -317,7 +346,13 @@ describe('production governance configuration', () => {
     expect(analysis.violations).toEqual(expect.arrayContaining([
       { file: '/virtual/src/rogue-namespace.ts', kind: 'NAMESPACE_IMPORT' },
       { file: '/virtual/src/rogue-dynamic.ts', kind: 'DYNAMIC_IMPORT' },
+      { file: '/virtual/src/shadow-forward.ts', kind: 'RE_EXPORT' },
+      { file: '/virtual/src/shadow-forward-star.ts', kind: 'RE_EXPORT' },
+      { file: '/virtual/src/shadow-forward-default.ts', kind: 'RE_EXPORT' },
     ]));
+    expect(analysis.violations).not.toContainEqual({
+      file: '/virtual/src/allowed-dynamic.ts', kind: 'DYNAMIC_IMPORT',
+    });
   });
 
   it('confines dual-horizon Shadow composition to its challenger route', () => {
