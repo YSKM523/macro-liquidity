@@ -154,6 +154,7 @@ export async function runIngest(
             }
             return observedAt;
           },
+          { resolveFirstVintage: lastPitVintage == null },
         );
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);

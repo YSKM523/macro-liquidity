@@ -10,6 +10,7 @@ export type ReleaseRules = ReleaseRule | ReleaseRule[];
 
 export interface FredFetchOptions extends HttpRetryOptions {
   fetchFn?: HttpFetcher;
+  resolveFirstVintage?: boolean;
 }
 
 export function parseFredJson(seriesId: string, json: any): Obs[] {
@@ -136,6 +137,36 @@ function addUtcDays(date: string, days: number): string {
   return value.toISOString().slice(0, 10);
 }
 
+async function firstFredVintageDate(
+  seriesId: string,
+  realtimeStart: string,
+  realtimeEnd: string,
+  apiKey: string,
+  options: FredFetchOptions,
+): Promise<string | null> {
+  const url = new URL('https://api.stlouisfed.org/fred/series/vintagedates');
+  for (const [key, value] of Object.entries({
+    series_id: seriesId,
+    api_key: apiKey,
+    file_type: 'json',
+    realtime_start: realtimeStart,
+    realtime_end: realtimeEnd,
+    limit: '1',
+    offset: '0',
+    sort_order: 'asc',
+  })) url.searchParams.set(key, value);
+  const response = await fetchWithRetry(
+    options.fetchFn ?? fetch, url.toString(), undefined, options,
+  );
+  if (!response.ok) {
+    await releaseResponseBody(response);
+    throw new Error(`ALFRED vintage dates ${seriesId} ${response.status}`);
+  }
+  const json: any = await response.json();
+  const first = json?.vintage_dates?.[0];
+  return first == null ? null : strictDate(first, 'first vintage date');
+}
+
 export async function fetchFredSeriesPit(
   seriesId: string,
   observationStart: string,
@@ -153,6 +184,13 @@ export async function fetchFredSeriesPit(
   const finalRealtimeEnd = strictDate(fetchedAt.slice(0, 10), 'real-time end');
   let windowStart = strictDate(realtimeStart, 'real-time start');
   if (windowStart > finalRealtimeEnd) throw new Error('invalid ALFRED real-time range');
+  if (requestOptions.resolveFirstVintage) {
+    const firstVintage = await firstFredVintageDate(
+      seriesId, windowStart, finalRealtimeEnd, apiKey, requestOptions,
+    );
+    if (firstVintage == null) return { latestRows: [], vintages: [] };
+    if (firstVintage > windowStart) windowStart = firstVintage;
+  }
   for (;;) {
     const candidateEnd = addUtcDays(windowStart, 1999);
     const windowEnd = candidateEnd < finalRealtimeEnd ? candidateEnd : finalRealtimeEnd;

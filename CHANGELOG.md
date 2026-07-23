@@ -16,6 +16,10 @@ All notable changes to Macro Liquidity Dashboard are documented here.
   at most 2,000 calendar dates so daily series cannot exceed the API limit.
   PIT page attempts use the existing provider-policy maximum of 30 seconds to
   tolerate measured ALFRED latency without relaxing live-data timeouts.
+- Initial PIT backfills now resolve and clamp to each series' first available
+  ALFRED vintage before requesting observations, avoiding pre-inception 400s
+  for late-starting series such as IORB. Incremental runs continue from the
+  persisted database checkpoint without the discovery request.
 
 ### PR-17 — Governed liquidity-structure challenger
 

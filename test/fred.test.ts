@@ -325,6 +325,39 @@ describe('ALFRED vintages', () => {
     expect(result.vintages).toHaveLength(2);
   });
 
+  it('starts an initial PIT backfill at the first available ALFRED vintage', async () => {
+    const requests: URL[] = [];
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requests.push(url);
+      if (url.pathname.endsWith('/vintagedates')) {
+        return Response.json({ vintage_dates: ['2021-07-28'] });
+      }
+      const realtimeStart = url.searchParams.get('realtime_start')!;
+      if (realtimeStart < '2021-07-28') {
+        return new Response('series does not exist in ALFRED', { status: 400 });
+      }
+      return Response.json({
+        count: 1,
+        limit: 100000,
+        offset: 0,
+        output_type: 3,
+        observations: [{ date: '2021-07-29', IORB_20210728: '0.15' }],
+      });
+    });
+
+    const result = await fetchFredSeriesPit(
+      'IORB', '2016-01-01', '2016-01-01', '2026-07-23T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, maxAttempts: 1, resolveFirstVintage: true },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0].pathname).toBe('/fred/series/vintagedates');
+    expect(requests[1].searchParams.get('realtime_start')).toBe('2021-07-28');
+    expect(result.latestRows).toEqual([{ date: '2021-07-29', value: 0.15 }]);
+  });
+
   it('timestamps a same-day vintage after the successful response rather than at run start', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       count: 1, limit: 100000, offset: 0,
