@@ -98,6 +98,29 @@ describe('FRED bounded retries', () => {
 });
 
 describe('ALFRED vintages', () => {
+  it('allows each PIT page up to the provider policy maximum by default', async () => {
+    const delays: number[] = [];
+    const fetchFn = vi.fn(async () => new Promise<Response>(() => {}));
+
+    await expect(fetchFredSeriesPit(
+      'WALCL', '2003-01-01', '2024-01-04', '2024-01-10T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      {
+        fetchFn: fetchFn as any,
+        maxAttempts: 1,
+        sleep: async () => undefined,
+        setTimeoutFn: ((callback: () => void, delay: number) => {
+          delays.push(delay);
+          queueMicrotask(callback);
+          return 1;
+        }) as any,
+        clearTimeoutFn: vi.fn(),
+      },
+    )).rejects.toThrow(/timeout/i);
+
+    expect(delays).toEqual([30_000]);
+  });
+
   it('times out each hung ALFRED page attempt without using wall-clock waits', async () => {
     const fetchFn = vi.fn(async () => new Promise<Response>(() => {}));
 

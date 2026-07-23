@@ -14,6 +14,8 @@ All notable changes to Macro Liquidity Dashboard are documented here.
   protected deployment: wide vintage fields are now normalized into append-only
   PIT rows, and long real-time ranges are fetched in non-overlapping windows of
   at most 2,000 calendar dates so daily series cannot exceed the API limit.
+  PIT page attempts use the existing provider-policy maximum of 30 seconds to
+  tolerate measured ALFRED latency without relaxing live-data timeouts.
 
 ### PR-17 — Governed liquidity-structure challenger
 

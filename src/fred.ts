@@ -149,6 +149,7 @@ export async function fetchFredSeriesPit(
 ): Promise<{ latestRows: Obs[]; vintages: PitObservation[] }> {
   const all: PitObservation[] = [];
   const limit = 100000;
+  const requestOptions: FredFetchOptions = { attemptTimeoutMs: 30_000, ...options };
   const finalRealtimeEnd = strictDate(fetchedAt.slice(0, 10), 'real-time end');
   let windowStart = strictDate(realtimeStart, 'real-time start');
   if (windowStart > finalRealtimeEnd) throw new Error('invalid ALFRED real-time range');
@@ -163,7 +164,9 @@ export async function fetchFredSeriesPit(
         observation_start: observationStart, realtime_start: windowStart,
         realtime_end: windowEnd, limit: String(limit), offset: String(offset),
       })) url.searchParams.set(key, value);
-      const response = await fetchWithRetry(options.fetchFn ?? fetch, url.toString(), undefined, options);
+      const response = await fetchWithRetry(
+        requestOptions.fetchFn ?? fetch, url.toString(), undefined, requestOptions,
+      );
       if (!response.ok) {
         await releaseResponseBody(response);
         throw new Error(`ALFRED ${seriesId} ${response.status}`);
