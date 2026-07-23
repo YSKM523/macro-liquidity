@@ -10,6 +10,10 @@ All notable changes to Macro Liquidity Dashboard are documented here.
   `@cloudflare/workers-types` to `5.20260723.1`, removing the known Wrangler
   3.x deployment-tool vulnerabilities while preserving Node 22 CI and the
   existing fail-closed production release gates.
+- Corrected the ALFRED `output_type=3` production contract exposed by the first
+  protected deployment: wide vintage fields are now normalized into append-only
+  PIT rows, and long real-time ranges are fetched in non-overlapping windows of
+  at most 2,000 calendar dates so daily series cannot exceed the API limit.
 
 ### PR-17 — Governed liquidity-structure challenger
 

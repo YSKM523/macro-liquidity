@@ -65,6 +65,32 @@ function normalizeReleaseRules(releaseRules: ReleaseRules): ReleaseRule[] {
   return rules;
 }
 
+function pitJsonObservations(seriesId: string, json: any): any[] {
+  const observations = Array.isArray(json?.observations) ? json.observations : [];
+  if (String(json?.output_type) !== '3') return observations;
+
+  const prefix = `${seriesId}_`;
+  const rows: any[] = [];
+  for (const observation of observations) {
+    for (const [field, value] of Object.entries(observation ?? {})) {
+      if (field === 'date') continue;
+      if (!field.startsWith(prefix)) {
+        throw new Error(`invalid ALFRED output_type=3 field ${field}`);
+      }
+      const compactVintage = field.slice(prefix.length);
+      if (!/^\d{8}$/.test(compactVintage)) {
+        throw new Error(`invalid ALFRED output_type=3 field ${field}`);
+      }
+      rows.push({
+        date: observation.date,
+        realtime_start: `${compactVintage.slice(0, 4)}-${compactVintage.slice(4, 6)}-${compactVintage.slice(6, 8)}`,
+        value,
+      });
+    }
+  }
+  return rows;
+}
+
 export async function parseFredPitJson(
   seriesId: string,
   json: any,
@@ -75,7 +101,7 @@ export async function parseFredPitJson(
   const unit = UNIT_BY_ID[seriesId] ?? 'I';
   const byKey = new Map<string, PitObservation>();
   const rules = normalizeReleaseRules(releaseRules);
-  for (const raw of (json?.observations ?? [])) {
+  for (const raw of pitJsonObservations(seriesId, json)) {
     if (raw.value === '.' || raw.value == null || raw.value === '') continue;
     let value = Number(raw.value);
     if (!Number.isFinite(value)) continue;
@@ -104,6 +130,12 @@ export async function parseFredPitJson(
     a.vintageDate.localeCompare(b.vintageDate) || a.observationDate.localeCompare(b.observationDate));
 }
 
+function addUtcDays(date: string, days: number): string {
+  const value = new Date(`${strictDate(date, 'real-time date')}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
 export async function fetchFredSeriesPit(
   seriesId: string,
   observationStart: string,
@@ -117,27 +149,36 @@ export async function fetchFredSeriesPit(
 ): Promise<{ latestRows: Obs[]; vintages: PitObservation[] }> {
   const all: PitObservation[] = [];
   const limit = 100000;
-  let offset = 0;
+  const finalRealtimeEnd = strictDate(fetchedAt.slice(0, 10), 'real-time end');
+  let windowStart = strictDate(realtimeStart, 'real-time start');
+  if (windowStart > finalRealtimeEnd) throw new Error('invalid ALFRED real-time range');
   for (;;) {
-    const url = new URL('https://api.stlouisfed.org/fred/series/observations');
-    for (const [key, value] of Object.entries({
-      series_id: seriesId, api_key: apiKey, file_type: 'json', output_type: '3',
-      observation_start: observationStart, realtime_start: realtimeStart,
-      realtime_end: fetchedAt.slice(0, 10), limit: String(limit), offset: String(offset),
-    })) url.searchParams.set(key, value);
-    const response = await fetchWithRetry(options.fetchFn ?? fetch, url.toString(), undefined, options);
-    if (!response.ok) {
-      await releaseResponseBody(response);
-      throw new Error(`ALFRED ${seriesId} ${response.status}`);
+    const candidateEnd = addUtcDays(windowStart, 1999);
+    const windowEnd = candidateEnd < finalRealtimeEnd ? candidateEnd : finalRealtimeEnd;
+    let offset = 0;
+    for (;;) {
+      const url = new URL('https://api.stlouisfed.org/fred/series/observations');
+      for (const [key, value] of Object.entries({
+        series_id: seriesId, api_key: apiKey, file_type: 'json', output_type: '3',
+        observation_start: observationStart, realtime_start: windowStart,
+        realtime_end: windowEnd, limit: String(limit), offset: String(offset),
+      })) url.searchParams.set(key, value);
+      const response = await fetchWithRetry(options.fetchFn ?? fetch, url.toString(), undefined, options);
+      if (!response.ok) {
+        await releaseResponseBody(response);
+        throw new Error(`ALFRED ${seriesId} ${response.status}`);
+      }
+      const json: any = await response.json();
+      const pageFetchedAt = observedAt();
+      all.push(...await parseFredPitJson(seriesId, json, pageFetchedAt, releaseRules, overrides));
+      const count = Number(json?.count ?? all.length);
+      const pageLimit = Number(json?.limit ?? limit);
+      const pageOffset = Number(json?.offset ?? offset);
+      if (!Number.isFinite(count) || count <= pageOffset + pageLimit) break;
+      offset = pageOffset + pageLimit;
     }
-    const json: any = await response.json();
-    const pageFetchedAt = observedAt();
-    all.push(...await parseFredPitJson(seriesId, json, pageFetchedAt, releaseRules, overrides));
-    const count = Number(json?.count ?? all.length);
-    const pageLimit = Number(json?.limit ?? limit);
-    const pageOffset = Number(json?.offset ?? offset);
-    if (!Number.isFinite(count) || count <= pageOffset + pageLimit) break;
-    offset = pageOffset + pageLimit;
+    if (windowEnd === finalRealtimeEnd) break;
+    windowStart = addUtcDays(windowEnd, 1);
   }
   const unique = new Map<string, PitObservation>();
   for (const row of all) {

@@ -177,6 +177,26 @@ describe('ALFRED vintages', () => {
     expect(result[0]).toMatchObject({ observationDate: '2024-01-03', vintageDate: '2024-01-04' });
   });
 
+  it('parses output_type=3 wide JSON vintage fields', async () => {
+    const result = await parseFredPitJson('WALCL', {
+      output_type: 3,
+      observations: [{
+        date: '2024-01-03',
+        WALCL_20240104: '5800000',
+        WALCL_20240108: '5900000',
+      }],
+    }, '2024-01-10T18:00:00Z', { expectedReleaseTime: '23:59:59' }, new Map());
+
+    expect(result.map(row => ({
+      observationDate: row.observationDate,
+      vintageDate: row.vintageDate,
+      value: row.value,
+    }))).toEqual([
+      { observationDate: '2024-01-03', vintageDate: '2024-01-04', value: 5800 },
+      { observationDate: '2024-01-03', vintageDate: '2024-01-08', value: 5900 },
+    ]);
+  });
+
   it('selects the unique release rule covering each vintage date', async () => {
     const result = await parseFredPitJson('WALCL', {
       observations: [
@@ -240,6 +260,46 @@ describe('ALFRED vintages', () => {
     });
     expect(result.latestRows.map(row => row.date)).toEqual(['2024-01-03', '2024-01-10']);
     vi.unstubAllGlobals();
+  });
+
+  it('splits the real-time range to stay within ALFREDs 2000-vintage limit', async () => {
+    const requests: URL[] = [];
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requests.push(url);
+      const realtimeStart = url.searchParams.get('realtime_start')!;
+      const realtimeEnd = url.searchParams.get('realtime_end')!;
+      const rangeDays = (
+        Date.parse(`${realtimeEnd}T00:00:00Z`) - Date.parse(`${realtimeStart}T00:00:00Z`)
+      ) / 86_400_000 + 1;
+      if (rangeDays > 2000) return new Response('too many vintage dates', { status: 400 });
+      return Response.json({
+        count: 1,
+        limit: 100000,
+        offset: 0,
+        output_type: 3,
+        observations: [{
+          date: realtimeStart,
+          [`RRPONTSYD_${realtimeStart.replaceAll('-', '')}`]: '1',
+        }],
+      });
+    });
+
+    const result = await fetchFredSeriesPit(
+      'RRPONTSYD', '2016-01-01', '2016-01-01', '2026-07-23T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, maxAttempts: 1 },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(requests.map(url => [
+      url.searchParams.get('realtime_start'),
+      url.searchParams.get('realtime_end'),
+    ])).toEqual([
+      ['2016-01-01', '2021-06-22'],
+      ['2021-06-23', '2026-07-23'],
+    ]);
+    expect(result.vintages).toHaveLength(2);
   });
 
   it('timestamps a same-day vintage after the successful response rather than at run start', async () => {
