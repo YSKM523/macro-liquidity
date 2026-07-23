@@ -422,7 +422,7 @@ function cadenceValidRawSmoothInput(
     || anchors.some(row => new Date(`${row.date}T00:00:00Z`).getUTCDay() !== 3)) {
     return null;
   }
-  const latestWalcl = asOfFresh(visible.WALCL, decisionDate, SERIES.WALCL);
+  const latestWalcl = asOfFresh(anchors, decisionDate, SERIES.WALCL);
   if (latestWalcl.value == null || latestWalcl.observationDate !== anchors.at(-1)!.date) {
     return null;
   }

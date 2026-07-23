@@ -414,6 +414,36 @@ describe('dual-horizon Shadow composition', () => {
     });
   });
 
+  it('ignores a cutoff-visible WALCL release until its Wed+7 model availability date', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(170));
+    const lastMatureAnchor = input.liquidity.seriesMap.WALCL.at(-1)!;
+    const decisionDate = isoDate(
+      Date.parse(`${lastMatureAnchor.date}T00:00:00Z`) + 8 * DAY_MS,
+    );
+    const beforeNewRelease = rawSmoothAtDecision(
+      input.liquidity.seriesMap,
+      decisionDate,
+    );
+    expect(beforeNewRelease).toMatchObject({
+      status: 'OK',
+      sampleCount: 170,
+      observationDate: lastMatureAnchor.date,
+    });
+
+    const afterNewRelease = rawSmoothAtDecision({
+      ...input.liquidity.seriesMap,
+      WALCL: [
+        ...input.liquidity.seriesMap.WALCL,
+        {
+          date: isoDate(Date.parse(`${lastMatureAnchor.date}T00:00:00Z`) + 7 * DAY_MS),
+          value: lastMatureAnchor.value + 1,
+        },
+      ],
+    }, decisionDate);
+
+    expect(afterNewRelease).toEqual(beforeNewRelease);
+  });
+
   it('keeps the frozen Champion identity and formal snapshot unchanged after a Shadow read', () => {
     const input = dualInputFromRawUnits(syntheticResearchSeries(220));
     const formalSnapshotBeforeShadowRead = structuredClone(input.snapshots.snapshots.at(-1)!);
