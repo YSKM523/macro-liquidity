@@ -47,6 +47,11 @@ const dbState = vi.hoisted(() => ({
     seriesMap: { WDTGAL: [], RRPONTSYD: [], WALCL: [] },
     provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 0, dataRunCount: 0 },
   } as any,
+  dualHorizonSnapshotInputs: {
+    asOfCutoff: '2030-01-01T00:00:00Z',
+    snapshots: [],
+    provenance: { methodology: 'GOVERNED_WEEKLY_AS_OF', rowCount: 0 },
+  } as any,
   policyRegime: { status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' } as any,
 }));
 
@@ -63,6 +68,7 @@ vi.mock('../src/db', () => ({
   officialSnapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => dbState.backtestRows),
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
+  loadDualHorizonSnapshotInputs: vi.fn(async () => dbState.dualHorizonSnapshotInputs),
   loadLiquidityStructureSeries: vi.fn(async () => dbState.liquidityStructureInputs),
   resolvePolicyRegime: vi.fn(async () => dbState.policyRegime),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
@@ -84,7 +90,12 @@ vi.mock('../src/db', () => ({
 
 import worker from '../src/worker';
 import { runIngest } from '../src/service';
-import { loadEventBacktestInputs, loadLiquidityStructureSeries, resolvePolicyRegime } from '../src/db';
+import {
+  loadDualHorizonSnapshotInputs,
+  loadEventBacktestInputs,
+  loadLiquidityStructureSeries,
+  resolvePolicyRegime,
+} from '../src/db';
 import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
 
 const env = {
@@ -94,6 +105,85 @@ const env = {
   ADMIN_TOKEN: 'test',
   START_DATE: '2024-01-01',
 };
+
+const DAY_MS = 86_400_000;
+
+function dualHorizonDate(epochMs: number) {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+function completeDualHorizonInputs() {
+  const start = Date.parse('2025-09-03T00:00:00Z');
+  const WALCL = [];
+  const WDTGAL = [];
+  const WTREGEN = [];
+  const RRPONTSYD = [];
+  for (let index = 0; index < 220; index++) {
+    const epochMs = start + index * 7 * DAY_MS;
+    const date = dualHorizonDate(epochMs);
+    const wave = Math.sin(index * 0.41) * 40 + Math.cos(index * 0.13) * 25;
+    WALCL.push({ date, value: 7_000 + index * 3 + wave });
+    WDTGAL.push({ date, value: 500 });
+    WTREGEN.push({ date, value: 500 });
+    for (let offset = -4; offset <= 0; offset++) {
+      RRPONTSYD.push({ date: dualHorizonDate(epochMs + offset * DAY_MS), value: 1_000 });
+    }
+  }
+  const decisionDate = dualHorizonDate(
+    Date.parse(`${WALCL.at(-1)!.date}T00:00:00Z`) + 7 * DAY_MS,
+  );
+  const asOfCutoff = `${decisionDate}T23:59:59Z`;
+  const factors = {
+    netliqTrend: 10, impulse: 60, credit: 20, funding: 40,
+    rates: 50, dollar: 70, reserveAdequacy: 60, curve: 90,
+  };
+  const factorResults = Object.fromEntries(
+    Object.keys(factors).map(key => [key, { status: 'OK' }]),
+  );
+  const snapshot = {
+    date: decisionDate,
+    decisionAt: `${decisionDate}T12:00:00Z`,
+    recordedAt: `${decisionDate}T12:30:00Z`,
+    score: 61,
+    verdict: 'BULLISH',
+    netliqDir: 'UP',
+    snapshotVixEod: 20,
+    qeQtRegime: 'QT',
+    factors,
+    factorResults,
+    modelVersion: CHAMPION_MODEL_VERSION,
+    configHash: championConfigDigest(),
+    codeCommitSha: 'b'.repeat(40),
+    dataRunId: 'dual-horizon-run',
+    dataCutoff: `${decisionDate}T11:00:00Z`,
+    createdAt: `${decisionDate}T12:30:00Z`,
+  };
+  const snapshots = Array.from({ length: 53 }, (_, index) => ({
+    ...snapshot,
+    date: dualHorizonDate(
+      Date.parse(`${decisionDate}T00:00:00Z`) - (52 - index) * 7 * DAY_MS,
+    ),
+  }));
+  return {
+    snapshots: {
+      asOfCutoff,
+      snapshots,
+      provenance: { methodology: 'GOVERNED_WEEKLY_AS_OF', rowCount: snapshots.length },
+    },
+    liquidity: {
+      asOfCutoff,
+      decisionDate,
+      decisionAt: `${decisionDate}T23:59:58Z`,
+      seriesMap: { WALCL, WDTGAL, WTREGEN, RRPONTSYD },
+      provenance: {
+        methodology: 'APPEND_ONLY_AS_OF',
+        rowCount: WALCL.length + WDTGAL.length + WTREGEN.length + RRPONTSYD.length,
+        dataRunCount: 1,
+        maxFetchedAt: asOfCutoff,
+      },
+    },
+  };
+}
 
 function formalEventInputs(signalCount = 300) {
   const date = (index: number) => new Date(Date.UTC(2018, 0, 1 + index * 7)).toISOString().slice(0, 10);
@@ -159,6 +249,11 @@ beforeEach(() => {
     seriesMap: { WDTGAL: [], RRPONTSYD: [], WALCL: [] },
     provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 0, dataRunCount: 0 },
   };
+  dbState.dualHorizonSnapshotInputs = {
+    asOfCutoff: '2030-01-01T00:00:00Z',
+    snapshots: [],
+    provenance: { methodology: 'GOVERNED_WEEKLY_AS_OF', rowCount: 0 },
+  };
   dbState.policyRegime = { status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' };
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
@@ -220,6 +315,95 @@ describe('public error contract', () => {
 });
 
 describe('/api/v1 governance routes', () => {
+  it('exposes dual-horizon Shadow analysis without changing the Champion response bytes', async () => {
+    const complete = completeDualHorizonInputs();
+    dbState.dualHorizonSnapshotInputs = complete.snapshots;
+    dbState.liquidityStructureInputs = complete.liquidity;
+    const championBefore = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
+    const championBodyBefore = await championBefore.text();
+
+    const response = await worker.fetch(new Request(
+      `https://example.test/api/v1/challengers/dual-horizon?as_of=${encodeURIComponent(complete.snapshots.asOfCutoff)}`,
+    ), env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      api_version: 'v1',
+      challenger_id: 'DUAL_HORIZON_CONFIDENCE_SHADOW_V1',
+      mode: 'SHADOW_ONLY',
+      champion_change: false,
+      status: 'OK',
+      result: {
+        status: 'OK',
+        championChanged: false,
+        strategicScore: 61,
+      },
+    });
+
+    const championAfter = await worker.fetch(new Request('https://example.test/api/snapshot'), env);
+    expect(await championAfter.text()).toBe(championBodyBefore);
+  });
+
+  it('pins both dual-horizon loaders to one database-resolved cutoff', async () => {
+    await worker.fetch(new Request('https://example.test/api/v1/challengers/dual-horizon'), env);
+    expect(vi.mocked(loadDualHorizonSnapshotInputs)).toHaveBeenCalledWith(env.DB, undefined);
+    expect(vi.mocked(loadLiquidityStructureSeries)).toHaveBeenCalledWith(
+      env.DB, dbState.dualHorizonSnapshotInputs.asOfCutoff,
+    );
+  });
+
+  it('returns the typed dual-horizon DATA_INCOMPLETE result in the v1 envelope', async () => {
+    dbState.dualHorizonSnapshotInputs = {
+      ...dbState.dualHorizonSnapshotInputs,
+      snapshots: [],
+    };
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+    ), env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      api_version: 'v1',
+      challenger_id: 'DUAL_HORIZON_CONFIDENCE_SHADOW_V1',
+      mode: 'SHADOW_ONLY',
+      champion_change: false,
+      status: 'DATA_INCOMPLETE',
+      reason: 'NO_GOVERNED_FORMAL_SNAPSHOT',
+      result: {
+        status: 'DATA_INCOMPLETE',
+        reasons: ['NO_GOVERNED_FORMAL_SNAPSHOT'],
+        championChanged: false,
+      },
+    });
+  });
+
+  it('returns typed invalid_as_of and redacts dual-horizon loader failures', async () => {
+    vi.mocked(loadDualHorizonSnapshotInputs)
+      .mockRejectedValueOnce(new Error('invalid dual-horizon as_of'));
+    const malformed = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon?as_of=bad',
+    ), env);
+    expect(malformed.status).toBe(400);
+    await expect(malformed.json()).resolves.toMatchObject({ error_code: 'INVALID_AS_OF' });
+
+    vi.mocked(loadDualHorizonSnapshotInputs)
+      .mockRejectedValueOnce(new Error('future dual-horizon as_of'));
+    const future = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon?as_of=2999-01-01T00:00:00Z',
+    ), env);
+    expect(future.status).toBe(400);
+    await expect(future.json()).resolves.toMatchObject({ error_code: 'INVALID_AS_OF' });
+
+    const errorSink = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(loadDualHorizonSnapshotInputs)
+      .mockRejectedValueOnce(new Error('authorization=Bearer super-secret'));
+    const unavailable = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+    ), env);
+    expect(await unavailable.json()).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'INPUT_LOAD_FAILED', champion_change: false,
+    });
+    expect(errorSink.mock.calls.at(-1)?.[0]).not.toMatch(/super-secret/);
+  });
+
   it('exposes the liquidity-structure challenger without changing the Champion', async () => {
     const date = (index: number) => new Date(Date.UTC(2020, 0, 1 + index * 7)).toISOString().slice(0, 10);
     dbState.liquidityStructureInputs = {

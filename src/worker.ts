@@ -9,6 +9,7 @@ import {
   countOfficialSnapshots,
   officialSnapshotOnOrBefore,
   loadSeriesMap,
+  loadDualHorizonSnapshotInputs,
   ingestRunSummary,
   loadEventBacktestInputs,
   loadLiquidityStructureSeries,
@@ -80,6 +81,10 @@ import {
   evaluateTgaBuffer,
   scorePolicyAwareWalcl,
 } from './liquidity-structure-challenger';
+import {
+  DUAL_HORIZON_PROTOCOL,
+  buildDualHorizonShadow,
+} from './dual-horizon-confidence';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
@@ -365,6 +370,49 @@ export default {
     if (p === '/api/prices') {
       const liveData = await loadLive(env, ctx);
       return json({ ...liveData.live, cache_status: liveData.cache.prices });
+    }
+    if (p === '/api/v1/challengers/dual-horizon') {
+      const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
+      try {
+        const snapshots = await loadDualHorizonSnapshotInputs(env.DB, requestedAsOf);
+        const liquidity = await loadLiquidityStructureSeries(env.DB, snapshots.asOfCutoff);
+        const result = buildDualHorizonShadow(snapshots, liquidity);
+        return json({
+          api_version: 'v1',
+          challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
+          mode: DUAL_HORIZON_PROTOCOL.mode,
+          champion_change: false,
+          status: result.status,
+          reason: result.status === 'OK' ? null : result.reasons[0] ?? 'DATA_INCOMPLETE',
+          as_of_cutoff: snapshots.asOfCutoff,
+          protocol: DUAL_HORIZON_PROTOCOL,
+          provenance: {
+            snapshots: snapshots.provenance,
+            liquidity: liquidity.provenance,
+          },
+          result,
+        });
+      } catch (error) {
+        const message = String((error as Error)?.message ?? error);
+        if (/^(?:invalid|future) (?:dual-horizon|liquidity-structure) as_of$/i.test(message)) {
+          return errorJson(requestId, 'invalid_as_of', 'INVALID_AS_OF', 400);
+        }
+        structuredLog('dual_horizon_failure', {
+          request_id: requestId, reason: 'INPUT_LOAD_FAILED', error: message,
+        }, console.error);
+        return json({
+          api_version: 'v1',
+          challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
+          mode: DUAL_HORIZON_PROTOCOL.mode,
+          champion_change: false,
+          status: 'DATA_INCOMPLETE',
+          reason: 'INPUT_LOAD_FAILED',
+          as_of_cutoff: requestedAsOf ?? null,
+          protocol: DUAL_HORIZON_PROTOCOL,
+          provenance: null,
+          result: null,
+        });
+      }
     }
     if (p === '/api/v1/challengers/liquidity-structure') {
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
