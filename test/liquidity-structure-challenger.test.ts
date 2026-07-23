@@ -7,6 +7,7 @@ import { addDays } from '../src/backtest';
 import { WEIGHTS } from '../src/config';
 import type { SeriesMap } from '../src/metrics';
 import {
+  LIQUIDITY_STRUCTURE_WORK_LIMITS,
   LIQUIDITY_STRUCTURE_PROTOCOL,
   buildEightFactorBenchmarks,
   buildFundingCreditAblations,
@@ -186,13 +187,22 @@ describe('formal funding/credit ablation evaluation', () => {
     const result = evaluateFundingCreditAblation(formalAblationInputs());
     expect(result).toMatchObject({
       status: 'OK', reason: null,
+      evaluationMode: 'RETROSPECTIVE_PIT_EVENT_TIME',
+      oosStatus: 'NOT_ESTABLISHED_NO_UNSEEN_HOLDOUT',
       cohort: { signalCount: 20, completeFactorCount: 20, provenance: 'GOVERNED_PIT' },
       primaryHorizonWeeks: 13, secondaryHorizonWeeks: [4, 8], championChange: false,
+      workBudget: { outcomeBuildPasses: 4 },
     });
     expect(Object.keys(result.arms)).toEqual([
       'A_CURRENT_8', 'B_WITHOUT_CREDIT', 'C_WITHOUT_FUNDING', 'D_WITHOUT_CREDIT_FUNDING',
     ]);
-    for (const arm of Object.values(result.arms)) {
+    for (const [armId, arm] of Object.entries(result.arms)) {
+      expect(arm.identity).toEqual({
+        challengerId: 'LIQUIDITY_STRUCTURE_CHALLENGER_V1',
+        protocolDigest: LIQUIDITY_STRUCTURE_PROTOCOL.canonicalDigest,
+        armId,
+        sourceModelCohort: 'GOVERNED_CHAMPION_INPUTS',
+      });
       expect(arm.verdictTrace.slice(0, 4)).toEqual(['NEUTRAL', 'BULLISH', 'BULLISH', 'BEARISH']);
       expect(Object.keys(arm.horizons)).toEqual(['4', '8', '13']);
       expect(arm.horizons[13]).toMatchObject({ overlapping: { n: expect.any(Number) }, independent: { n: expect.any(Number) } });
@@ -216,7 +226,35 @@ describe('formal funding/credit ablation evaluation', () => {
     legacy.signals[0].configHash = 'LEGACY_UNVERSIONED';
     legacy.signals[0].codeCommitSha = 'LEGACY_UNVERSIONED';
     expect(evaluateFundingCreditAblation(legacy)).toMatchObject({
-      status: 'DATA_INCOMPLETE', reason: 'NON_GOVERNED_SIGNAL_COHORT', arms: {},
+      status: 'DATA_INCOMPLETE', reason: 'NON_GOVERNED_SIGNAL_COHORT',
+      cohort: { provenance: 'MIXED' }, arms: {},
+    });
+  });
+
+  it('fails closed when the preregistered primary 13-week horizon is not fully mature', () => {
+    const immature = formalAblationInputs();
+    immature.prices = immature.prices.slice(0, 180);
+    const result = evaluateFundingCreditAblation(immature);
+    expect(result).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'PRIMARY_HORIZON_INCOMPLETE',
+      evaluationMode: 'RETROSPECTIVE_PIT_EVENT_TIME',
+      oosStatus: 'NOT_ESTABLISHED_NO_UNSEEN_HOLDOUT',
+    });
+    expect(Object.values(result.arms).some(arm => arm.horizons[13].missingCount > 0)).toBe(true);
+  });
+
+  it('returns a typed result before formal validation when request work exceeds the hard bound', () => {
+    const oversized = formalAblationInputs();
+    oversized.signals = Array.from(
+      { length: LIQUIDITY_STRUCTURE_WORK_LIMITS.maxSignals + 1 },
+      () => ({ ...oversized.signals[0] }),
+    );
+    expect(evaluateFundingCreditAblation(oversized)).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'WORK_BUDGET_EXCEEDED', arms: {},
+      workBudget: {
+        signalCount: LIQUIDITY_STRUCTURE_WORK_LIMITS.maxSignals + 1,
+        outcomeBuildPasses: 0,
+      },
     });
   });
 });

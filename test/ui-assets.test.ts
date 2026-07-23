@@ -251,7 +251,9 @@ describe('static UI assets', () => {
     expect(js).toContain('Shadow only · Champion unchanged');
     expect(js).toContain('TGA 冲击 / RRP 缓冲');
     expect(js).toContain('政策阶段 WALCL');
-    expect(js).toContain('13 周 OOS IC');
+    expect(js).not.toContain('13 周 OOS IC');
+    expect(js).toContain('13 周回溯 PIT IC');
+    expect(js).toContain('未建立未见样本 OOS');
     expect(js).toContain('Beta 匹配 Sharpe 差');
     expect(js).toContain('q10 尾部损失');
     const start = js.indexOf('function rbFinite');
