@@ -20,6 +20,10 @@ All notable changes to Macro Liquidity Dashboard are documented here.
   ALFRED vintage before requesting observations, avoiding pre-inception 400s
   for late-starting series such as IORB. Incremental runs continue from the
   persisted database checkpoint without the discovery request.
+- SP500 is fetched explicitly from current FRED using the active observation
+  checkpoint because FRED reports that this series does not exist in ALFRED.
+  No synthetic PIT vintage is created: downstream storage keeps its existing
+  `LEGACY_NO_PIT` provenance and formal PIT diagnostics remain fail-closed.
 
 ### PR-17 — Governed liquidity-structure challenger
 

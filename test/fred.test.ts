@@ -358,6 +358,37 @@ describe('ALFRED vintages', () => {
     expect(result.latestRows).toEqual([{ date: '2021-07-29', value: 0.15 }]);
   });
 
+  it('fetches an explicitly current-only series without inventing PIT vintages', async () => {
+    const requests: URL[] = [];
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requests.push(url);
+      if (url.pathname.endsWith('/vintagedates') || url.searchParams.has('output_type')) {
+        throw new Error('current-only SP500 must not call ALFRED');
+      }
+      return Response.json({
+        observations: [
+          { date: '2026-07-21', value: '6300.25' },
+          { date: '2026-07-22', value: '.' },
+        ],
+      });
+    });
+
+    const result = await fetchFredSeriesPit(
+      'SP500', '2026-07-21', '2016-01-01', '2026-07-23T18:00:00Z', 'key',
+      { expectedReleaseTime: '23:59:59' }, new Map(), undefined,
+      { fetchFn: fetchFn as any, maxAttempts: 1, currentOnly: true },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].pathname).toBe('/fred/series/observations');
+    expect(requests[0].searchParams.get('observation_start')).toBe('2026-07-21');
+    expect(result).toEqual({
+      latestRows: [{ date: '2026-07-21', value: 6300.25 }],
+      vintages: [],
+    });
+  });
+
   it('timestamps a same-day vintage after the successful response rather than at run start', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       count: 1, limit: 100000, offset: 0,

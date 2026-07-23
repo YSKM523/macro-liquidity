@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   metaFailureKey: null as string | null,
   seriesReadFailureSeries: null as string | null,
   maxPitVintage: '2024-01-03' as string | null,
+  maxObsDate: '2024-01-02' as string | null,
   activeSeries: new Set<string>(),
   staged: [] as Array<{ seriesId: string; rows: Obs[] }>,
   pitStaged: [] as string[],
@@ -24,6 +25,7 @@ const state = vi.hoisted(() => ({
     observationStart: string;
     realtimeStart: string;
     resolveFirstVintage: boolean;
+    currentOnly: boolean;
   }>,
   fetchObservedAts: [] as string[],
   rowResolutionAts: [] as string[],
@@ -48,7 +50,7 @@ vi.mock('../src/fred', () => ({
     seriesId: string, observationStart: string, realtimeStart: string,
     _fetchedAt: string, _apiKey: string, _rules: unknown, _overrides: unknown,
     observedAt: () => string,
-    options?: { resolveFirstVintage?: boolean },
+    options?: { resolveFirstVintage?: boolean; currentOnly?: boolean },
   ) => {
     state.events.push(`fetch:${seriesId}`);
     state.fetchArgs.push({
@@ -56,6 +58,7 @@ vi.mock('../src/fred', () => ({
       observationStart,
       realtimeStart,
       resolveFirstVintage: options?.resolveFirstVintage ?? false,
+      currentOnly: options?.currentOnly ?? false,
     });
     if (seriesId === state.fetchFailureSeries) throw new Error(`fetch failed: ${seriesId}`);
     state.fetchObservedAts.push(observedAt());
@@ -84,6 +87,10 @@ vi.mock('../src/db', async importOriginal => {
       state.events.push(`max-pit:${seriesId}`);
       if (seriesId === state.seriesReadFailureSeries) throw new Error(`series read failed: ${seriesId}`);
       return state.maxPitVintage;
+    }),
+    maxObsDate: vi.fn(async (_db: unknown, seriesId: string) => {
+      state.events.push(`max-obs:${seriesId}`);
+      return state.maxObsDate;
     }),
     loadReleaseRules: vi.fn(async () => { state.events.push('release-rules'); return new Map(SERIES_IDS.map(id => [id, { expectedReleaseTime: '23:59:59' }])); }),
     loadReleaseOverrides: vi.fn(async () => new Map()),
@@ -229,6 +236,7 @@ beforeEach(() => {
   state.metaFailureKey = null;
   state.seriesReadFailureSeries = null;
   state.maxPitVintage = '2024-01-03';
+  state.maxObsDate = '2024-01-02';
   state.activeSeries = new Set(SERIES_IDS);
   state.staged = [];
   state.pitStaged = [];
@@ -388,6 +396,7 @@ describe('atomic ingest orchestration', () => {
       observationStart: env.START_DATE,
       realtimeStart: '2024-01-03',
       resolveFirstVintage: false,
+      currentOnly: false,
     });
     expect(state.events.indexOf('stage-pit')).toBeLessThan(
       state.events.findIndex(event => event.startsWith(`stage:${SERIES_IDS[0]}:`)),
@@ -399,7 +408,22 @@ describe('atomic ingest orchestration', () => {
 
     await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
 
-    expect(state.fetchArgs.every(call => call.resolveFirstVintage)).toBe(true);
+    expect(state.fetchArgs
+      .filter(call => call.seriesId !== 'SP500')
+      .every(call => call.resolveFirstVintage)).toBe(true);
+  });
+
+  it('uses the active observation checkpoint for current-only SP500', async () => {
+    await runIngest(env, false, new Date('2024-01-10T12:00:00Z'));
+
+    expect(state.fetchArgs.find(call => call.seriesId === 'SP500')).toEqual({
+      seriesId: 'SP500',
+      observationStart: '2024-01-02',
+      realtimeStart: env.START_DATE,
+      resolveFirstVintage: false,
+      currentOnly: true,
+    });
+    expect(state.events).toContain('max-obs:SP500');
   });
 
   it('uses START_DATE as the full rebuild vintage checkpoint', async () => {

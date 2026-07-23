@@ -28,6 +28,7 @@ import {
   completeIngestSuccess,
   failIngestSnapshots,
   IngestSeriesValidationError,
+  maxObsDate,
   maxPitVintageDate,
   loadReleaseRules,
   stagePitObservations,
@@ -134,7 +135,12 @@ export async function runIngest(
       await startSeriesAttempt(env.DB, runId, id, new Date().toISOString());
       try {
         failedStep = 'series-read';
-        const lastPitVintage = rebuildAll ? null : await maxPitVintageDate(env.DB, id);
+        const currentOnly = id === 'SP500';
+        const lastPitVintage = rebuildAll || currentOnly
+          ? null : await maxPitVintageDate(env.DB, id);
+        const observationStart = currentOnly && !rebuildAll
+          ? await maxObsDate(env.DB, id) ?? env.START_DATE
+          : env.START_DATE;
         const releaseRules = await loadReleaseRules(env.DB);
         const realtimeStart = lastPitVintage ?? env.START_DATE;
         const releaseRule = releaseRules.get(id);
@@ -145,7 +151,7 @@ export async function runIngest(
         await renewOwnedLease(env.DB, runId);
         failedStep = 'fetch';
         const fetched = await fetchFredSeriesPit(
-          id, env.START_DATE, realtimeStart, nowIso, env.FRED_API_KEY, releaseRule, new Map(),
+          id, observationStart, realtimeStart, nowIso, env.FRED_API_KEY, releaseRule, new Map(),
           () => {
             const observedAt = clock();
             isoTimestampMs(observedAt, 'observed fetch time');
@@ -154,7 +160,10 @@ export async function runIngest(
             }
             return observedAt;
           },
-          { resolveFirstVintage: lastPitVintage == null },
+          {
+            resolveFirstVintage: !currentOnly && lastPitVintage == null,
+            currentOnly,
+          },
         );
         failedStep = 'lock';
         await renewOwnedLease(env.DB, runId);

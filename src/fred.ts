@@ -11,6 +11,7 @@ export type ReleaseRules = ReleaseRule | ReleaseRule[];
 export interface FredFetchOptions extends HttpRetryOptions {
   fetchFn?: HttpFetcher;
   resolveFirstVintage?: boolean;
+  currentOnly?: boolean;
 }
 
 export function parseFredJson(seriesId: string, json: any): Obs[] {
@@ -181,6 +182,12 @@ export async function fetchFredSeriesPit(
   const all: PitObservation[] = [];
   const limit = 100000;
   const requestOptions: FredFetchOptions = { attemptTimeoutMs: 30_000, ...options };
+  if (requestOptions.currentOnly) {
+    return {
+      latestRows: await fetchFredSeries(seriesId, observationStart, apiKey, requestOptions),
+      vintages: [],
+    };
+  }
   const finalRealtimeEnd = strictDate(fetchedAt.slice(0, 10), 'real-time end');
   let windowStart = strictDate(realtimeStart, 'real-time start');
   if (windowStart > finalRealtimeEnd) throw new Error('invalid ALFRED real-time range');
