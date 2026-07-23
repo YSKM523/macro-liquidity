@@ -34,6 +34,7 @@ import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
 import { formalValidationUnavailable, runFormalValidation, validateFormalSignal } from './evaluation-protocol';
+import { isoTimestampMs } from './pit';
 import {
   SCORE_STRESS_PROTOCOL,
   buildFormalOutcomes,
@@ -75,6 +76,7 @@ import {
   LIQUIDITY_STRUCTURE_PROTOCOL,
   buildEightFactorBenchmarks,
   buildFundingCreditAblations,
+  evaluateFundingCreditAblation,
   evaluateTgaBuffer,
   scorePolicyAwareWalcl,
 } from './liquidity-structure-challenger';
@@ -366,6 +368,14 @@ export default {
     }
     if (p === '/api/v1/challengers/liquidity-structure') {
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
+      const unavailable = (reason: string, asOfCutoff: string | null = requestedAsOf ?? null) => json({
+        api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
+        mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
+        status: 'DATA_INCOMPLETE', reason, as_of_cutoff: asOfCutoff,
+        protocol: LIQUIDITY_STRUCTURE_PROTOCOL, provenance: null, signal_provenance: null,
+        tga_buffer: null, policy_regime: null, walcl_policy: null,
+        weight_benchmarks: null, funding_credit_ablation: null, formal_ablation_evaluation: null,
+      });
       let structureInputs: Awaited<ReturnType<typeof loadLiquidityStructureSeries>>;
       let eventInputs: Awaited<ReturnType<typeof loadEventBacktestInputs>>;
       try {
@@ -381,43 +391,36 @@ export default {
         structuredLog('liquidity_structure_failure', {
           request_id: requestId, reason: 'INPUT_LOAD_FAILED', error: message,
         }, console.error);
-        return json({
-          api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
-          mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
-          status: 'DATA_INCOMPLETE', reason: 'INPUT_LOAD_FAILED',
-          as_of_cutoff: requestedAsOf ?? null, protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
-        });
+        return unavailable('INPUT_LOAD_FAILED');
       }
       const signals = [...eventInputs.signals].sort((left, right) => left.decisionAt.localeCompare(right.decisionAt));
       const latestSignal = signals.at(-1);
       if (!latestSignal || !eventInputs.asOfCutoff) {
-        return json({
-          api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
-          mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
-          status: 'DATA_INCOMPLETE', reason: 'NO_GOVERNED_SIGNAL_COVERAGE',
-          as_of_cutoff: eventInputs.asOfCutoff ?? structureInputs.asOfCutoff,
-          protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
-        });
+        return unavailable('NO_GOVERNED_SIGNAL_COVERAGE', eventInputs.asOfCutoff ?? structureInputs.asOfCutoff);
       }
       try {
-        validateFormalSignal(latestSignal, Date.parse(eventInputs.asOfCutoff));
+        validateFormalSignal(latestSignal, isoTimestampMs(eventInputs.asOfCutoff, 'liquidity-structure as-of cutoff'));
       } catch (error) {
         structuredLog('liquidity_structure_failure', {
           request_id: requestId, reason: 'FORMAL_SIGNAL_INVALID',
           error: String((error as Error)?.message ?? error),
         }, console.error);
-        return json({
-          api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
-          mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
-          status: 'DATA_INCOMPLETE', reason: 'FORMAL_SIGNAL_INVALID',
-          as_of_cutoff: eventInputs.asOfCutoff, protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
-        });
+        return unavailable('FORMAL_SIGNAL_INVALID', eventInputs.asOfCutoff);
       }
-      const policy = await resolvePolicyRegime(env.DB, {
-        decisionDate: latestSignal.signalDate,
-        decisionAt: latestSignal.decisionAt,
-        asOfCutoff: eventInputs.asOfCutoff,
-      });
+      let policy: Awaited<ReturnType<typeof resolvePolicyRegime>>;
+      try {
+        policy = await resolvePolicyRegime(env.DB, {
+          decisionDate: latestSignal.signalDate,
+          decisionAt: latestSignal.decisionAt,
+          asOfCutoff: eventInputs.asOfCutoff,
+        });
+      } catch (error) {
+        structuredLog('liquidity_structure_failure', {
+          request_id: requestId, reason: 'POLICY_REGIME_INVALID',
+          error: String((error as Error)?.message ?? error),
+        }, console.error);
+        return unavailable('POLICY_REGIME_INVALID', eventInputs.asOfCutoff);
+      }
       const tgaBuffer = evaluateTgaBuffer(structureInputs.seriesMap, structureInputs.decisionDate);
       const walcl = (structureInputs.seriesMap.WALCL ?? [])
         .filter(row => row.date <= structureInputs.decisionDate);
@@ -427,8 +430,21 @@ export default {
         : { status: 'POLICY_OR_WALCL_UNAVAILABLE' as const, score: null, impulse };
       const weightBenchmarks = buildEightFactorBenchmarks(latestSignal.factors ?? {});
       const ablations = buildFundingCreditAblations(latestSignal.factors ?? {});
+      let formalAblation: ReturnType<typeof evaluateFundingCreditAblation> | {
+        status: 'DATA_INCOMPLETE'; reason: 'FORMAL_ABLATION_INVALID'; arms: Record<string, never>;
+      };
+      try {
+        formalAblation = evaluateFundingCreditAblation(eventInputs);
+      } catch (error) {
+        structuredLog('liquidity_structure_failure', {
+          request_id: requestId, reason: 'FORMAL_ABLATION_INVALID',
+          error: String((error as Error)?.message ?? error),
+        }, console.error);
+        formalAblation = { status: 'DATA_INCOMPLETE', reason: 'FORMAL_ABLATION_INVALID', arms: {} };
+      }
       const complete = tgaBuffer.status === 'OK' && policy.status === 'OK'
-        && walclPolicy.status === 'OK' && weightBenchmarks.status === 'OK' && ablations.status === 'OK';
+        && walclPolicy.status === 'OK' && weightBenchmarks.status === 'OK' && ablations.status === 'OK'
+        && formalAblation.status === 'OK';
       return json({
         api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
         mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
@@ -441,10 +457,7 @@ export default {
         },
         tga_buffer: tgaBuffer, policy_regime: policy, walcl_policy: walclPolicy,
         weight_benchmarks: weightBenchmarks, funding_credit_ablation: ablations,
-        formal_ablation_evaluation: {
-          status: 'PENDING_GOVERNED_EVALUATION',
-          reason: 'SNAPSHOT_ARM_SCORES_ONLY_NO_PORTFOLIO_RESULT_CLAIMED',
-        },
+        formal_ablation_evaluation: formalAblation,
       });
     }
     if (p === '/api/v1/diagnostics') {
