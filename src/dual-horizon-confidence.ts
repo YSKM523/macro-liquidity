@@ -1,5 +1,14 @@
-import { SCORING_FACTOR_KEYS, WEIGHTS } from './config';
-import { clamp, scoreNetliqTrend } from './metrics';
+// @ts-ignore -- isolated Node research module
+import { buildContinuousChallenger, buildWeeklyNetLiquidity } from '../scripts/netliq-challenger.mjs';
+import { SCORING_FACTOR_KEYS, SERIES, WEIGHTS } from './config';
+import type { DualHorizonSnapshotInputs, LiquidityStructureSeriesInputs } from './db';
+import { clamp, asOfFresh, scoreNetliqTrend } from './metrics';
+import {
+  isPortfolioDirection,
+  isPortfolioVerdict,
+  mapPortfolioPolicy,
+  snapshotVixStressStatus,
+} from './portfolio-policy';
 
 export const DUAL_HORIZON_PROTOCOL = Object.freeze({
   protocol: 'DUAL_HORIZON_CONFIDENCE_SHADOW_V1' as const,
@@ -27,6 +36,49 @@ export type DualHorizonIncompleteReason =
   | 'MISSING_TACTICAL_HISTORY'
   | 'MISSING_RAW_SMOOTH_HISTORY'
   | 'CONFIDENCE_INPUT_INCOMPLETE';
+
+export type DualHorizonShadowResult =
+  | {
+      status: 'OK';
+      protocol: 'DUAL_HORIZON_CONFIDENCE_SHADOW_V1';
+      asOf: string;
+      snapshotDate: string;
+      modelVersion: string;
+      configHash: string;
+      strategicScore: number;
+      tacticalScore: number;
+      formalFactors: Record<string, number>;
+      tacticalFactors: Record<string, number>;
+      confidence: number;
+      confidenceComponents: {
+        completeness: number;
+        freshness: number;
+        regimeSample: number;
+        majorFactorAgreement: number;
+        rawSmoothAgreement: number;
+      };
+      baseExposure: number;
+      shadowAdjustment: number;
+      shadowTargetExposure: number;
+      rawSmooth: {
+        agreement: RawSmoothAgreement;
+        rawLatent: number;
+        smoothLatent: number;
+        observationDate: string;
+        availableDate: string;
+        sampleCount: number;
+      };
+      reasons: string[];
+      championChanged: false;
+    }
+  | {
+      status: 'DATA_INCOMPLETE';
+      protocol: 'DUAL_HORIZON_CONFIDENCE_SHADOW_V1';
+      asOf: string;
+      reasons: DualHorizonIncompleteReason[];
+      availableDiagnostics: Record<string, unknown>;
+      championChanged: false;
+    };
 
 function completeFactors(input: Record<string, number | undefined>) {
   const output: Record<string, number> = {};
@@ -76,6 +128,18 @@ function isRawSmoothAgreement(value: unknown): value is RawSmoothAgreement {
   return value === 'HIGH' || value === 'LOW' || value === 'TRANSITION';
 }
 
+function statusesFromPersistedFactorResults(
+  factorResults: Record<string, unknown>,
+): Record<string, DualFactorStatus | undefined> {
+  return Object.fromEntries(SCORING_FACTOR_KEYS.map(key => {
+    const result = factorResults[key];
+    const status = result != null && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>).status
+      : undefined;
+    return [key, isDualFactorStatus(status) ? status : undefined];
+  }));
+}
+
 export function computeDualHorizonConfidence(input: {
   factorStatuses: Record<string, DualFactorStatus | undefined>;
   tacticalFactors: Record<string, number | undefined>;
@@ -112,4 +176,172 @@ export function mapShadowExposure(baseExposure: number, tacticalScore: number, c
   let shadowTargetExposure = Math.max(0.25, Math.min(1, baseExposure + shadowAdjustment));
   if (confidence < 40) shadowTargetExposure = Math.min(0.75, shadowTargetExposure);
   return { unguardedAdjustment, shadowAdjustment, shadowTargetExposure };
+}
+
+function researchRawUnits(
+  seriesMap: Record<string, Array<{ date: string; value: number }>>,
+) {
+  return {
+    WALCL: (seriesMap.WALCL ?? []).map(row => ({ ...row, value: row.value * 1_000 })),
+    WDTGAL: (seriesMap.WDTGAL ?? []).map(row => ({ ...row, value: row.value * 1_000 })),
+    WTREGEN: (seriesMap.WTREGEN ?? []).map(row => ({ ...row, value: row.value * 1_000 })),
+    RRPONTSYD: (seriesMap.RRPONTSYD ?? []).map(row => ({ ...row })),
+  };
+}
+
+export function rawSmoothAtDecision(
+  seriesMap: Record<string, Array<{ date: string; value: number }>>,
+  decisionDate: string,
+) {
+  const points = buildWeeklyNetLiquidity(researchRawUnits(seriesMap))
+    .filter((point: { availableDate: string }) => point.availableDate <= decisionDate);
+  const latest = buildContinuousChallenger(points).at(-1);
+  if (!latest || !Number.isFinite(latest.raw.latent) || !Number.isFinite(latest.smooth.latent)) {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'MISSING_RAW_SMOOTH_HISTORY' as const,
+    };
+  }
+  return {
+    status: 'OK' as const,
+    agreement: latest.agreement.confidence as RawSmoothAgreement,
+    rawLatent: latest.raw.latent as number,
+    smoothLatent: latest.smooth.latent as number,
+    observationDate: latest.observationDate as string,
+    availableDate: latest.availableDate as string,
+    sampleCount: points.length,
+  };
+}
+
+function incomplete(
+  asOf: string,
+  reason: DualHorizonIncompleteReason,
+  availableDiagnostics: Record<string, unknown> = {},
+): DualHorizonShadowResult {
+  return {
+    status: 'DATA_INCOMPLETE',
+    protocol: DUAL_HORIZON_PROTOCOL.protocol,
+    asOf,
+    reasons: [reason],
+    availableDiagnostics,
+    championChanged: false,
+  };
+}
+
+function tacticalReason(score: number) {
+  return score >= 60 ? 'TACTICAL_UP' : score <= 40 ? 'TACTICAL_DOWN' : 'TACTICAL_NEUTRAL';
+}
+
+function dayGap(fromDate: string, toDate: string) {
+  return (Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`))
+    / 86_400_000;
+}
+
+function tacticalRawLevels(
+  seriesMap: Record<string, Array<{ date: string; value: number }>>,
+  decisionDate: string,
+) {
+  const anchors = (seriesMap.WALCL ?? []).filter(row => row.date <= decisionDate).slice(-5);
+  if (anchors.length !== 5) return null;
+  const points = anchors.map(walcl => {
+    const tga = asOfFresh(seriesMap.WDTGAL ?? [], walcl.date, SERIES.WDTGAL);
+    const rrp = asOfFresh(seriesMap.RRPONTSYD ?? [], walcl.date, SERIES.RRPONTSYD);
+    return tga.value != null && rrp.value != null
+      ? { date: walcl.date, value: walcl.value - tga.value - rrp.value }
+      : null;
+  }).filter((row): row is { date: string; value: number } => row != null);
+  if (points.length !== anchors.length) return null;
+  const invalidCadence = points.slice(1).some((point, index) => {
+    const gap = dayGap(points[index].date, point.date);
+    return gap < 5 || gap > 10;
+  });
+  return invalidCadence ? null : points;
+}
+
+export function buildDualHorizonShadow(
+  snapshotsInput: DualHorizonSnapshotInputs,
+  liquidityInput: LiquidityStructureSeriesInputs,
+): DualHorizonShadowResult {
+  if (snapshotsInput.asOfCutoff !== liquidityInput.asOfCutoff) {
+    return incomplete(snapshotsInput.asOfCutoff, 'AS_OF_CUTOFF_MISMATCH');
+  }
+  if (snapshotsInput.snapshots.length === 0) {
+    return incomplete(snapshotsInput.asOfCutoff, 'NO_GOVERNED_FORMAL_SNAPSHOT');
+  }
+  if (snapshotsInput.snapshots.length > 600) {
+    return incomplete(snapshotsInput.asOfCutoff, 'SNAPSHOT_WORK_LIMIT_EXCEEDED');
+  }
+  const selected = snapshotsInput.snapshots.at(-1)!;
+  if (!isPortfolioVerdict(selected.verdict) || !isPortfolioDirection(selected.netliqDir)) {
+    return incomplete(snapshotsInput.asOfCutoff, 'FORMAL_SNAPSHOT_INVALID');
+  }
+
+  const rawSmooth = rawSmoothAtDecision(liquidityInput.seriesMap, liquidityInput.decisionDate);
+  if (rawSmooth.status !== 'OK') {
+    return incomplete(snapshotsInput.asOfCutoff, rawSmooth.reason);
+  }
+  const recent = tacticalRawLevels(liquidityInput.seriesMap, liquidityInput.decisionDate);
+  if (!recent) {
+    return incomplete(snapshotsInput.asOfCutoff, 'MISSING_TACTICAL_HISTORY');
+  }
+
+  const tactical = scoreFourWeekTacticalCohort(
+    selected.factors as Record<string, number | undefined>,
+    recent.map(point => point.value),
+  );
+  if (tactical.status !== 'OK') {
+    return incomplete(snapshotsInput.asOfCutoff, tactical.reason);
+  }
+  const factorStatuses = statusesFromPersistedFactorResults(selected.factorResults);
+  const sameRegimeSampleCount = snapshotsInput.snapshots.slice(0, -1).filter(row =>
+    row.qeQtRegime === selected.qeQtRegime
+    && row.modelVersion === selected.modelVersion
+    && row.configHash === selected.configHash).length;
+  const confidence = computeDualHorizonConfidence({
+    factorStatuses,
+    tacticalFactors: tactical.factors,
+    sameRegimeSampleCount,
+    rawSmooth: rawSmooth.agreement,
+  });
+  if (confidence.status !== 'OK') {
+    return incomplete(snapshotsInput.asOfCutoff, confidence.reason);
+  }
+
+  const formalPolicy = mapPortfolioPolicy({
+    score: selected.score,
+    verdict: selected.verdict,
+    netliqDir: selected.netliqDir,
+    stressStatus: snapshotVixStressStatus(selected.snapshotVixEod),
+  });
+  const shadow = mapShadowExposure(
+    formalPolicy.targetExposure,
+    tactical.score,
+    confidence.confidence,
+  );
+  const reasons = [tacticalReason(tactical.score)];
+  if (shadow.unguardedAdjustment > 0 && shadow.shadowAdjustment === 0) {
+    reasons.push('UPWARD_ADJUSTMENT_BLOCKED_LOW_CONFIDENCE');
+  }
+  if (confidence.confidence < 40) reasons.push('LOW_CONFIDENCE_EXPOSURE_CAP');
+  reasons.push(`RAW_SMOOTH_${rawSmooth.agreement}`);
+  return {
+    status: 'OK',
+    protocol: DUAL_HORIZON_PROTOCOL.protocol,
+    asOf: snapshotsInput.asOfCutoff,
+    snapshotDate: selected.date,
+    modelVersion: selected.modelVersion,
+    configHash: selected.configHash,
+    strategicScore: selected.score,
+    tacticalScore: tactical.score,
+    formalFactors: selected.factors as Record<string, number>,
+    tacticalFactors: tactical.factors,
+    confidence: confidence.confidence,
+    confidenceComponents: confidence.components,
+    baseExposure: formalPolicy.targetExposure,
+    shadowAdjustment: shadow.shadowAdjustment,
+    shadowTargetExposure: shadow.shadowTargetExposure,
+    rawSmooth,
+    reasons,
+    championChanged: false,
+  };
 }
