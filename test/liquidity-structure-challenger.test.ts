@@ -145,9 +145,10 @@ function formalAblationInputs(): EventBacktestInputs {
   const start = Date.parse('2023-01-02T00:00:00Z');
   const date = (days: number) => new Date(start + days * 86_400_000).toISOString().slice(0, 10);
   const timestamp = (days: number, time = '12:00:00') => `${date(days)}T${time}Z`;
-  const scores = [50, 60, 50, 40, 62, 48, 38, 52, 65, 50, 35, 50, 61, 47, 39, 53, 64, 49, 37, 51];
+  const scoreCycle = [50, 60, 50, 40, 62, 48, 38, 52, 65, 50, 35, 50, 61, 47, 39, 53, 64, 49, 37, 51];
+  const scores = Array.from({ length: 40 }, (_, index) => scoreCycle[index % scoreCycle.length]);
   const factorKeys = ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve'];
-  const asOfCutoff = '2024-01-01T00:00:00Z';
+  const asOfCutoff = '2025-01-01T00:00:00Z';
   return {
     asOfCutoff,
     signals: scores.map((score, index) => ({
@@ -163,18 +164,18 @@ function formalAblationInputs(): EventBacktestInputs {
       modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
       codeCommitSha: '0123456789abcdef0123456789abcdef01234567',
     })),
-    prices: Array.from({ length: 260 }, (_, index) => ({
+    prices: Array.from({ length: 430 }, (_, index) => ({
       date: date(index), adjustedClose: 100 + index * .2 + Math.sin(index / 5) * 2,
       source: 'FRED:SP500', fetchedAt: '2023-12-01T00:00:00Z', dataRunId: 'price-run',
       activationRunId: `price-activation-${index}`, activatedAt: '2023-12-02T00:00:00Z',
       provenanceStatus: 'PIT_RAW' as const,
     })),
-    vix: Array.from({ length: 260 }, (_, index) => ({
+    vix: Array.from({ length: 430 }, (_, index) => ({
       date: date(index), value: 20, source: 'FRED:VIXCLS', fetchedAt: '2023-12-01T00:00:00Z',
       dataRunId: 'vix-run', activationRunId: `vix-activation-${index}`,
       activatedAt: '2023-12-02T00:00:00Z', provenanceStatus: 'PIT_RAW' as const,
     })),
-    cashRates: Array.from({ length: 261 }, (_, index) => ({
+    cashRates: Array.from({ length: 431 }, (_, index) => ({
       date: date(index - 1), rate: 5, source: 'FRED:SOFR', fetchedAt: '2023-12-01T00:00:00Z',
       dataRunId: 'cash-run', activationRunId: `cash-activation-${index}`,
       activatedAt: '2023-12-02T00:00:00Z', provenanceStatus: 'PIT_RAW' as const,
@@ -189,7 +190,7 @@ describe('formal funding/credit ablation evaluation', () => {
       status: 'OK', reason: null,
       evaluationMode: 'RETROSPECTIVE_PIT_EVENT_TIME',
       oosStatus: 'NOT_ESTABLISHED_NO_UNSEEN_HOLDOUT',
-      cohort: { signalCount: 20, completeFactorCount: 20, provenance: 'GOVERNED_PIT' },
+      cohort: { signalCount: 40, completeFactorCount: 40, provenance: 'GOVERNED_PIT' },
       primaryHorizonWeeks: 13, secondaryHorizonWeeks: [4, 8], championChange: false,
       workBudget: { outcomeBuildPasses: 4 },
     });

@@ -213,6 +213,14 @@ const ABLATION_ARMS = Object.freeze({
 
 type AblationArmKey = keyof typeof ABLATION_ARMS;
 type AblationHorizon = 4 | 8 | 13;
+const ABLATION_HORIZONS = Object.freeze([4, 8, 13] as const);
+
+export const LIQUIDITY_STRUCTURE_WORK_LIMITS = Object.freeze({
+  maxSignals: 600,
+  maxPrices: 4_000,
+  maxVix: 4_000,
+  maxCashRates: 4_000,
+});
 
 function icEstimate(pairs: ForwardPair[]) {
   if (pairs.length < 3) return { value: null, n: pairs.length, status: 'INSUFFICIENT_SAMPLE' as const };
@@ -247,45 +255,97 @@ function buildArmSignals(input: EventBacktestInputs, removed: ReadonlySet<string
   return output;
 }
 
-function horizonMetrics(signals: EventSignal[], input: EventBacktestInputs, horizonWeeks: AblationHorizon) {
-  const formal = buildFormalEventOutcomes({ ...input, signals }, [horizonWeeks]);
-  const pairs: ForwardPair[] = formal.outcomes.filter(outcome => outcome.status === 'OK').map((outcome, index) => ({
-    startIdx: index,
-    endIdx: input.prices.findIndex(price => price.date === outcome.exitDate),
-    signalDate: outcome.entryDate!, outcomeDate: outcome.exitDate!,
-    score: outcome.score, fwd: outcome.totalReturn!, verdict: outcome.verdict,
-    targetExposure: outcome.targetExposure, factors: {}, pitStatus: 'PIT', provenanceStatus: 'GOVERNED',
-  }));
-  const independent = greedyIndependentPairs(pairs);
-  return {
-    overlapping: icEstimate(pairs),
-    independent: icEstimate(independent),
-    tailLossQ10: quantile(pairs.map(pair => pair.fwd), .1),
-    pendingCount: formal.outcomes.filter(outcome => outcome.status === 'PENDING_OUTCOME').length,
-    missingCount: formal.outcomes.filter(outcome => outcome.status !== 'OK' && outcome.status !== 'PENDING_OUTCOME').length,
+function armHorizonMetrics(signals: EventSignal[], input: EventBacktestInputs) {
+  const formal = buildFormalEventOutcomes({ ...input, signals }, ABLATION_HORIZONS);
+  const priceIndexes = new Map([...input.prices]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((price, index) => [price.date, index]));
+  const horizon = (horizonWeeks: AblationHorizon) => {
+    const outcomes = formal.outcomes.filter(outcome => outcome.horizonWeeks === horizonWeeks);
+    const pairs: ForwardPair[] = outcomes.filter(outcome => outcome.status === 'OK').map(outcome => ({
+      startIdx: priceIndexes.get(outcome.entryDate!)!,
+      endIdx: priceIndexes.get(outcome.exitDate!)!,
+      signalDate: outcome.entryDate!, outcomeDate: outcome.exitDate!,
+      score: outcome.score, fwd: outcome.totalReturn!, verdict: outcome.verdict,
+      targetExposure: outcome.targetExposure, factors: {}, pitStatus: 'PIT', provenanceStatus: 'GOVERNED',
+    }));
+    const independent = greedyIndependentPairs(pairs);
+    return {
+      overlapping: icEstimate(pairs),
+      independent: icEstimate(independent),
+      tailLossQ10: quantile(pairs.map(pair => pair.fwd), .1),
+      pendingCount: outcomes.filter(outcome => outcome.status === 'PENDING_OUTCOME').length,
+      missingCount: outcomes.filter(outcome => outcome.status !== 'OK' && outcome.status !== 'PENDING_OUTCOME').length,
+    };
   };
+  return Object.fromEntries(ABLATION_HORIZONS.map(value => [value, horizon(value)])) as
+    Record<AblationHorizon, ReturnType<typeof horizon>>;
+}
+
+function cohortProvenance(signals: EventSignal[]): 'GOVERNED_PIT' | 'LEGACY_PIT' | 'MIXED' | 'INVALID' {
+  const statuses = new Set(signals.map(formalProvenance));
+  if (statuses.size === 1 && statuses.has('GOVERNED')) return 'GOVERNED_PIT';
+  if (statuses.size === 1 && statuses.has('LEGACY')) return 'LEGACY_PIT';
+  if (statuses.has('INVALID')) return 'INVALID';
+  return 'MIXED';
 }
 
 export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
-  assertFormalEventInputs(input);
   const completeFactorCount = input.signals.filter(signal => completeFactors(signal.factors ?? {}) != null).length;
-  const cohort = { signalCount: input.signals.length, completeFactorCount, provenance: 'GOVERNED_PIT' as const };
-  if (completeFactorCount !== input.signals.length) {
-    return { status: 'DATA_INCOMPLETE' as const, reason: 'INCOMPLETE_FACTOR_COHORT' as const, cohort, arms: {} };
+  const cohort = {
+    signalCount: input.signals.length,
+    completeFactorCount,
+    provenance: cohortProvenance(input.signals),
+  };
+  const workBudget = {
+    signalCount: input.signals.length,
+    priceCount: input.prices.length,
+    vixCount: input.vix.length,
+    cashRateCount: input.cashRates.length,
+    limits: LIQUIDITY_STRUCTURE_WORK_LIMITS,
+    outcomeBuildPasses: 0,
+  };
+  const disclosure = {
+    evaluationMode: 'RETROSPECTIVE_PIT_EVENT_TIME' as const,
+    oosStatus: 'NOT_ESTABLISHED_NO_UNSEEN_HOLDOUT' as const,
+  };
+  if (input.signals.length > LIQUIDITY_STRUCTURE_WORK_LIMITS.maxSignals
+    || input.prices.length > LIQUIDITY_STRUCTURE_WORK_LIMITS.maxPrices
+    || input.vix.length > LIQUIDITY_STRUCTURE_WORK_LIMITS.maxVix
+    || input.cashRates.length > LIQUIDITY_STRUCTURE_WORK_LIMITS.maxCashRates) {
+    return {
+      status: 'DATA_INCOMPLETE' as const, reason: 'WORK_BUDGET_EXCEEDED' as const,
+      ...disclosure, cohort, workBudget, arms: {},
+    };
   }
-  if (input.signals.some(signal => formalProvenance(signal) !== 'GOVERNED')) {
-    return { status: 'DATA_INCOMPLETE' as const, reason: 'NON_GOVERNED_SIGNAL_COHORT' as const, cohort, arms: {} };
+  assertFormalEventInputs(input);
+  if (completeFactorCount !== input.signals.length) {
+    return {
+      status: 'DATA_INCOMPLETE' as const, reason: 'INCOMPLETE_FACTOR_COHORT' as const,
+      ...disclosure, cohort, workBudget, arms: {},
+    };
+  }
+  if (cohort.provenance !== 'GOVERNED_PIT') {
+    return {
+      status: 'DATA_INCOMPLETE' as const, reason: 'NON_GOVERNED_SIGNAL_COHORT' as const,
+      ...disclosure, cohort, workBudget, arms: {},
+    };
   }
 
   const evaluateArm = (key: AblationArmKey) => {
     const signals = buildArmSignals(input, new Set(ABLATION_ARMS[key]));
     if (!signals) throw new Error('formal ablation requires complete portfolio policy inputs');
     const eventTime = runEventTimeBacktest({ ...input, signals });
-    const horizons = Object.fromEntries(([4, 8, 13] as AblationHorizon[])
-      .map(horizon => [horizon, horizonMetrics(signals, input, horizon)])) as Record<AblationHorizon, ReturnType<typeof horizonMetrics>>;
+    const horizons = armHorizonMetrics(signals, input);
     const strategySharpe = eventTime.portfolio?.strategy.metrics.sharpe ?? null;
     const betaMatchedSharpe = eventTime.portfolio?.benchmarks.betaMatchedStatic.metrics.sharpe ?? null;
     return {
+      identity: {
+        challengerId: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
+        protocolDigest: LIQUIDITY_STRUCTURE_PROTOCOL.canonicalDigest,
+        armId: key,
+        sourceModelCohort: 'GOVERNED_CHAMPION_INPUTS' as const,
+      },
       status: eventTime.status,
       reason: eventTime.reason,
       removedFactors: [...ABLATION_ARMS[key]],
@@ -303,10 +363,19 @@ export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
   const arms = {} as Record<AblationArmKey, ReturnType<typeof evaluateArm>>;
   for (const key of Object.keys(ABLATION_ARMS) as AblationArmKey[]) arms[key] = evaluateArm(key);
   const incomplete = Object.values(arms).find(arm => arm.status !== 'OK');
+  const primaryIncomplete = Object.values(arms).some(arm => {
+    const primary = arm.horizons[13];
+    return primary.pendingCount > 0 || primary.missingCount > 0
+      || primary.overlapping.status !== 'OK' || primary.independent.status !== 'OK'
+      || primary.tailLossQ10 == null;
+  });
+  workBudget.outcomeBuildPasses = Object.keys(arms).length;
   return {
-    status: incomplete ? 'DATA_INCOMPLETE' as const : 'OK' as const,
-    reason: incomplete?.reason ?? null,
+    status: incomplete || primaryIncomplete ? 'DATA_INCOMPLETE' as const : 'OK' as const,
+    reason: incomplete?.reason ?? (primaryIncomplete ? 'PRIMARY_HORIZON_INCOMPLETE' as const : null),
+    ...disclosure,
     cohort,
+    workBudget,
     primaryHorizonWeeks: 13 as const,
     secondaryHorizonWeeks: [4, 8] as const,
     championChange: false as const,

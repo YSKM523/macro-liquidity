@@ -802,8 +802,8 @@ function renderLiquidityStructureChallenger(result) {
       + `<td class="num">${rbMaybePct(portfolio.maxDrawdown)}</td></tr>`;
   }).join('');
   const ablation = `<div class="rb-sub">Credit / Funding 正式 PIT 消融 · 13 周为主，4 / 8 周为辅</div>`
-    + `<p class="rb-note">每个 arm 独立按时间顺序执行一次 hysteresis；同一完整 cohort，不按 arm 删除样本。评价状态：${rbEsc(evaluation.status || '—')}${evaluation.reason ? ` · ${rbEsc(evaluation.reason)}` : ''}</p>`
-    + '<table class="rb-table"><thead><tr><th>Arm</th><th>状态</th><th class="num">13 周 OOS IC</th><th class="num">非重叠 IC</th><th class="num">Beta 匹配 Sharpe 差</th><th class="num">q10 尾部损失</th><th class="num">最大回撤</th></tr></thead><tbody>'
+    + `<p class="rb-note">回溯 PIT 事件时间；未建立未见样本 OOS。每个 arm 独立按时间顺序执行一次 hysteresis；同一完整 cohort，不按 arm 删除样本。评价状态：${rbEsc(evaluation.status || '—')}${evaluation.reason ? ` · ${rbEsc(evaluation.reason)}` : ''}</p>`
+    + '<table class="rb-table"><thead><tr><th>Arm</th><th>状态</th><th class="num">13 周回溯 PIT IC</th><th class="num">非重叠 IC</th><th class="num">Beta 匹配 Sharpe 差</th><th class="num">q10 尾部损失</th><th class="num">最大回撤</th></tr></thead><tbody>'
     + (rows || '<tr><td colspan="7">—</td></tr>') + '</tbody></table>';
   return header + structure + benchmark + ablation;
 }
