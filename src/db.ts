@@ -1383,24 +1383,40 @@ export async function loadLiquidityStructureSeries(
   const decisionClock = new Date(isoTimestampMs(cutoff, 'liquidity-structure cutoff') - 1);
   const decisionDate = decisionClock.toISOString().slice(0, 10);
   const decisionAt = decisionClock.toISOString();
+  await validateOverrideTimings(db, cutoff);
+  await validateStoredPitTimings(db);
   const rows = await db.prepare(
-    `WITH eligible AS (
-       SELECT series_id,observation_date,value,fetched_at,data_run_id,
+    `WITH resolved AS (
+       SELECT raw.series_id,raw.observation_date,raw.vintage_date,raw.value,
+              raw.fetched_at,raw.data_run_id,raw.checksum,
+              COALESCE(overrides.released_at,raw.released_at) AS released_at,
+              COALESCE(overrides.tradable_at,raw.tradable_at) AS tradable_at
+       FROM observations_pit raw
+       LEFT JOIN release_calendar_overrides overrides
+         ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
+        AND overrides.created_at=(
+          SELECT candidate.created_at FROM release_calendar_overrides candidate
+          WHERE candidate.series_id=raw.series_id AND candidate.vintage_date=raw.vintage_date
+            AND julianday(candidate.created_at)<julianday(?)
+          ORDER BY julianday(candidate.created_at) DESC LIMIT 1
+        )
+       WHERE raw.series_id IN ('WALCL','WDTGAL','RRPONTSYD')
+         AND raw.observation_date<=?
+         AND julianday(raw.fetched_at)<julianday(?)
+     ), eligible AS (
+       SELECT *,
               ROW_NUMBER() OVER (
                 PARTITION BY series_id,observation_date
-                ORDER BY julianday(fetched_at) DESC,vintage_date DESC,checksum DESC
+                ORDER BY vintage_date DESC,julianday(fetched_at) DESC,checksum DESC
               ) AS revision_rank
-       FROM observations_pit
-       WHERE series_id IN ('WALCL','WDTGAL','RRPONTSYD')
-         AND observation_date<=?
-         AND julianday(fetched_at)<julianday(?)
-         AND julianday(released_at)<julianday(?)
+       FROM resolved
+       WHERE julianday(released_at)<julianday(?)
          AND julianday(tradable_at)<julianday(?)
      )
-     SELECT series_id,observation_date,value,fetched_at,data_run_id
+     SELECT series_id,observation_date,vintage_date,value,fetched_at,data_run_id
      FROM eligible WHERE revision_rank=1 ORDER BY series_id,observation_date`,
-  ).bind(decisionDate, cutoff, cutoff, cutoff).all<{
-    series_id: 'WALCL' | 'WDTGAL' | 'RRPONTSYD'; observation_date: string;
+  ).bind(cutoff, decisionDate, cutoff, cutoff, cutoff).all<{
+    series_id: 'WALCL' | 'WDTGAL' | 'RRPONTSYD'; observation_date: string; vintage_date: string;
     value: number; fetched_at: string; data_run_id: string;
   }>();
   const result = rows.results ?? [];
@@ -1409,6 +1425,7 @@ export async function loadLiquidityStructureSeries(
   let maxFetchedAt: string | null = null;
   for (const row of result) {
     requirePolicyDate(row.observation_date, 'liquidity-structure observation date');
+    requirePolicyDate(row.vintage_date, 'liquidity-structure vintage date');
     requireIsoTimestamp(row.fetched_at, 'liquidity-structure fetchedAt');
     if (!Number.isFinite(row.value)) throw new Error('invalid liquidity-structure observation value');
     seriesMap[row.series_id].push({ date: row.observation_date, value: row.value });
