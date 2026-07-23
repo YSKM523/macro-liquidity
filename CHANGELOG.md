@@ -6,6 +6,20 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ### Release tooling
 
+- Published the complete reviewed PR-01 through PR-18 implementation to the
+  protected production Worker. Workflow run 30039240127 deployed functional
+  baseline `865afa7`; remote D1 migrations 0001 through 0011 are applied with
+  none pending.
+- Completed one authenticated incremental refresh followed by the explicitly
+  confirmed production bootstrap rebuild. The active full run ingested 18
+  series / 29,861 rows and upgraded all 550 official weekly snapshots to
+  governed PIT provenance; `/api/health`, `/api/v1/snapshot`, and the dashboard
+  now return HTTP 200.
+- Preserved the provider limitation honestly: SP500 remains current-only
+  `LEGACY_NO_PIT`, no SP500 rows were invented in `observations_pit`, and formal
+  diagnostics that require PIT SPX continue to fail closed. Staging remains an
+  unconfigured placeholder; continuous remote log retrieval, real alert
+  delivery, and a production restore exercise remain operational follow-ups.
 - Upgraded the production deployment CLI to `wrangler@4.114.0` and aligned
   `@cloudflare/workers-types` to `5.20260723.1`, removing the known Wrangler
   3.x deployment-tool vulnerabilities while preserving Node 22 CI and the

@@ -27,6 +27,6 @@ describe('PR-11 research documentation contract', () => {
       expect(content).toContain('0.2655');
       expect(content).toContain('0.2959');
     }
-    expect(files[2]).toContain('PR-11 | 已完成（本地）');
+    expect(files[2]).toContain('PR-11 | 已完成并部署');
   });
 });

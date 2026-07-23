@@ -8,28 +8,43 @@
 
 ## 执行状态（2026-07-23）
 
-| PR | 状态 | 本地提交 | 说明 |
+| PR | 状态 | 提交 | 说明 |
 |---|---|---|---|
-| PR-01 | 已完成 | `2267e21` | 增量重算继承窗口前正式快照的迟滞状态；已覆盖 full/incremental 一致性 |
-| PR-02 | 已完成 | `ce7da2b` | 决策状态机与 45/50/55 边界统一 |
-| PR-03 | 已完成 | `1c53681` | 实时 Stress 改为 NORMAL/STRESSED/UNKNOWN 并 fail closed |
-| PR-04 | 已完成 | `6367de0`–`19ceabc` | 独立 freshness、FactorResult、DATA_INCOMPLETE 与质量传播 |
-| PR-05 | 已完成 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
-| PR-06 | 已完成（本地） | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
-| PR-07 | 已完成（本地） | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
-| PR-08 | 已完成（本地） | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
-| PR-09 | 已完成（本地） | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
-| PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
-| PR-11 | 已完成（本地） | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
-| PR-12 | 已完成（本地） | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
-| PR-13 | 已完成（本地） | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；固定范围独立复审 Ready（0 Critical / 0 Important / 0 Minor）；未部署 |
-| PR-14 | 已完成（本地） | `3638c55`–`780e125` | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，双重复审 Ready；Champion 不变，未部署 |
-| PR-15 | 已完成（本地） | `710bb30`–`b79aab3` | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 759 tests、focused 103、双重复审 Ready；未部署、未修改远程数据库 |
-| PR-16 | 已完成（本地） | `d7aba3c`–`d0f59cd` | 共享正式 4/8/13 周 outcome、七个分数桶、冻结 ledger 与前序绑定修订、BH-FDR/DSR fail-closed、八个压力事件及固定形状 v1 API/UI；58 files / 777 tests、TypeScript、lint、迁移幂等与 dry-run 通过，双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion、PR-11/12 决策及数据库均不变，未部署 |
-| PR-17 | 已完成（本地；OOS 证据待未来成熟） | `74620fd`–`9415a98` | 冻结 TGA/RRP、数据库时间政策账本、WALCL 阶段矩阵、四臂 Credit/Funding 回溯 PIT 消融和精确 8 因子基准；新增 strict as-of/override/latest-vintage API、执行与指标 fail-closed、四次 outcome build 硬上限及 Shadow UI；60 files / 800 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion 不变，未部署 |
-| PR-18 | 已完成（本地；Shadow-only，非 unseen OOS / 非 promotion） | `05a9aa8..3041523` | ALG-10 13 周 Strategic / 4 周 Tactical 与 ALG-11 五组件置信度已实现；focused 5 files / 133 tests、full 62 files / 860 tests、correctness 79、no-lookahead 42、rebuild 5、TypeScript 与 lint 均通过；规格复审 Ready（0 Critical / 0 Important / 0 Minor），代码复审 Ready（0 Critical / 0 Important / 1 documented Minor）；Champion 不变，未部署 |
+| PR-01 | 已完成并部署 | `2267e21` | 增量重算继承窗口前正式快照的迟滞状态；已覆盖 full/incremental 一致性 |
+| PR-02 | 已完成并部署 | `ce7da2b` | 决策状态机与 45/50/55 边界统一 |
+| PR-03 | 已完成并部署 | `1c53681` | 实时 Stress 改为 NORMAL/STRESSED/UNKNOWN 并 fail closed |
+| PR-04 | 已完成并部署 | `6367de0`–`19ceabc` | 独立 freshness、FactorResult、DATA_INCOMPLETE 与质量传播 |
+| PR-05 | 已完成并部署 | `c3ee4d1` | 正式周频快照与 `PROVISIONAL` 日频 nowcast 分表；官方分析只读周频表 |
+| PR-06 | 已完成并部署 | `cf7463c`–`732880e` | 原子 ingest run、逐序列 staging、单事务 ACTIVE 切换、数据库时间租约 fencing 与失败审计 |
+| PR-07 | 已完成并部署 | `28af59c`–`5a9179c` | 行情 source/fetch 时间分离、统一 provider、全品种官方 fallback 与 divergence fail-closed |
+| PR-08 | 已完成并部署 | `07f7c81`–`37fd6c4` | append-only ALFRED vintage、惰性 event-time resolver、冻结 raw universe/override cutoff 与正式 endpoint audit index |
+| PR-09 | 已完成并部署 | `0764210`–`02f9e38` | append-only as-of event-time、保守 close eligibility、日频 NAV、SOFR/成本、typed incomplete 与 UI 披露；冻结 PIT 可抵御 legacy 无 provenance 覆盖；29 files / 518 tests + TypeScript strict 已通过，final rereview Ready（0 Critical / 0 Important） |
+| PR-10 | 已完成并部署 | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
+| PR-11 | 已完成并部署 | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
+| PR-12 | 已完成并部署 | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
+| PR-13 | 已完成并部署 | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；固定范围独立复审 Ready（0 Critical / 0 Important / 0 Minor） |
+| PR-14 | 已完成并部署 | `3638c55`–`780e125` | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，双重复审 Ready；Champion 不变 |
+| PR-15 | 已完成并部署 | `710bb30`–`b79aab3` | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 759 tests、focused 103、双重复审 Ready |
+| PR-16 | 已完成并部署 | `d7aba3c`–`d0f59cd` | 共享正式 4/8/13 周 outcome、七个分数桶、冻结 ledger 与前序绑定修订、BH-FDR/DSR fail-closed、八个压力事件及固定形状 v1 API/UI；58 files / 777 tests、TypeScript、lint、迁移幂等与 dry-run 通过，双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion 与 PR-11/12 决策不变 |
+| PR-17 | 已完成并部署（OOS 证据待未来成熟） | `74620fd`–`9415a98` | 冻结 TGA/RRP、数据库时间政策账本、WALCL 阶段矩阵、四臂 Credit/Funding 回溯 PIT 消融和精确 8 因子基准；新增 strict as-of/override/latest-vintage API、执行与指标 fail-closed、四次 outcome build 硬上限及 Shadow UI；60 files / 800 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion 不变 |
+| PR-18 | 已完成并部署（Shadow-only，非 unseen OOS / 非 promotion） | `05a9aa8..3041523` | ALG-10 13 周 Strategic / 4 周 Tactical 与 ALG-11 五组件置信度已实现；focused 5 files / 133 tests、full 62 files / 860 tests、correctness 79、no-lookahead 42、rebuild 5、TypeScript 与 lint 均通过；规格复审 Ready（0 Critical / 0 Important / 0 Minor），代码复审 Ready（0 Critical / 0 Important / 1 documented Minor）；Champion 不变 |
 
-当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
+### Production release status（2026-07-23 UTC）
+
+- GitHub `main` 已推送；受保护 production workflow
+  [run 30039240127](https://github.com/YSKM523/macro-liquidity/actions/runs/30039240127)
+  成功部署功能基线 `865afa7`。
+- production D1 migration `0001`–`0011` 已应用，远程 migration 列表无待办。
+- 首次受控 full rebuild `dd688328-64d9-4e34-a22c-9c996338c922`
+  成功：18 个序列、29,861 行、550/550 正式周频快照均为 governed PIT，
+  snapshot state 为 `SUCCEEDED`。
+- production `/api/health` 返回 HTTP 200、page/ingest SLO 均为 `HEALTHY`；
+  `/api/v1/snapshot` provenance 为 `COMPLETE`，首页返回 HTTP 200。
+- staging D1 仍是显式 placeholder，未配置也未部署；远程日志持续检索、真实告警
+  接收与生产恢复演练仍是运维待办，不能用本地测试冒充。
+- FRED 明确不在 ALFRED 提供 SP500。生产仅保存
+  `LEGACY_NO_PIT` current-series 行，`observations_pit` 中不伪造 SP500；
+  依赖正式 PIT SPX 的诊断继续 fail closed。ALFRED 响应延迟仍可能导致瞬态重试。
 
 ---
 
@@ -1806,7 +1821,7 @@ feat: point-in-time observation storage
 
 PR-08 已知限制：ALFRED 历史只提供 vintage 日期时仍使用保守日末发布时间；默认 next-weekday 规则尚未覆盖美股假日。resolver 不再保留全部 frame，但当前服务仍一次加载并排序 cutoff-visible PIT 行；stored timing 异常检查只返回至多一条坏行，不再额外物化全表。`snapshot_inputs` 仅是 endpoint audit index，不应被解释为全部评分行 manifest。这些限制留给 PR-09 的交易日历/执行引擎或独立的流式数据库读取改造，不在 PR-08 扩展模型公式、权重或阈值。
 
-PR-08 回滚：完整本地 PR 使用固定范围 `git revert --no-commit e415f5d..37fd6c4` 后创建单独 revert commit；不得使用会随当前分支前进而扩大的动态 HEAD 终点。仅本地验证库可删除对应 `--persist-to` 临时目录后从 0001 重建。0008 尚未应用远程数据库；若未来已远程应用，不应回写或删除 append-only PIT 数据或移除冻结保护，应先停止新写入并以向前 migration 恢复兼容结构。
+PR-08 回滚：完整代码使用固定范围 `git revert --no-commit e415f5d..37fd6c4` 后创建单独 revert commit；不得使用会随当前分支前进而扩大的动态 HEAD 终点。仅本地验证库可删除对应 `--persist-to` 临时目录后从 0001 重建。0008 已应用 production；不得回写或删除 append-only PIT 数据或移除冻结保护，应先停止依赖写入并以向前 migration 恢复兼容结构。
 
 ---
 
@@ -1832,7 +1847,7 @@ refactor: event-time backtest engine
 
 PR-09 已知限制：SPX/VIX 来自 FRED 指数收盘，`adjusted_close` 不包含股息；交易日历由现有 SPX 行自然形成，没有独立交易所 calendar。全年统一 `17:00Z` 只是不会晚于任何正常/early-close session 的保守 eligibility lower bound，并非真实交易所收盘时间。正式策略本 PR 仍沿用 `score>55 ? 100% : 0%` 兼容政策；exposure tiers、公平基准和尾部指标留给 PR-10。SOFR 缺失或超过 4 个日历日会 fail closed，NAV 为空且全部绩效 totals 为 null。Synthetic migration backfill 与 legacy/no-PIT rows 仅供审计，formal gate 会保持 `DATA_INCOMPLETE`，直到对应日期取得真实 PIT provenance；append-only correction 可通过相同 `as_of` cutoff 重放旧结果。
 
-PR-09 回滚：完整本地代码可从 PR-09 base `37fd6c4` 对 reviewed head 做单独 revert；0009 仅在本地临时数据库验证且未部署。若未来已应用到共享数据库，不应删除/更新 append-only revision 表或绕过 triggers；应先停止依赖写入/读取，再以向前 migration 停用或迁移结构。本地验证库可丢弃对应临时 `--persist-to` 目录后从 0001 重建。
+PR-09 回滚：完整代码可从 PR-09 base `37fd6c4` 对 reviewed head 做单独 revert；0009 已应用 production，不应删除/更新 append-only revision 表或绕过 triggers；应先停止依赖写入/读取，再以向前 migration 停用或迁移结构。本地验证库可丢弃对应临时 `--persist-to` 目录后从 0001 重建。
 
 ---
 
@@ -1926,13 +1941,14 @@ feat: model versioning, CI, staging, observability and backup
 - [x] dry-run 默认备份、全 schema 双 D1 恢复演练、Model Card、runbook 与 Challenger registry
 - [x] independent whole-range rereview `29e84a3..2eb70ce`：Ready，0 Critical / 0 Important / 0 Minor
 
-PR-13 已知限制：staging D1 仍是明确 placeholder；真实 staging/production
-部署、远程日志检索、真实告警接收方和生产备份恢复均需要单独明确授权，
-本地 dry-run/fixture 不冒充这些外部验证。
+PR-13 已知限制：production 已于 2026-07-23 部署并完成健康验证；staging D1
+仍是明确 placeholder。远程日志持续检索、真实告警接收方和生产备份恢复仍待
+单独验证，本地 dry-run/fixture 不冒充这些外部验证。
 
-PR-13 回滚：固定代码范围为 `29e84a3..2eb70ce`。0010 为 additive
-migration；若未来已远程应用，不删除列、表或审计行，应回退应用行为或以
-forward migration 停用。当前未部署，因此没有生产回滚动作。
+PR-13 回滚：固定代码范围为 `29e84a3..2eb70ce`。0010 已作为 additive
+migration 应用于 production；不得删除列、表、append-only 数据或审计行。
+应用回滚使用 revert 后重新走受保护部署，schema 变更只能通过 forward
+migration 停用。
 
 ---
 
@@ -1952,11 +1968,11 @@ feat: governed liquidity-structure challenger
 - [ ] ALG-08 OOS 证据：原冻结协议未定义 unseen holdout，当前结果仅为 `RETROSPECTIVE_PIT_EVENT_TIME`；需另行预注册 prospective holdout 并等待成熟
 - [x] ALG-09：精确 8 因子 equal/current/50-50 blend；`vol` 继续留在基础分外
 - [x] versioned `as_of` API、固定失败形状、安全转义 Shadow 卡；不写正式快照或政策事件
-- [x] 0011 恢复演练与生产 schema confirmation gate；未执行远程 migration/deploy
+- [x] 0011 恢复演练与生产 schema confirmation gate；production migration/deploy 已于 2026-07-23 完成
 
 PR-17 已知限制：0011 刻意不含未核验政策日期，未追加经 primary-source 审批的事件前，政策阶段会诚实返回 unavailable。正式消融要求整段 cohort 均为 governed PIT、8/8 因子完整且日频价格/现金/冻结 VIX provenance 完整；13 周 pending/missing/null 指标、历史 migration-backfill 或覆盖不足会保持 typed `DATA_INCOMPLETE`。原协议没有 unseen holdout，因此当前只能称为回溯 PIT event-time，不能称为 OOS。endpoint 每 arm 只构建一次 4/8/13 周 outcomes，并以 600 signals、各 4,000 行 prices/VIX/cash 的硬上限 fail closed；仍未做生产 shadow runtime、缓存或性能压测。没有 promotion gate，不能自动替换 Champion。
 
-PR-17 回滚：回退 base `52d1276` 后的 PR-17 commits。0011 仅在本地临时 D1 验证且没有 seed；若未来已应用到共享数据库，不删除表、不修改/删除 append-only rows，以应用回滚或 forward migration 停用 reader。
+PR-17 回滚：回退 base `52d1276` 后的 PR-17 commits。0011 已应用 production 且没有 seed；不删除表、不修改/删除 append-only rows，以应用回滚或 forward migration 停用 reader。
 
 ---
 
@@ -2016,8 +2032,9 @@ PR-17 回滚：回退 base `52d1276` 后的 PR-17 commits。0011 仅在本地临
 - [x] TypeScript strict 通过
 - [x] 全部 Vitest 通过
 - [x] worktree-local D1 migration apply 通过（未访问 remote D1）
+- [x] production D1 migration `0001`–`0011` 已应用且无待办
 - [ ] staging 部署通过
-- [x] 结构化日志已实现并由测试验证（尚未部署，远程日志检索待 staging）
+- [x] 结构化日志已实现、测试并部署 production（远程持续检索仍待验证）
 - [x] 失败告警可注入触发并审计（仅 fake endpoint 测试，未发送真实告警）
 - [x] 数据库恢复演练通过（完全本地 fixture；生产备份恢复仍需授权）
 

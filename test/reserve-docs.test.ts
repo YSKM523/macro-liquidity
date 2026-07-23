@@ -15,6 +15,6 @@ describe('PR-12 research documentation contract', () => {
     }
     const report = read('docs/research/RESERVE_ADEQUACY_OOS_REPORT.md');
     for (const phrase of ['PR12_RESEARCH_V2_SRF_BOUNDARY', 'A-002', '2021-07-29', 'small-value exercises', 'DROP_RESEARCH']) expect(report).toContain(phrase);
-    expect(read('public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md')).toContain('PR-12 | 已完成（本地）');
+    expect(read('public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md')).toContain('PR-12 | 已完成并部署');
   });
 });
