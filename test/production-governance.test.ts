@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as ts from 'typescript';
 // @ts-ignore Vitest executes in Node.
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 // @ts-ignore Vitest executes in Node.
@@ -6,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 // @ts-ignore Vitest executes in Node.
 import { tmpdir } from 'node:os';
 // @ts-ignore Vitest executes in Node.
-import { join, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 declare const process: { execPath: string; env: Record<string, string | undefined> };
 
 const read = (path: string) => readFileSync(path, 'utf8');
@@ -21,6 +22,128 @@ function productionTypeScriptFiles(directory = 'src'): string[] {
     if (entry.isDirectory()) return productionTypeScriptFiles(path);
     return entry.isFile() && path.endsWith('.ts') ? [path] : [];
   });
+}
+
+type ShadowViolationKind = 'NAMESPACE_IMPORT' | 'DEFAULT_IMPORT' | 'DYNAMIC_IMPORT';
+
+interface ShadowUsageAnalysis {
+  imports: Array<{ file: string; localName: string }>;
+  calls: Array<{ file: string; localName: string; inDualHorizonRoute: boolean }>;
+  references: Array<{ file: string; localName: string; inDualHorizonRoute: boolean; isDirectCall: boolean }>;
+  routes: Array<{ file: string; start: number; end: number }>;
+  violations: Array<{ file: string; kind: ShadowViolationKind }>;
+}
+
+function isDualHorizonModule(file: string, moduleSpecifier: string): boolean {
+  if (!moduleSpecifier.startsWith('.')) return false;
+  const candidate = resolve(dirname(file), moduleSpecifier);
+  return normalize(candidate.endsWith('.ts') ? candidate : `${candidate}.ts`)
+    .endsWith('/dual-horizon-confidence.ts');
+}
+
+function isDualHorizonRouteCondition(condition: ts.Expression): boolean {
+  if (!ts.isBinaryExpression(condition) || condition.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) {
+    return false;
+  }
+  return [condition.left, condition.right].some(operand =>
+    ts.isStringLiteral(operand) && operand.text === '/api/v1/challengers/dual-horizon');
+}
+
+function analyzeDualHorizonShadowUsage(files: Map<string, string>): ShadowUsageAnalysis {
+  const sources = new Map([...files].map(([file, text]) => [normalize(file), text]));
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Node10,
+    target: ts.ScriptTarget.ESNext,
+    skipLibCheck: true,
+  };
+  const baseHost = ts.createCompilerHost(options, true);
+  const host: ts.CompilerHost = {
+    ...baseHost,
+    fileExists: file => sources.has(normalize(file)) || baseHost.fileExists(file),
+    readFile: file => sources.get(normalize(file)) ?? baseHost.readFile(file),
+    getSourceFile: (file, languageVersion) => {
+      const text = sources.get(normalize(file)) ?? baseHost.readFile(file);
+      return text == null ? undefined : ts.createSourceFile(file, text, languageVersion, true);
+    },
+  };
+  const program = ts.createProgram({ rootNames: [...sources.keys()], options, host });
+  const checker = program.getTypeChecker();
+  const imports: ShadowUsageAnalysis['imports'] = [];
+  const calls: ShadowUsageAnalysis['calls'] = [];
+  const references: ShadowUsageAnalysis['references'] = [];
+  const routes: ShadowUsageAnalysis['routes'] = [];
+  const violations: ShadowUsageAnalysis['violations'] = [];
+  const bindings: Array<{ file: string; localName: string; symbol: ts.Symbol }> = [];
+  const sourceFiles = [...sources.keys()].map(file => program.getSourceFile(file)!).filter(Boolean);
+
+  for (const sourceFile of sourceFiles) {
+    const file = normalize(sourceFile.fileName);
+    const visit = (node: ts.Node): void => {
+      if (file.endsWith('/worker.ts') && ts.isIfStatement(node)
+        && isDualHorizonRouteCondition(node.expression)) {
+        routes.push({ file, start: node.thenStatement.getStart(sourceFile), end: node.thenStatement.end });
+      }
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)
+        && isDualHorizonModule(file, node.moduleSpecifier.text)) {
+        const clause = node.importClause;
+        if (clause?.name) violations.push({ file, kind: 'DEFAULT_IMPORT' });
+        if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+          violations.push({ file, kind: 'NAMESPACE_IMPORT' });
+        }
+        if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+          for (const specifier of clause.namedBindings.elements) {
+            const importedName = specifier.propertyName?.text ?? specifier.name.text;
+            if (importedName !== 'buildDualHorizonShadow') continue;
+            const symbol = checker.getSymbolAtLocation(specifier.name);
+            if (!symbol) continue;
+            imports.push({ file, localName: specifier.name.text });
+            bindings.push({ file, localName: specifier.name.text, symbol });
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  for (const sourceFile of sourceFiles) {
+    const file = normalize(sourceFile.fileName);
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+          violations.push({ file, kind: 'DYNAMIC_IMPORT' });
+        } else if (ts.isIdentifier(node.expression)) {
+          const symbol = checker.getSymbolAtLocation(node.expression);
+          const binding = bindings.find(candidate => candidate.symbol === symbol);
+          if (binding) {
+            const start = node.getStart(sourceFile);
+            calls.push({
+              file,
+              localName: binding.localName,
+              inDualHorizonRoute: routes.some(route => route.file === file && start >= route.start && start < route.end),
+            });
+          }
+        }
+      } else if (ts.isIdentifier(node) && !ts.isImportSpecifier(node.parent)) {
+        const symbol = checker.getSymbolAtLocation(node);
+        const binding = bindings.find(candidate => candidate.symbol === symbol);
+        if (binding) {
+          const start = node.getStart(sourceFile);
+          references.push({
+            file,
+            localName: binding.localName,
+            inDualHorizonRoute: routes.some(route => route.file === file && start >= route.start && start < route.end),
+            isDirectCall: ts.isCallExpression(node.parent) && node.parent.expression === node,
+          });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  return { imports, calls, references, routes, violations };
 }
 
 function deployFixture() {
@@ -156,19 +279,63 @@ describe('production governance configuration', () => {
     expect(read('docs/OPERATIONS_RUNBOOK.md')).toContain('FULL_REBUILD');
   });
 
-  it('confines dual-horizon Shadow composition to its challenger route', () => {
-    const sources = productionTypeScriptFiles();
-    const importers = sources.filter(path => path !== 'src/dual-horizon-confidence.ts'
-      && read(path).includes("from './dual-horizon-confidence'")
-      && read(path).includes('buildDualHorizonShadow'));
-    const callers = sources.filter(path => path !== 'src/dual-horizon-confidence.ts'
-      && /\bbuildDualHorizonShadow\s*\(/.test(read(path)));
-    const worker = read('src/worker.ts');
-    const routeStart = worker.indexOf("if (p === '/api/v1/challengers/dual-horizon')");
-    const routeEnd = worker.indexOf("if (p === '/api/v1/challengers/liquidity-structure')");
+  it('detects aliased, namespace, and dynamic Shadow imports with the compiler AST', () => {
+    const analysis = analyzeDualHorizonShadowUsage(new Map([
+      ['/virtual/src/dual-horizon-confidence.ts', 'export function buildDualHorizonShadow() {}'],
+      ['/virtual/src/worker.ts', `
+        import { buildDualHorizonShadow as compose } from "./dual-horizon-confidence";
+        const p = '/api/v1/challengers/dual-horizon';
+        if (p === '/api/v1/challengers/dual-horizon') compose();
+      `],
+      ['/virtual/src/rogue-alias.ts', `
+        import { buildDualHorizonShadow as compose } from './dual-horizon-confidence';
+        compose();
+      `],
+      ['/virtual/src/rogue-forward.ts', `
+        import { buildDualHorizonShadow as compose } from './dual-horizon-confidence';
+        const forwarded = compose;
+        forwarded();
+      `],
+      ['/virtual/src/rogue-namespace.ts', `
+        import * as shadow from './dual-horizon-confidence';
+        shadow.buildDualHorizonShadow();
+      `],
+      ['/virtual/src/rogue-dynamic.ts', 'void import("./dual-horizon-confidence");'],
+    ]));
 
-    expect(importers).toEqual(['src/worker.ts']);
-    expect(callers).toEqual(['src/worker.ts']);
-    expect(worker.slice(routeStart, routeEnd)).toContain('buildDualHorizonShadow(snapshots, liquidity)');
+    expect(analysis.imports).toEqual(expect.arrayContaining([
+      { file: '/virtual/src/worker.ts', localName: 'compose' },
+      { file: '/virtual/src/rogue-alias.ts', localName: 'compose' },
+    ]));
+    expect(analysis.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: '/virtual/src/worker.ts', localName: 'compose', inDualHorizonRoute: true }),
+      expect.objectContaining({ file: '/virtual/src/rogue-alias.ts', localName: 'compose', inDualHorizonRoute: false }),
+    ]));
+    expect(analysis.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: '/virtual/src/rogue-forward.ts', localName: 'compose', isDirectCall: false }),
+    ]));
+    expect(analysis.violations).toEqual(expect.arrayContaining([
+      { file: '/virtual/src/rogue-namespace.ts', kind: 'NAMESPACE_IMPORT' },
+      { file: '/virtual/src/rogue-dynamic.ts', kind: 'DYNAMIC_IMPORT' },
+    ]));
+  });
+
+  it('confines dual-horizon Shadow composition to its challenger route', () => {
+    const worker = normalize(resolve('src/worker.ts'));
+    const analysis = analyzeDualHorizonShadowUsage(new Map(
+      productionTypeScriptFiles().map(path => [normalize(resolve(path)), read(path)]),
+    ));
+    const [route] = analysis.routes.filter(candidate => candidate.file === worker);
+
+    expect(analysis.violations).toEqual([]);
+    expect(analysis.imports).toEqual([{ file: worker, localName: 'buildDualHorizonShadow' }]);
+    expect(analysis.calls).toEqual([
+      { file: worker, localName: 'buildDualHorizonShadow', inDualHorizonRoute: true },
+    ]);
+    expect(analysis.references).toEqual([
+      { file: worker, localName: 'buildDualHorizonShadow', inDualHorizonRoute: true, isDirectCall: true },
+    ]);
+    expect(route?.start).toBeGreaterThanOrEqual(0);
+    expect(route?.end).toBeGreaterThan(route?.start ?? Infinity);
   });
 });
