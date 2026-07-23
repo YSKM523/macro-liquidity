@@ -47,7 +47,7 @@ export type DualHorizonShadowResult =
       configHash: string;
       strategicScore: number;
       tacticalScore: number;
-      formalFactors: Record<string, number>;
+      formalFactors: Record<string, unknown>;
       tacticalFactors: Record<string, number>;
       confidence: number;
       confidenceComponents: {
@@ -243,6 +243,8 @@ function tacticalRawLevels(
 ) {
   const anchors = (seriesMap.WALCL ?? []).filter(row => row.date <= decisionDate).slice(-5);
   if (anchors.length !== 5) return null;
+  const latestWalcl = asOfFresh(seriesMap.WALCL ?? [], decisionDate, SERIES.WALCL);
+  if (latestWalcl.value == null || latestWalcl.observationDate !== anchors.at(-1)!.date) return null;
   const points = anchors.map(walcl => {
     const tga = asOfFresh(seriesMap.WDTGAL ?? [], walcl.date, SERIES.WDTGAL);
     const rrp = asOfFresh(seriesMap.RRPONTSYD ?? [], walcl.date, SERIES.RRPONTSYD);
@@ -333,7 +335,7 @@ export function buildDualHorizonShadow(
     configHash: selected.configHash,
     strategicScore: selected.score,
     tacticalScore: tactical.score,
-    formalFactors: selected.factors as Record<string, number>,
+    formalFactors: selected.factors,
     tacticalFactors: tactical.factors,
     confidence: confidence.confidence,
     confidenceComponents: confidence.components,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 // @ts-ignore -- isolated Node research module
 import { buildContinuousChallenger, buildWeeklyNetLiquidity } from '../scripts/netliq-challenger.mjs';
 import { WEIGHTS } from '../src/config';
@@ -294,6 +294,45 @@ describe('dual-horizon Shadow composition', () => {
     expect(result.tacticalFactors.netliqTrend)
       .not.toBe(input.snapshots.snapshots.at(-1)!.factors.netliqTrend);
     expect(result.formalFactors).toEqual(input.snapshots.snapshots.at(-1)!.factors);
+  });
+
+  it('preserves extra formal diagnostics under an unknown-valued result contract', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    const selected = input.snapshots.snapshots.at(-1)!;
+    selected.factors = {
+      ...selected.factors,
+      diagnostic: { methodology: 'LEGACY_ZERO_WEIGHT_DIAGNOSTIC' },
+    };
+    const result = buildDualHorizonShadow(input.snapshots, input.liquidity);
+    expect(result.status).toBe('OK');
+    if (result.status !== 'OK') return;
+    expectTypeOf(result.formalFactors).toEqualTypeOf<Record<string, unknown>>();
+    expect(result.formalFactors).toEqual(selected.factors);
+    expect(result.formalFactors.diagnostic).toEqual({
+      methodology: 'LEGACY_ZERO_WEIGHT_DIAGNOSTIC',
+    });
+  });
+
+  it('fails closed when the latest WALCL anchor is stale at the decision date', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    const latestWalclDate = input.liquidity.seriesMap.WALCL.at(-1)!.date;
+    const staleDecisionDate = isoDate(
+      Date.parse(`${latestWalclDate}T00:00:00Z`) + 100 * DAY_MS,
+    );
+    const staleCutoff = `${staleDecisionDate}T23:59:59Z`;
+    expect(buildDualHorizonShadow(
+      { ...input.snapshots, asOfCutoff: staleCutoff },
+      {
+        ...input.liquidity,
+        asOfCutoff: staleCutoff,
+        decisionDate: staleDecisionDate,
+        decisionAt: `${staleDecisionDate}T23:59:58Z`,
+      },
+    )).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reasons: ['MISSING_TACTICAL_HISTORY'],
+      championChanged: false,
+    });
   });
 
   it('fails closed for insufficient Raw/Smooth history without inventing confidence', () => {
