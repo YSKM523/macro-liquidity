@@ -121,6 +121,8 @@ describe('dual-horizon PIT inputs', () => {
     const after = await loadDualHorizonSnapshotInputs(db, '2024-01-12T00:00:00.001Z');
     expect(after.snapshots.map(row => row.date)).toEqual(['2024-01-03', '2024-01-10']);
     expect(JSON.stringify(after)).not.toContain('2024-01-11');
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM nowcast_snapshot_daily').first())
+      .toEqual({ n: 1 });
     await mf.dispose();
   });
 
@@ -132,6 +134,26 @@ describe('dual-horizon PIT inputs', () => {
     expect(old.seriesMap.WTREGEN).toEqual([{ date: '2024-01-03', value: 700 }]);
     const revised = await loadLiquidityStructureSeries(db, '2024-01-12T00:00:00.001Z');
     expect(revised.seriesMap.WTREGEN).toEqual([{ date: '2024-01-03', value: 710 }]);
+    await mf.dispose();
+  });
+
+  it('replays the complete old-cutoff loader result after a late revision and override arrive', async () => {
+    const { mf, db } = await migratedDb();
+    const oldCutoff = '2024-01-10T00:00:00Z';
+    await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 7_000);
+
+    const resultBeforeLateRevision = await loadLiquidityStructureSeries(db, oldCutoff);
+
+    await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-11', '2024-01-12T00:00:00Z', 7_100);
+    await db.prepare(
+      `INSERT INTO release_calendar_overrides
+        (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+       VALUES ('WALCL','2024-01-04','2024-01-15T00:00:00Z','2024-01-15T14:30:00Z',
+               'late verified correction','2024-01-12T00:00:00Z')`,
+    ).run();
+
+    const resultAfterLateRevisionAtOldCutoff = await loadLiquidityStructureSeries(db, oldCutoff);
+    expect(resultAfterLateRevisionAtOldCutoff).toEqual(resultBeforeLateRevision);
     await mf.dispose();
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore Vitest executes in Node.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 // @ts-ignore Vitest executes in Node.
 import { execFileSync, spawnSync } from 'node:child_process';
 // @ts-ignore Vitest executes in Node.
@@ -10,6 +10,18 @@ import { join, resolve } from 'node:path';
 declare const process: { execPath: string; env: Record<string, string | undefined> };
 
 const read = (path: string) => readFileSync(path, 'utf8');
+
+function productionTypeScriptFiles(directory = 'src'): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry: {
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }) => {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return productionTypeScriptFiles(path);
+    return entry.isFile() && path.endsWith('.ts') ? [path] : [];
+  });
+}
 
 function deployFixture() {
   const root = mkdtempSync(join(tmpdir(), 'deploy-git-gate-'));
@@ -142,5 +154,21 @@ describe('production governance configuration', () => {
     expect(registry).toMatch(/PR-11[\s\S]+DROP_RESEARCH/);
     expect(registry).toMatch(/PR-12[\s\S]+DROP_RESEARCH/);
     expect(read('docs/OPERATIONS_RUNBOOK.md')).toContain('FULL_REBUILD');
+  });
+
+  it('confines dual-horizon Shadow composition to its challenger route', () => {
+    const sources = productionTypeScriptFiles();
+    const importers = sources.filter(path => path !== 'src/dual-horizon-confidence.ts'
+      && read(path).includes("from './dual-horizon-confidence'")
+      && read(path).includes('buildDualHorizonShadow'));
+    const callers = sources.filter(path => path !== 'src/dual-horizon-confidence.ts'
+      && /\bbuildDualHorizonShadow\s*\(/.test(read(path)));
+    const worker = read('src/worker.ts');
+    const routeStart = worker.indexOf("if (p === '/api/v1/challengers/dual-horizon')");
+    const routeEnd = worker.indexOf("if (p === '/api/v1/challengers/liquidity-structure')");
+
+    expect(importers).toEqual(['src/worker.ts']);
+    expect(callers).toEqual(['src/worker.ts']);
+    expect(worker.slice(routeStart, routeEnd)).toContain('buildDualHorizonShadow(snapshots, liquidity)');
   });
 });

@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { buildContinuousChallenger, buildWeeklyNetLiquidity } from '../scripts/netliq-challenger.mjs';
 import { WEIGHTS } from '../src/config';
 import {
+  DUAL_HORIZON_PROTOCOL,
   buildDualHorizonShadow,
   computeDualHorizonConfidence,
   mapShadowExposure,
@@ -11,6 +12,7 @@ import {
   type DualFactorStatus,
   type RawSmoothAgreement,
 } from '../src/dual-horizon-confidence';
+import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
 import type {
   DualHorizonSnapshotInputs,
   LiquidityStructureSeriesInputs,
@@ -257,6 +259,20 @@ describe('dual-horizon frozen arithmetic', () => {
 });
 
 describe('dual-horizon Shadow composition', () => {
+  it('keeps the frozen Champion identity and formal snapshot unchanged after a Shadow read', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    const formalSnapshotBeforeShadowRead = structuredClone(input.snapshots.snapshots.at(-1)!);
+
+    const result = buildDualHorizonShadow(input.snapshots, input.liquidity);
+    const formalSnapshotAfterShadowRead = input.snapshots.snapshots.at(-1)!;
+
+    expect(DUAL_HORIZON_PROTOCOL.championChanged).toBe(false);
+    expect(championConfigDigest()).toBe('17ad1ca8854b0fbd8e56d6255b7ee2f4fe8a85ae1a95a328ade46ffdff02a0cf');
+    expect(CHAMPION_MODEL_VERSION).toBe('champion-v1.0.0');
+    expect(result.championChanged).toBe(false);
+    expect(formalSnapshotAfterShadowRead).toEqual(formalSnapshotBeforeShadowRead);
+  });
+
   it('matches the frozen PR-11 Raw/Smooth direction from the same synthetic history', () => {
     const rawUnits = syntheticResearchSeries(220);
     const frozen = buildContinuousChallenger(buildWeeklyNetLiquidity(rawUnits)).at(-1)!;
