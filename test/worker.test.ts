@@ -97,6 +97,10 @@ import {
   resolvePolicyRegime,
 } from '../src/db';
 import { DUAL_HORIZON_PROTOCOL } from '../src/dual-horizon-confidence';
+import {
+  DualHorizonDomainError,
+  DualHorizonRequestError,
+} from '../src/dual-horizon-errors';
 import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
 
 const env = {
@@ -509,7 +513,7 @@ describe('/api/v1 governance routes', () => {
 
   it('maps invalid and future liquidity-structure cutoffs to INVALID_AS_OF', async () => {
     vi.mocked(loadLiquidityStructureSeries)
-      .mockRejectedValueOnce(new Error('invalid liquidity-structure as_of'));
+      .mockRejectedValueOnce(new DualHorizonRequestError('INVALID_AS_OF'));
     const invalid = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon',
       { headers: { 'x-request-id': 'dual-horizon-invalid-liquidity' } },
@@ -522,7 +526,7 @@ describe('/api/v1 governance routes', () => {
     });
 
     vi.mocked(loadLiquidityStructureSeries)
-      .mockRejectedValueOnce(new Error('future liquidity-structure as_of'));
+      .mockRejectedValueOnce(new DualHorizonRequestError('INVALID_AS_OF'));
     const future = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon',
       { headers: { 'x-request-id': 'dual-horizon-future-liquidity' } },
@@ -537,7 +541,7 @@ describe('/api/v1 governance routes', () => {
 
   it('returns typed invalid_as_of and redacts dual-horizon loader failures', async () => {
     vi.mocked(loadDualHorizonSnapshotInputs)
-      .mockRejectedValueOnce(new Error('invalid dual-horizon as_of'));
+      .mockRejectedValueOnce(new DualHorizonRequestError('INVALID_AS_OF'));
     const malformed = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon?as_of=bad',
     ), env);
@@ -545,7 +549,7 @@ describe('/api/v1 governance routes', () => {
     await expect(malformed.json()).resolves.toMatchObject({ error_code: 'INVALID_AS_OF' });
 
     vi.mocked(loadDualHorizonSnapshotInputs)
-      .mockRejectedValueOnce(new Error('future dual-horizon as_of'));
+      .mockRejectedValueOnce(new DualHorizonRequestError('INVALID_AS_OF'));
     const future = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon?as_of=2999-01-01T00:00:00Z',
     ), env);
@@ -557,23 +561,61 @@ describe('/api/v1 governance routes', () => {
       .mockRejectedValueOnce(new Error('authorization=Bearer super-secret'));
     const unavailable = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon',
+      { headers: { 'x-request-id': 'dual-horizon-service-failure' } },
     ), env);
-    expect(unavailable.status).toBe(200);
+    expect(unavailable.status).toBe(503);
     const unavailableBody = await unavailable.json();
     expect(unavailableBody).toEqual({
-      api_version: 'v1',
-      challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
-      mode: DUAL_HORIZON_PROTOCOL.mode,
-      champion_change: false,
-      status: 'DATA_INCOMPLETE',
-      reason: 'INPUT_LOAD_FAILED',
-      as_of_cutoff: null,
-      protocol: DUAL_HORIZON_PROTOCOL,
-      provenance: null,
-      result: null,
+      error: 'service_unavailable',
+      error_code: 'DUAL_HORIZON_SERVICE_UNAVAILABLE',
+      request_id: 'dual-horizon-service-failure',
     });
     expect(JSON.stringify(unavailableBody)).not.toContain('super-secret');
     expect(errorSink.mock.calls.at(-1)?.[0]).not.toMatch(/super-secret/);
+  });
+
+  it('does not classify an unknown repository failure by its message', async () => {
+    vi.mocked(loadDualHorizonSnapshotInputs)
+      .mockRejectedValueOnce(new Error('invalid dual-horizon as_of'));
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+      { headers: { 'x-request-id': 'dual-horizon-message-mimic' } },
+    ), env);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: 'service_unavailable',
+      error_code: 'DUAL_HORIZON_SERVICE_UNAVAILABLE',
+      request_id: 'dual-horizon-message-mimic',
+    });
+  });
+
+  it('serializes a typed governed-input failure as Shadow DATA_INCOMPLETE', async () => {
+    vi.mocked(loadDualHorizonSnapshotInputs).mockRejectedValueOnce(
+      new DualHorizonDomainError(
+        'FORMAL_SNAPSHOT_INVALID',
+        '2029-11-21T23:59:59Z',
+        { snapshotDate: '2029-11-21' },
+      ),
+    );
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+    ), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'FORMAL_SNAPSHOT_INVALID',
+      as_of_cutoff: '2029-11-21T23:59:59Z',
+      provenance: null,
+      result: {
+        status: 'DATA_INCOMPLETE',
+        asOf: '2029-11-21T23:59:59Z',
+        reasons: ['FORMAL_SNAPSHOT_INVALID'],
+        availableDiagnostics: { snapshotDate: '2029-11-21' },
+        championChanged: false,
+      },
+    });
   });
 
   it('exposes the liquidity-structure challenger without changing the Champion', async () => {

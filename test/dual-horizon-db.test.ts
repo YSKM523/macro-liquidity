@@ -6,6 +6,10 @@ import {
   loadDualHorizonSnapshotInputs,
   loadLiquidityStructureSeries,
 } from '../src/db';
+import {
+  DualHorizonDomainError,
+  DualHorizonRequestError,
+} from '../src/dual-horizon-errors';
 
 const MIGRATIONS = [
   '0001_init.sql', '0002_add_coverage.sql', '0003_meta.sql', '0004_snapshot_quality.sql',
@@ -159,8 +163,31 @@ describe('dual-horizon PIT inputs', () => {
 
   it('rejects malformed and future as_of values', async () => {
     const { mf, db } = await migratedDb();
-    await expect(loadDualHorizonSnapshotInputs(db, 'bad')).rejects.toThrow(/invalid dual-horizon as_of/i);
-    await expect(loadDualHorizonSnapshotInputs(db, '2999-01-01T00:00:00Z')).rejects.toThrow(/future dual-horizon as_of/i);
+    await expect(loadDualHorizonSnapshotInputs(db, 'bad'))
+      .rejects.toBeInstanceOf(DualHorizonRequestError);
+    await expect(loadDualHorizonSnapshotInputs(db, '2999-01-01T00:00:00Z'))
+      .rejects.toBeInstanceOf(DualHorizonRequestError);
+    await mf.dispose();
+  });
+
+  it('returns malformed governed snapshot input as a typed domain failure', async () => {
+    const { mf, db } = await migratedDb();
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-03', recordedAt: '2024-01-05T00:00:00Z',
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), regime: 'FLAT',
+    });
+    await db.prepare(
+      `UPDATE model_snapshot_weekly
+       SET factors_json='{"netliqTrend":'
+       WHERE date='2024-01-03'`,
+    ).run();
+
+    await expect(loadDualHorizonSnapshotInputs(db, '2024-01-06T00:00:00Z'))
+      .rejects.toMatchObject({
+        name: DualHorizonDomainError.name,
+        reason: 'FORMAL_SNAPSHOT_INVALID',
+        asOf: '2024-01-06T00:00:00Z',
+      });
     await mf.dispose();
   });
 });

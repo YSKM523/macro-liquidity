@@ -85,6 +85,10 @@ import {
   DUAL_HORIZON_PROTOCOL,
   buildDualHorizonShadow,
 } from './dual-horizon-confidence';
+import {
+  DualHorizonDomainError,
+  DualHorizonRequestError,
+} from './dual-horizon-errors';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
@@ -403,25 +407,42 @@ export default {
           result,
         });
       } catch (error) {
-        const message = String((error as Error)?.message ?? error);
-        if (/^(?:invalid|future) (?:dual-horizon|liquidity-structure) as_of$/i.test(message)) {
+        if (error instanceof DualHorizonRequestError) {
           return errorJson(requestId, 'invalid_as_of', 'INVALID_AS_OF', 400);
         }
+        if (error instanceof DualHorizonDomainError) {
+          const result = {
+            status: 'DATA_INCOMPLETE' as const,
+            protocol: DUAL_HORIZON_PROTOCOL.protocol,
+            asOf: error.asOf,
+            reasons: [error.reason],
+            availableDiagnostics: error.availableDiagnostics,
+            championChanged: false as const,
+          };
+          return json({
+            api_version: 'v1',
+            challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
+            mode: DUAL_HORIZON_PROTOCOL.mode,
+            champion_change: false,
+            status: result.status,
+            reason: error.reason,
+            as_of_cutoff: error.asOf,
+            protocol: DUAL_HORIZON_PROTOCOL,
+            provenance: null,
+            result,
+          });
+        }
         structuredLog('dual_horizon_failure', {
-          request_id: requestId, reason: 'INPUT_LOAD_FAILED', error: message,
+          request_id: requestId,
+          error_code: 'DUAL_HORIZON_SERVICE_UNAVAILABLE',
+          error: String((error as Error)?.message ?? error),
         }, console.error);
-        return json({
-          api_version: 'v1',
-          challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
-          mode: DUAL_HORIZON_PROTOCOL.mode,
-          champion_change: false,
-          status: 'DATA_INCOMPLETE',
-          reason: 'INPUT_LOAD_FAILED',
-          as_of_cutoff: requestedAsOf ?? null,
-          protocol: DUAL_HORIZON_PROTOCOL,
-          provenance: null,
-          result: null,
-        });
+        return errorJson(
+          requestId,
+          'service_unavailable',
+          'DUAL_HORIZON_SERVICE_UNAVAILABLE',
+          503,
+        );
       }
     }
     if (p === '/api/v1/challengers/liquidity-structure') {

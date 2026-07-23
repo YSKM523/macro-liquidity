@@ -12,6 +12,10 @@ import {
 } from './portfolio-policy';
 import { resolveModelIdentity } from './model-version';
 import type { ModelIdentity } from './model-version';
+import {
+  DualHorizonDomainError,
+  DualHorizonRequestError,
+} from './dual-horizon-errors';
 
 function requireIsoTimestamp(value: string, field: string): void {
   isoTimestampMs(value, field);
@@ -1404,10 +1408,10 @@ export async function loadDualHorizonSnapshotInputs(
   try {
     requireIsoTimestamp(clock.cutoff, 'dual-horizon as_of');
   } catch {
-    throw new Error('invalid dual-horizon as_of');
+    throw new DualHorizonRequestError('INVALID_AS_OF');
   }
   if (compareIsoTimestamps(clock.cutoff, clock.db_now) > 0) {
-    throw new Error('future dual-horizon as_of');
+    throw new DualHorizonRequestError('INVALID_AS_OF');
   }
 
   const rows = await db.prepare(
@@ -1423,7 +1427,12 @@ export async function loadDualHorizonSnapshotInputs(
      LIMIT 601`,
   ).bind(clock.cutoff, clock.cutoff).all<Record<string, unknown>>();
 
-  const snapshots = (rows.results ?? []).map(row => parseDualHorizonSnapshotRow(row));
+  let snapshots: DualHorizonSnapshotRow[];
+  try {
+    snapshots = (rows.results ?? []).map(row => parseDualHorizonSnapshotRow(row));
+  } catch {
+    throw new DualHorizonDomainError('FORMAL_SNAPSHOT_INVALID', clock.cutoff);
+  }
   return {
     asOfCutoff: clock.cutoff,
     snapshots,
