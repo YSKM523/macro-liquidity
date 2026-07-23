@@ -1315,7 +1315,6 @@ export async function resolvePolicyRegime(db: D1Database, input: {
        ) AS revision_rank
        FROM policy_regime_events
        WHERE julianday(created_at)<julianday(?)
-         AND julianday(created_at)<=julianday(?)
          AND julianday(source_published_at)<=julianday(?)
      )
      SELECT event_id,event_key,revision,regime,effective_from,effective_to,
@@ -1324,7 +1323,7 @@ export async function resolvePolicyRegime(db: D1Database, input: {
      WHERE revision_rank=1 AND status='ACTIVE'
        AND effective_from<=? AND (effective_to IS NULL OR effective_to>?)
      ORDER BY event_key`,
-  ).bind(input.asOfCutoff, input.decisionAt, input.decisionAt, input.decisionDate, input.decisionDate)
+  ).bind(input.asOfCutoff, input.decisionAt, input.decisionDate, input.decisionDate)
     .all<{
       event_id: string; event_key: string; revision: number; regime: StoredPolicyRegime;
       effective_from: string; effective_to: string | null; source_document: string;
