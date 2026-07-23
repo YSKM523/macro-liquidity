@@ -109,18 +109,26 @@ describe('liquidity-structure PIT input loader', () => {
       VALUES (?,?,?, ?,?,?,'ALFRED',?,'pit-source','OBSERVED_AT_FETCH',?)
     `).bind(series, observation, vintage, fetched, fetched, fetched, `${series}-${vintage}`, value).run();
     await add('WDTGAL', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 100);
-    await add('WDTGAL', '2024-01-03', '2024-01-11', '2024-01-11T20:00:00Z', 110);
+    await add('WDTGAL', '2024-01-03', '2024-01-06', '2024-01-08T20:00:00Z', 120);
+    await add('WDTGAL', '2024-01-03', '2024-01-05', '2024-01-09T20:00:00Z', 110);
+    await add('WDTGAL', '2024-01-03', '2024-01-11', '2024-01-11T20:00:00Z', 130);
     await add('RRPONTSYD', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 500);
     await add('WALCL', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 7_000);
+    await db.prepare(`INSERT INTO release_calendar_overrides
+      (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+      VALUES ('RRPONTSYD','2024-01-04','2024-01-10T20:00:00Z','2024-01-11T14:30:00Z',
+              'verified delayed release','2024-01-08T00:00:00Z')`).run();
 
     const old = await loadLiquidityStructureSeries(db, '2024-01-10T00:00:00Z');
     expect(old).toMatchObject({
       asOfCutoff: '2024-01-10T00:00:00Z', decisionDate: '2024-01-09',
       decisionAt: '2024-01-09T23:59:59.999Z',
     });
-    expect(old.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 100 }]);
+    expect(old.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 120 }]);
+    expect(old.seriesMap.RRPONTSYD).toEqual([]);
     const revised = await loadLiquidityStructureSeries(db, '2024-01-12T00:00:00Z');
-    expect(revised.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 110 }]);
+    expect(revised.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 130 }]);
+    expect(revised.seriesMap.RRPONTSYD).toEqual([{ date: '2024-01-03', value: 500 }]);
     await expect(loadLiquidityStructureSeries(db, 'bad')).rejects.toThrow(/invalid liquidity-structure as_of/i);
     await mf.dispose();
   }, 30_000);
