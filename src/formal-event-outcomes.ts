@@ -5,12 +5,12 @@ import { isoTimestampMs } from './pit';
 
 const DAY_MS = 86_400_000;
 
-export type FormalOutcomeStatus = 'OK' | 'PENDING_OUTCOME' | 'UNEXECUTED';
+export type FormalOutcomeStatus = 'OK' | 'PENDING_OUTCOME' | 'MISSING_PRICE_COVERAGE' | 'UNEXECUTED';
 
 export interface FormalEventOutcome {
   horizonWeeks: 4 | 8 | 13;
   status: FormalOutcomeStatus;
-  reason: 'NO_CLOSE_AFTER_TRADABLE_AT' | 'NO_EXIT_WITHIN_TOLERANCE' | null;
+  reason: 'NO_CLOSE_AFTER_TRADABLE_AT' | 'OUTCOME_NOT_YET_MATURE' | 'NO_EXIT_WITHIN_TOLERANCE' | null;
   modelDate: string;
   decisionAt: string;
   tradableAt: string;
@@ -123,8 +123,12 @@ export function buildFormalEventOutcomes(
       const exit = prices.find(price => price.date >= targetDate);
       const withinTolerance = exit != null && (dateMs(exit.date) - dateMs(targetDate)) / DAY_MS <= outcomeToleranceDays;
       if (!exit || !withinTolerance) {
+        const maturityDeadlineMs = dateMs(addDays(targetDate, outcomeToleranceDays + 1));
+        const pending = cutoffMs <= maturityDeadlineMs;
         outcomes.push({
-          ...common(execution, horizonWeeks), status: 'PENDING_OUTCOME', reason: 'NO_EXIT_WITHIN_TOLERANCE',
+          ...common(execution, horizonWeeks),
+          status: pending ? 'PENDING_OUTCOME' : 'MISSING_PRICE_COVERAGE',
+          reason: pending ? 'OUTCOME_NOT_YET_MATURE' : 'NO_EXIT_WITHIN_TOLERANCE',
           entryDate: execution.executionDate, targetDate, exitDate: null, totalReturn: null, worstDrawdown: null,
           priceProvenance: prices[entryIndex]?.provenanceStatus ?? null,
         });

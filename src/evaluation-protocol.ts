@@ -168,7 +168,7 @@ export function buildForwardPairs(snaps: ValidationSnap[], horizonWeeks: number 
   return pairs;
 }
 
-function formalProvenance(signal: EventSignal): 'GOVERNED' | 'LEGACY' | 'INVALID' {
+export function formalProvenance(signal: EventSignal): 'GOVERNED' | 'LEGACY' | 'INVALID' {
   const legacy = signal.modelVersion === 'LEGACY_UNVERSIONED'
     && signal.configHash === 'LEGACY_UNVERSIONED' && signal.codeCommitSha === 'LEGACY_UNVERSIONED';
   if (legacy) return 'LEGACY';
@@ -187,7 +187,7 @@ interface FormalExecutionCoverage {
   unexecutedCount: number;
 }
 
-function validateFormalSignal(signal: EventSignal, cutoffMs: number): void {
+export function validateFormalSignal(signal: EventSignal, cutoffMs: number): void {
   const provenance = formalProvenance(signal);
   if (provenance === 'INVALID') throw new Error('formal validation requires complete signal provenance');
   if (provenance === 'GOVERNED' && (signal.modelVersion !== HOLDOUT_REGISTRATION.modelVersion
@@ -211,18 +211,14 @@ function validateFormalSignal(signal: EventSignal, cutoffMs: number): void {
   }
 }
 
-function prepareFormal(input: EventBacktestInputs): {
-  pairs: ForwardPair[];
-  executions: ScheduledExecution[];
-  executionCoverage: FormalExecutionCoverage;
-} {
+export function assertFormalEventInputs(input: EventBacktestInputs): number {
   if (typeof input.asOfCutoff !== 'string') {
     throw new Error('formal validation requires an explicit as-of cutoff');
   }
   const cutoffMs = isoTimestampMs(input.asOfCutoff, 'formal as-of cutoff');
   if (input.signals.length === 0) throw new Error('formal validation has no official signal coverage');
   input.signals.forEach(signal => validateFormalSignal(signal, cutoffMs));
-  if (input.signals.length > 0 && input.prices.length === 0) throw new Error('formal validation has no execution price coverage');
+  if (input.prices.length === 0) throw new Error('formal validation has no execution price coverage');
   for (const price of input.prices) {
     if (price.provenanceStatus !== 'PIT_RAW') throw new Error('formal validation requires PIT_RAW daily prices');
     if (!price.fetchedAt || !price.dataRunId || !price.activationRunId || !price.activatedAt) {
@@ -233,6 +229,15 @@ function prepareFormal(input: EventBacktestInputs): {
     if (fetchedMs > activatedMs) throw new Error('formal validation price fetched after activation');
     if (activatedMs >= cutoffMs) throw new Error('formal validation price not visible at cutoff');
   }
+  return cutoffMs;
+}
+
+function prepareFormal(input: EventBacktestInputs): {
+  pairs: ForwardPair[];
+  executions: ScheduledExecution[];
+  executionCoverage: FormalExecutionCoverage;
+} {
+  assertFormalEventInputs(input);
   const formal = buildFormalEventOutcomes(input, [13], VALIDATION_PROTOCOL.outcomeToleranceDays);
   if (formal.executionCoverage.unexecutedCount > 0 || formal.executionCoverage.executionCount === 0) {
     throw new Error('formal validation has unexecuted signal coverage');

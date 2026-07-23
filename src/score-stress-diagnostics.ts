@@ -1,13 +1,62 @@
 import type { EventBacktestInputs } from './event-backtest';
+import type { DailyMarketPrice } from './event-backtest';
+import { assertFormalEventInputs } from './evaluation-protocol';
 import { buildFormalEventOutcomes } from './formal-event-outcomes';
 import type { FormalEventOutcome } from './formal-event-outcomes';
 import { sha256Hex } from './model-version';
+
+const REGISTERED_SCORE_STRESS_ARTIFACT = Object.freeze({
+  protocol: 'SCORE_STRESS_DIAGNOSTICS_V1',
+  registered_at: '2026-07-22T20:36:03Z',
+  registration_commit: 'd7aba3c2b5bd79cfaf7847cdc82770abb499fdcd',
+  champion_change: false,
+  score_buckets: [[0, 20], [20, 35], [35, 45], [45, 55], [55, 65], [65, 80], [80, 100]],
+  bucket_interval_rule: 'LEFT_CLOSED_RIGHT_OPEN_EXCEPT_FINAL_CLOSED',
+  horizon_weeks: [4, 8, 13],
+  entry_rule: 'FIRST_ACTUAL_PIT_CLOSE_STRICTLY_AFTER_TRADABLE_AT_ELIGIBILITY',
+  exit_rule: 'FIRST_ACTUAL_PIT_CLOSE_ON_OR_AFTER_ENTRY_PLUS_HORIZON_CALENDAR_DAYS',
+  outcome_tolerance_days: 14,
+  return_interval: 'ENTRY_EXCLUDED_EXIT_INCLUDED',
+  independent_rule: 'GREEDY_INTERVAL_NON_OVERLAP',
+  quantile_rule: 'TYPE7_LINEAR',
+  negative_rule: 'RETURN_LT_ZERO',
+  minimum_probability_n: 5,
+  bh: { alpha: .05, family_rule: 'ISOLATED_BY_FAMILY', ranking_rule: 'STABLE_ASCENDING_P_THEN_HYPOTHESIS_ID', missing_p_value: 1 },
+  dsr: {
+    method: 'BAILEY_LOPEZ_DE_PRADO_2014',
+    expected_maximum_rule: 'EULER_MASCHERONI_INTERPOLATION_FROM_COMPLETE_TRIAL_SHARPE_VARIANCE',
+    probability_rule: 'PSR_WITH_SAMPLE_T_SKEWNESS_AND_NON_EXCESS_KURTOSIS',
+    incomplete_trial_rule: 'TRIAL_UNIVERSE_INCOMPLETE_NULL',
+  },
+  events: [
+    ['2018_Q4', '2018-10-01', '2019-01-01'],
+    ['2019_REPO_STRESS', '2019-09-16', '2019-11-01'],
+    ['2020_COVID', '2020-02-19', '2020-05-01'],
+    ['2021_TGA_RRP', '2021-02-01', '2022-01-01'],
+    ['2022_HIKING_QT', '2022-03-16', '2023-01-01'],
+    ['2023_REGIONAL_BANKS', '2023-03-08', '2023-05-02'],
+    ['2024_YEN_CARRY', '2024-07-01', '2024-09-01'],
+    ['2025_2026_RESERVE_MGMT', '2025-01-01', '2027-01-01'],
+  ],
+  event_interval_rule: 'ENTRY_DATE_LEFT_CLOSED_RIGHT_OPEN',
+  candidate_rule: 'INDEPENDENTLY_VERSIONED_PIT_ARTIFACT_OR_CANDIDATE_NOT_PROVIDED',
+  promotion_threshold: null,
+});
+
+export function canonicalScoreStressProtocol(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+const SCORE_STRESS_PROTOCOL_DIGEST = '3ea92b2fc2f11745ab8f4810d9bab940f4ce4bed7892a50229822524176f38b3';
+if (sha256Hex(canonicalScoreStressProtocol(REGISTERED_SCORE_STRESS_ARTIFACT)) !== SCORE_STRESS_PROTOCOL_DIGEST) {
+  throw new Error('registered score/stress protocol literal mismatch; create an explicit amendment');
+}
 
 export const SCORE_STRESS_PROTOCOL = Object.freeze({
   protocol: 'SCORE_STRESS_DIAGNOSTICS_V1' as const,
   registeredAt: '2026-07-22T20:36:03Z',
   registrationCommit: 'd7aba3c2b5bd79cfaf7847cdc82770abb499fdcd',
-  protocolDigest: '891f77f991ca40521639dee3ab50418999e4c3d9296e7bd675f693ee3801efa2',
+  protocolDigest: SCORE_STRESS_PROTOCOL_DIGEST,
   horizonsWeeks: Object.freeze([4, 8, 13] as const),
   outcomeToleranceDays: 14,
   alpha: .05,
@@ -36,6 +85,7 @@ const BUCKETS = Object.freeze([
 ]);
 
 export function buildFormalOutcomes(input: EventBacktestInputs): FormalEventOutcome[] {
+  assertFormalEventInputs(input);
   return buildFormalEventOutcomes(input).outcomes;
 }
 
@@ -249,14 +299,22 @@ export function deflatedSharpeRatio(input: {
   kurtosis: number;
 }) {
   const trialCount = input.trialSharpes.length;
-  if (trialCount < 2 || input.trialSharpes.some(value => value == null || !Number.isFinite(value))) {
+  const unavailable = (status: string) => ({
+    status, value: null, expectedMaximumSharpe: null, trialCount,
+  });
+  if (!Number.isFinite(input.observedSharpe) || !Number.isFinite(input.skewness)
+    || !Number.isFinite(input.kurtosis) || input.trialSharpes.some(value => value != null && !Number.isFinite(value))) {
+    return unavailable('INVALID_INPUT');
+  }
+  if (!Number.isInteger(input.sampleT) || input.sampleT < 2) return unavailable('INSUFFICIENT_SAMPLE');
+  if (trialCount < 2) return unavailable('INSUFFICIENT_TRIALS');
+  if (input.trialSharpes.some(value => value == null)) {
     return { status: 'TRIAL_UNIVERSE_INCOMPLETE' as const, value: null, expectedMaximumSharpe: null, trialCount };
   }
-  if (!Number.isInteger(input.sampleT) || input.sampleT < 2 || !Number.isFinite(input.observedSharpe)
-    || !Number.isFinite(input.skewness) || !Number.isFinite(input.kurtosis)) throw new Error('invalid DSR inputs');
   const sharpes = input.trialSharpes as number[];
   const mean = sharpes.reduce((sum, value) => sum + value, 0) / trialCount;
   const variance = sharpes.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (trialCount - 1);
+  if (!(variance > Number.EPSILON)) return unavailable('ZERO_TRIAL_VARIANCE');
   const gamma = .5772156649015329;
   const expectedMaximumSharpe = Math.sqrt(variance) * (
     (1 - gamma) * inverseNormal(1 - 1 / trialCount)
@@ -264,13 +322,36 @@ export function deflatedSharpeRatio(input: {
   );
   const denominatorSquared = 1 - input.skewness * input.observedSharpe
     + ((input.kurtosis - 1) / 4) * input.observedSharpe ** 2;
-  if (!(denominatorSquared > 0)) throw new Error('invalid DSR denominator');
+  if (!(denominatorSquared > 0) || !Number.isFinite(denominatorSquared)) return unavailable('INVALID_INPUT');
   const statistic = (input.observedSharpe - expectedMaximumSharpe) * Math.sqrt(input.sampleT - 1)
     / Math.sqrt(denominatorSquared);
   return { status: 'OK' as const, value: normalCdf(statistic), expectedMaximumSharpe, trialCount };
 }
 
-export function evaluateStressEvents(outcomes: FormalEventOutcome[], asOfDate: string) {
+function eventDrawdown(prices: DailyMarketPrice[], from: string, to: string): number | null {
+  const values = prices.filter(row => row.date >= from && row.date < to)
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map(row => row.adjustedClose);
+  if (values.length === 0) return null;
+  if (values.some(value => !Number.isFinite(value) || value <= 0)) throw new Error('invalid stress-event price');
+  let peak = values[0];
+  let drawdown = 0;
+  for (const value of values) {
+    peak = Math.max(peak, value);
+    drawdown = Math.min(drawdown, value / peak - 1);
+  }
+  return drawdown;
+}
+
+export function evaluateStressEvents(
+  outcomes: FormalEventOutcome[],
+  asOfDate: string,
+  eventPrices: DailyMarketPrice[] = [],
+) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)
+    || new Date(`${asOfDate}T00:00:00Z`).toISOString().slice(0, 10) !== asOfDate) {
+    throw new Error('invalid stress-event as-of date');
+  }
   return SCORE_STRESS_PROTOCOL.events.map(event => {
     const rows = outcomes.filter(row => row.entryDate != null && row.entryDate >= event.from && row.entryDate < event.to);
     const candidateComparison = { status: 'CANDIDATE_NOT_PROVIDED' as const, candidate: null };
@@ -279,15 +360,33 @@ export function evaluateStressEvents(outcomes: FormalEventOutcome[], asOfDate: s
     if (rows.some(row => row.priceProvenance !== 'PIT_RAW')) {
       return { ...event, status: 'NON_PIT_PRICE_COVERAGE' as const, outcomeCount: rows.length, candidateComparison };
     }
-    if (rows.some(row => row.status !== 'OK')) {
+    const okRows = rows.filter(row => row.status === 'OK');
+    if (okRows.length === 0 && rows.some(row => row.status === 'PENDING_OUTCOME')) {
       return { ...event, status: 'PENDING_OUTCOME' as const, outcomeCount: rows.length, candidateComparison };
     }
-    const returns = rows.map(row => row.totalReturn!);
+    const returns = okRows.map(row => row.totalReturn!);
+    const horizons = SCORE_STRESS_PROTOCOL.horizonsWeeks.map(horizonWeeks => {
+      const horizonRows = okRows.filter(row => row.horizonWeeks === horizonWeeks);
+      return {
+        horizonWeeks,
+        n: horizonRows.length,
+        bearishN: horizonRows.filter(row => row.verdict === 'BEARISH').length,
+        averageExposure: horizonRows.length === 0 ? null
+          : horizonRows.reduce((sum, row) => sum + row.targetExposure!, 0) / horizonRows.length,
+        meanReturn: horizonRows.length === 0 ? null
+          : horizonRows.reduce((sum, row) => sum + row.totalReturn!, 0) / horizonRows.length,
+        worstReturn: horizonRows.length === 0 ? null : Math.min(...horizonRows.map(row => row.totalReturn!)),
+      };
+    });
+    const completeHorizons = horizons.every(row => row.n > 0);
+    const partial = !completeHorizons || okRows.length !== rows.length;
     return {
-      ...event, status: 'OK' as const, outcomeCount: rows.length, candidateComparison,
-      meanReturn: returns.reduce((sum, value) => sum + value, 0) / returns.length,
-      worstReturn: Math.min(...returns),
-      worstEpisodeDrawdown: Math.min(...rows.map(row => row.worstDrawdown!)),
+      ...event, status: partial ? 'PARTIAL_COVERAGE' as const : 'OK' as const,
+      outcomeCount: rows.length, candidateComparison, horizons,
+      spxDrawdown: eventDrawdown(eventPrices, event.from, event.to),
+      meanReturn: returns.length === 0 ? null : returns.reduce((sum, value) => sum + value, 0) / returns.length,
+      worstReturn: returns.length === 0 ? null : Math.min(...returns),
+      worstEpisodeDrawdown: okRows.length === 0 ? null : Math.min(...okRows.map(row => row.worstDrawdown!)),
     };
   });
 }
