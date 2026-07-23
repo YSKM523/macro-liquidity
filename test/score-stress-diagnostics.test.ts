@@ -15,6 +15,7 @@ import {
   deflatedSharpeRatio,
   evaluateStressEvents,
   canonicalScoreStressProtocol,
+  summarizeHypothesisLedger,
   validateHypothesisLedger,
 } from '../src/score-stress-diagnostics';
 
@@ -172,6 +173,23 @@ describe('multiplicity', () => {
       registrationCommit: expect.stringMatching(/^[a-f0-9]{40}$/), status: expect.any(String), supersedes: null,
     }));
     expect(validated.entries[1].supersedes).toBe(validated.entries[0].hypothesisId);
+    expect(validated.entries.map(entry => entry.registrationClass)).toEqual([
+      'PREREGISTERED', 'RETROSPECTIVE_REVIEW_AMENDMENT',
+      'PREREGISTERED', 'RETROSPECTIVE_REVIEW_AMENDMENT',
+    ]);
+    expect(summarizeHypothesisLedger(validated)).toMatchObject({
+      status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT',
+      candidateCount: 4,
+      directionSpecificationCount: 6,
+      windowSpecificationCount: 12,
+      parameterSpecificationCount: 12,
+      totalTrialCount: 48,
+      dsr: { status: 'NOT_APPLICABLE_CURRENT_VINTAGE_RESEARCH', value: null },
+      families: [
+        { family: 'NET_LIQUIDITY_CHALLENGER', trialCount: 24, rejectedCount: 0 },
+        { family: 'RESERVE_ADEQUACY_CHALLENGER', trialCount: 24, rejectedCount: 0 },
+      ],
+    });
   });
 
   it('rejects duplicate IDs, duplicate parameter hashes in a family, bad hashes, and dangling supersession', () => {

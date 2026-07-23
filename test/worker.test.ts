@@ -204,6 +204,42 @@ describe('public error contract', () => {
 });
 
 describe('/api/v1 governance routes', () => {
+  it('returns strict PIT score buckets, multiplicity status, and all registered stress events', async () => {
+    dbState.eventInputs = formalEventInputs(80);
+    const cutoff = '2030-01-01T00:00:00Z';
+    const response = await worker.fetch(new Request(
+      `https://example.test/api/v1/diagnostics?as_of=${encodeURIComponent(cutoff)}`,
+    ), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      api_version: 'v1', status: 'OK', as_of_cutoff: cutoff,
+      protocol: { protocol: 'SCORE_STRESS_DIAGNOSTICS_V1' },
+      multiple_testing: {
+        status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT', totalTrialCount: 48,
+        dsr: { status: 'NOT_APPLICABLE_CURRENT_VINTAGE_RESEARCH', value: null },
+      },
+      candidate_comparison: { status: 'CANDIDATE_NOT_PROVIDED' },
+    });
+    expect(body.score_buckets).toHaveLength(21);
+    expect(body.stress_events).toHaveLength(8);
+    expect(vi.mocked(loadEventBacktestInputs)).toHaveBeenCalledWith(env.DB, cutoff);
+  });
+
+  it('fails diagnostics closed without changing legacy routes and validates as_of', async () => {
+    vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('event input unavailable'));
+    const unavailable = await worker.fetch(new Request('https://example.test/api/v1/diagnostics'), env);
+    expect(unavailable.status).toBe(200);
+    await expect(unavailable.json()).resolves.toMatchObject({
+      api_version: 'v1', status: 'DATA_INCOMPLETE', reason: 'EVENT_INPUT_LOAD_FAILED',
+      score_buckets: [], stress_events: [],
+    });
+    vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('invalid backtest as_of'));
+    const invalid = await worker.fetch(new Request('https://example.test/api/v1/diagnostics?as_of=bad'), env);
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({ error_code: 'INVALID_AS_OF' });
+  });
+
   it('returns a migration-backfilled legacy snapshot honestly instead of permanently rejecting it', async () => {
     dbState.row = {
       ...dbState.row,

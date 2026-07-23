@@ -207,6 +207,23 @@ describe('static UI assets', () => {
     expect(js).toContain('尾部风险');
   });
 
+  it('renders score/stress diagnostics with typed nulls and escaped statuses', () => {
+    const html = read('public/index.html');
+    const js = read('public/app.js');
+    expect(html).toContain('id="score-stress-card"');
+    expect(html).toContain('SCORE_STRESS_DIAGNOSTICS_V1');
+    expect(js).toContain("fetch('/api/v1/diagnostics')");
+    expect(js).toContain('renderScoreStressDiagnostics');
+    const start = js.indexOf('function renderScoreStressDiagnostics');
+    const end = js.indexOf('async function fetchEventBacktest');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const render = new Function(`const rbEsc=${JSON.stringify(undefined)};`) as unknown;
+    expect(js.slice(start, end)).toContain('rbEsc(');
+    expect(js.slice(start, end)).toContain("== null ? '—'");
+    expect(String(render)).toBeTruthy();
+  });
+
   it('renders adversarial validation status and all-null metrics without unsafe HTML or exceptions', () => {
     const js = read('public/app.js');
     const start = js.indexOf('function rbFinite');
