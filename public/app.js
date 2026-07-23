@@ -68,6 +68,7 @@ async function main() {
   fetchExplain('1w');
   fetchRobust();
   fetchScoreStressDiagnostics();
+  fetchLiquidityStructureChallenger();
   fetchEventBacktest();
   let snapRes, histRes;
   try {
@@ -764,6 +765,58 @@ async function fetchScoreStressDiagnostics() {
     body.innerHTML = renderScoreStressDiagnostics(result);
   } catch (error) {
     body.innerHTML = '<p class="rb-note">分数与压力诊断加载失败，稍后重试</p>';
+  }
+  card.style.display = '';
+}
+
+function renderLiquidityStructureChallenger(result) {
+  const status = rbEsc(result?.status || 'DATA_INCOMPLETE');
+  const reason = result?.reason ? ` · ${rbEsc(result.reason)}` : '';
+  const header = `<div class="rb-concl">${status}${reason} · Shadow only · Champion unchanged</div>`;
+  const tga = result?.tga_buffer || {};
+  const policy = result?.policy_regime || {};
+  const walcl = result?.walcl_policy || {};
+  const weights = result?.weight_benchmarks || {};
+  const structure = `<div class="rb-sub">TGA 冲击 / RRP 缓冲</div>`
+    + `<div class="rb-stat"><span class="k">状态 / 缓冲层</span><span class="v">${rbEsc(tga.status || '—')} / ${rbEsc(tga.bufferState || '—')}</span></div>`
+    + `<div class="rb-stat"><span class="k">原始 / 有效 TGA 冲击</span><span class="v">${rbMaybeNum(tga.tgaShock)} / ${rbMaybeNum(tga.effectiveTgaShock)}</span></div>`
+    + `<div class="rb-sub">政策阶段 WALCL</div>`
+    + `<div class="rb-stat"><span class="k">阶段 / 扩表状态</span><span class="v">${rbEsc(policy.regime || policy.status || '—')} / ${rbEsc(walcl.impulse || '—')}</span></div>`
+    + `<div class="rb-stat"><span class="k">政策解释分</span><span class="v">${rbMaybeNum(walcl.score)}</span></div>`;
+  const benchmark = `<div class="rb-sub">8 因子权重基准（vol 不进入基础分）</div>`
+    + `<div class="rb-stat"><span class="k">等权 / 当前 / 50-50</span><span class="v">${rbMaybeNum(weights.equal8)} / ${rbMaybeNum(weights.current8)} / ${rbMaybeNum(weights.blend8)}</span></div>`;
+  const evaluation = result?.formal_ablation_evaluation || {};
+  const armLabels = {
+    A_CURRENT_8: 'A 当前 8 因子', B_WITHOUT_CREDIT: 'B 移除 credit',
+    C_WITHOUT_FUNDING: 'C 移除 funding', D_WITHOUT_CREDIT_FUNDING: 'D 移除两者',
+  };
+  const rows = Object.entries(evaluation.arms || {}).map(([key, arm]) => {
+    const h13 = arm?.horizons?.['13'] || {};
+    const portfolio = arm?.portfolio || {};
+    return `<tr><td>${rbEsc(armLabels[key] || key)}</td>`
+      + `<td>${rbEsc(arm?.status || '—')}</td>`
+      + `<td class="num">${rbMaybeNum(h13.overlapping?.value)} (${rbCount(h13.overlapping?.n)})</td>`
+      + `<td class="num">${rbMaybeNum(h13.independent?.value)} (${rbCount(h13.independent?.n)})</td>`
+      + `<td class="num">${rbMaybeNum(portfolio.betaMatchedSharpeDelta)}</td>`
+      + `<td class="num">${rbMaybePct(h13.tailLossQ10)}</td>`
+      + `<td class="num">${rbMaybePct(portfolio.maxDrawdown)}</td></tr>`;
+  }).join('');
+  const ablation = `<div class="rb-sub">Credit / Funding 正式 PIT 消融 · 13 周为主，4 / 8 周为辅</div>`
+    + `<p class="rb-note">每个 arm 独立按时间顺序执行一次 hysteresis；同一完整 cohort，不按 arm 删除样本。评价状态：${rbEsc(evaluation.status || '—')}${evaluation.reason ? ` · ${rbEsc(evaluation.reason)}` : ''}</p>`
+    + '<table class="rb-table"><thead><tr><th>Arm</th><th>状态</th><th class="num">13 周 OOS IC</th><th class="num">非重叠 IC</th><th class="num">Beta 匹配 Sharpe 差</th><th class="num">q10 尾部损失</th><th class="num">最大回撤</th></tr></thead><tbody>'
+    + (rows || '<tr><td colspan="7">—</td></tr>') + '</tbody></table>';
+  return header + structure + benchmark + ablation;
+}
+
+async function fetchLiquidityStructureChallenger() {
+  const card = document.getElementById('liquidity-structure-card');
+  const body = document.getElementById('liquidity-structure-body');
+  if (!card || !body) return;
+  try {
+    const result = await fetch('/api/v1/challengers/liquidity-structure').then(response => response.json());
+    body.innerHTML = renderLiquidityStructureChallenger(result);
+  } catch (error) {
+    body.innerHTML = '<p class="rb-note">流动性结构 Challenger 加载失败，稍后重试</p>';
   }
   card.style.display = '';
 }
