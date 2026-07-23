@@ -234,7 +234,7 @@ describe('formal funding/credit ablation evaluation', () => {
 
   it('fails closed when the preregistered primary 13-week horizon is not fully mature', () => {
     const immature = formalAblationInputs();
-    immature.prices = immature.prices.slice(0, 180);
+    immature.prices = immature.prices.slice(0, 300);
     const result = evaluateFundingCreditAblation(immature);
     expect(result).toMatchObject({
       status: 'DATA_INCOMPLETE', reason: 'PRIMARY_HORIZON_INCOMPLETE',

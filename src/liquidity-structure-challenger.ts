@@ -278,8 +278,11 @@ function armHorizonMetrics(signals: EventSignal[], input: EventBacktestInputs) {
       missingCount: outcomes.filter(outcome => outcome.status !== 'OK' && outcome.status !== 'PENDING_OUTCOME').length,
     };
   };
-  return Object.fromEntries(ABLATION_HORIZONS.map(value => [value, horizon(value)])) as
-    Record<AblationHorizon, ReturnType<typeof horizon>>;
+  return {
+    horizons: Object.fromEntries(ABLATION_HORIZONS.map(value => [value, horizon(value)])) as
+      Record<AblationHorizon, ReturnType<typeof horizon>>,
+    executionCoverage: formal.executionCoverage,
+  };
 }
 
 function cohortProvenance(signals: EventSignal[]): 'GOVERNED_PIT' | 'LEGACY_PIT' | 'MIXED' | 'INVALID' {
@@ -336,7 +339,8 @@ export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
     const signals = buildArmSignals(input, new Set(ABLATION_ARMS[key]));
     if (!signals) throw new Error('formal ablation requires complete portfolio policy inputs');
     const eventTime = runEventTimeBacktest({ ...input, signals });
-    const horizons = armHorizonMetrics(signals, input);
+    const formalMetrics = armHorizonMetrics(signals, input);
+    const horizons = formalMetrics.horizons;
     const strategySharpe = eventTime.portfolio?.strategy.metrics.sharpe ?? null;
     const betaMatchedSharpe = eventTime.portfolio?.benchmarks.betaMatchedStatic.metrics.sharpe ?? null;
     return {
@@ -348,6 +352,7 @@ export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
       },
       status: eventTime.status,
       reason: eventTime.reason,
+      executionCoverage: formalMetrics.executionCoverage,
       removedFactors: [...ABLATION_ARMS[key]],
       verdictTrace: signals.map(signal => signal.verdict as Verdict),
       horizons,
@@ -363,6 +368,17 @@ export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
   const arms = {} as Record<AblationArmKey, ReturnType<typeof evaluateArm>>;
   for (const key of Object.keys(ABLATION_ARMS) as AblationArmKey[]) arms[key] = evaluateArm(key);
   const incomplete = Object.values(arms).find(arm => arm.status !== 'OK');
+  const executionIncomplete = Object.values(arms).some(arm =>
+    arm.executionCoverage.signalCount !== cohort.signalCount
+    || arm.executionCoverage.executionCount !== cohort.signalCount
+    || arm.executionCoverage.supersededCount !== 0
+    || arm.executionCoverage.unexecutedCount !== 0);
+  const portfolioIncomplete = Object.values(arms).some(arm => [
+    arm.portfolio.strategySharpe,
+    arm.portfolio.betaMatchedSharpe,
+    arm.portfolio.betaMatchedSharpeDelta,
+    arm.portfolio.maxDrawdown,
+  ].some(value => typeof value !== 'number' || !Number.isFinite(value)));
   const primaryIncomplete = Object.values(arms).some(arm => {
     const primary = arm.horizons[13];
     return primary.pendingCount > 0 || primary.missingCount > 0
@@ -371,8 +387,12 @@ export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
   });
   workBudget.outcomeBuildPasses = Object.keys(arms).length;
   return {
-    status: incomplete || primaryIncomplete ? 'DATA_INCOMPLETE' as const : 'OK' as const,
-    reason: incomplete?.reason ?? (primaryIncomplete ? 'PRIMARY_HORIZON_INCOMPLETE' as const : null),
+    status: incomplete || executionIncomplete || portfolioIncomplete || primaryIncomplete
+      ? 'DATA_INCOMPLETE' as const : 'OK' as const,
+    reason: incomplete?.reason
+      ?? (executionIncomplete ? 'EXECUTION_COHORT_INCOMPLETE' as const
+        : portfolioIncomplete ? 'PORTFOLIO_METRICS_INCOMPLETE' as const
+          : primaryIncomplete ? 'PRIMARY_HORIZON_INCOMPLETE' as const : null),
     ...disclosure,
     cohort,
     workBudget,
