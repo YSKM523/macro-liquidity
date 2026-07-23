@@ -379,10 +379,9 @@ export default {
       let structureInputs: Awaited<ReturnType<typeof loadLiquidityStructureSeries>>;
       let eventInputs: Awaited<ReturnType<typeof loadEventBacktestInputs>>;
       try {
-        [structureInputs, eventInputs] = await Promise.all([
-          loadLiquidityStructureSeries(env.DB, requestedAsOf),
-          loadEventBacktestInputs(env.DB, requestedAsOf),
-        ]);
+        eventInputs = await loadEventBacktestInputs(env.DB, requestedAsOf);
+        if (!eventInputs.asOfCutoff) throw new Error('backtest as_of unavailable');
+        structureInputs = await loadLiquidityStructureSeries(env.DB, eventInputs.asOfCutoff);
       } catch (error) {
         const message = String((error as Error)?.message ?? error);
         if (/^(?:invalid|future) (?:liquidity-structure|backtest) as_of$/i.test(message)) {
@@ -392,6 +391,9 @@ export default {
           request_id: requestId, reason: 'INPUT_LOAD_FAILED', error: message,
         }, console.error);
         return unavailable('INPUT_LOAD_FAILED');
+      }
+      if (structureInputs.asOfCutoff !== eventInputs.asOfCutoff) {
+        return unavailable('AS_OF_CUTOFF_MISMATCH', eventInputs.asOfCutoff ?? structureInputs.asOfCutoff);
       }
       const signals = [...eventInputs.signals].sort((left, right) => left.decisionAt.localeCompare(right.decisionAt));
       const latestSignal = signals.at(-1);
@@ -410,8 +412,8 @@ export default {
       let policy: Awaited<ReturnType<typeof resolvePolicyRegime>>;
       try {
         policy = await resolvePolicyRegime(env.DB, {
-          decisionDate: latestSignal.signalDate,
-          decisionAt: latestSignal.decisionAt,
+          decisionDate: structureInputs.decisionDate,
+          decisionAt: structureInputs.decisionAt,
           asOfCutoff: eventInputs.asOfCutoff,
         });
       } catch (error) {

@@ -1350,6 +1350,7 @@ export async function resolvePolicyRegime(db: D1Database, input: {
 export interface LiquidityStructureSeriesInputs {
   asOfCutoff: string;
   decisionDate: string;
+  decisionAt: string;
   seriesMap: SeriesMap;
   provenance: {
     methodology: 'APPEND_ONLY_AS_OF';
@@ -1381,6 +1382,7 @@ export async function loadLiquidityStructureSeries(
   const cutoff = clock.cutoff;
   const decisionClock = new Date(isoTimestampMs(cutoff, 'liquidity-structure cutoff') - 1);
   const decisionDate = decisionClock.toISOString().slice(0, 10);
+  const decisionAt = decisionClock.toISOString();
   const rows = await db.prepare(
     `WITH eligible AS (
        SELECT series_id,observation_date,value,fetched_at,data_run_id,
@@ -1414,7 +1416,7 @@ export async function loadLiquidityStructureSeries(
     if (maxFetchedAt == null || compareIsoTimestamps(row.fetched_at, maxFetchedAt) > 0) maxFetchedAt = row.fetched_at;
   }
   return {
-    asOfCutoff: cutoff, decisionDate, seriesMap,
+    asOfCutoff: cutoff, decisionDate, decisionAt, seriesMap,
     provenance: {
       methodology: 'APPEND_ONLY_AS_OF', rowCount: result.length,
       dataRunCount: runIds.size, maxFetchedAt,
