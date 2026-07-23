@@ -1283,6 +1283,71 @@ export async function countOfficialSnapshots(db: D1Database): Promise<number> {
   return row?.n ?? 0;
 }
 
+export type StoredPolicyRegime = 'QE' | 'QT' | 'RESERVE_MANAGEMENT' | 'REINVESTMENT_ONLY'
+  | 'CRISIS_LIQUIDITY' | 'NEUTRAL' | 'UNKNOWN';
+
+export type PolicyRegimeResolution = {
+  status: 'OK'; regime: StoredPolicyRegime; eventId: string; eventKey: string;
+  revision: number; effectiveFrom: string; effectiveTo: string | null;
+  sourceDocument: string; sourcePublishedAt: string; approvedBy: string; createdAt: string;
+} | { status: 'POLICY_REGIME_UNAVAILABLE'; reason: 'NO_VISIBLE_ACTIVE_EVENT' };
+
+function requirePolicyDate(value: string, field: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)
+    || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
+    throw new Error(`invalid ${field}`);
+  }
+}
+
+export async function resolvePolicyRegime(db: D1Database, input: {
+  decisionDate: string; decisionAt: string; asOfCutoff: string;
+}): Promise<PolicyRegimeResolution> {
+  requirePolicyDate(input.decisionDate, 'policy decision date');
+  requireIsoTimestamp(input.decisionAt, 'policy decisionAt');
+  requireIsoTimestamp(input.asOfCutoff, 'policy asOf cutoff');
+  if (compareIsoTimestamps(input.decisionAt, input.asOfCutoff) >= 0) {
+    throw new Error('policy decision must be visible strictly before as-of cutoff');
+  }
+  const rows = await db.prepare(
+    `WITH visible AS (
+       SELECT *,ROW_NUMBER() OVER (
+         PARTITION BY event_key ORDER BY revision DESC,event_id DESC
+       ) AS revision_rank
+       FROM policy_regime_events
+       WHERE julianday(created_at)<julianday(?)
+         AND julianday(created_at)<=julianday(?)
+         AND julianday(source_published_at)<=julianday(?)
+     )
+     SELECT event_id,event_key,revision,regime,effective_from,effective_to,
+            source_document,source_published_at,approved_by,created_at
+     FROM visible
+     WHERE revision_rank=1 AND status='ACTIVE'
+       AND effective_from<=? AND (effective_to IS NULL OR effective_to>?)
+     ORDER BY event_key`,
+  ).bind(input.asOfCutoff, input.decisionAt, input.decisionAt, input.decisionDate, input.decisionDate)
+    .all<{
+      event_id: string; event_key: string; revision: number; regime: StoredPolicyRegime;
+      effective_from: string; effective_to: string | null; source_document: string;
+      source_published_at: string; approved_by: string; created_at: string;
+    }>();
+  const visible = rows.results ?? [];
+  for (const row of visible) {
+    requirePolicyDate(row.effective_from, 'policy effective_from');
+    if (row.effective_to != null) requirePolicyDate(row.effective_to, 'policy effective_to');
+    requireIsoTimestamp(row.source_published_at, 'policy source publishedAt');
+    requireIsoTimestamp(row.created_at, 'policy createdAt');
+  }
+  if (visible.length > 1) throw new Error('overlapping visible policy regimes');
+  const row = visible[0];
+  if (!row) return { status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' };
+  return {
+    status: 'OK', regime: row.regime, eventId: row.event_id, eventKey: row.event_key,
+    revision: row.revision, effectiveFrom: row.effective_from, effectiveTo: row.effective_to,
+    sourceDocument: row.source_document, sourcePublishedAt: row.source_published_at,
+    approvedBy: row.approved_by, createdAt: row.created_at,
+  };
+}
+
 export async function officialSnapshotOnOrBefore(db: D1Database, date: string) {
   return db.prepare("SELECT * FROM model_snapshot_weekly WHERE date <= ? AND decision_status = 'OK' ORDER BY date DESC LIMIT 1")
     .bind(date).first();
