@@ -62,7 +62,11 @@ unchanged PR-11 builder. It enforces:
 Long-stale forward fills, irregular anchors, and insufficient aligned history
 return `MISSING_RAW_SMOOTH_HISTORY`. Direct HIGH, LOW, TRANSITION, stale,
 cadence-invalid, and missing-history cases assert the expected directions and
-evidence.
+evidence. Follow-up review also proved that a newly cutoff-visible WALCL release
+inside its Wed+7 model delay must not displace the latest mature anchor:
+freshness and anchor identity are now evaluated only on the eligible bounded
+anchor series, while the mature anchor must still satisfy decision-date
+freshness.
 
 ### R5 — Cutoff-local replay
 
@@ -95,8 +99,13 @@ Explicit fail-closed sentinels:
 - governed snapshot rows: `600`, queried with a `601`st sentinel row.
 
 Limits may only be lowered by test overrides. Below-bound D1 data is equivalent
-to the unbounded governed input; exceeding raw-revision or selected-row work
-returns a typed deterministic work-limit result before platform exhaustion.
+to the unbounded governed input; exceeding raw-revision, participating-override,
+or selected-row work returns a typed deterministic work-limit result before
+platform exhaustion. Participating overrides are counted and validated by an
+`EXISTS` against the same four-series, raw-observation-date,
+raw-fetched-before-cutoff cohort used by the main query. An override is neither
+missed because its vintage is outside the observation window nor counted when
+no relevant visible raw revision can join it.
 
 ### R7 — Behavioral coverage and governed cohorts
 
@@ -137,7 +146,17 @@ compile/runtime regression exercises the four-week call while the default
   regime regression was RED because the promise resolved; the runtime regime
   guard made the expanded focus GREEN at 96/96.
 - Additional route-level selected-row and endpoint work-limit sentinel
-  regressions passed, yielding the final 131-test required focus.
+  regressions passed, yielding the initial 131-test required focus.
+- Follow-up code re-review WALCL RED: 170 valid mature anchors returned `OK`,
+  but appending only the cutoff-visible 2021-04-07 release before its Wed+7
+  eligibility changed the result to `MISSING_RAW_SMOOTH_HISTORY`. GREEN:
+  freshness over the eligible anchors preserved the complete prior result
+  byte-for-byte; the full confidence file passed 31/31.
+- Follow-up code re-review override RED: with `overrideLimit: 1`, a selected
+  2024 raw observation whose vintage was `1900-01-01` allowed two matching
+  visible overrides to bypass the sentinel and the loader resolved. GREEN: the
+  relevant-raw `EXISTS` makes the same test return
+  `LIQUIDITY_WORK_LIMIT_EXCEEDED`; the full D1 file passed 12/12.
 
 No assertion was weakened and no timeout was increased to obtain GREEN.
 
@@ -165,8 +184,11 @@ No assertion was weakened and no timeout was increased to obtain GREEN.
 - `6ff2930` — `test: preserve malformed late-cutoff replay`
 - `0b7352f` — `fix: validate governed regime cohorts`
 - `d9f2391` — `test: prove dual-horizon work sentinels`
+- `5059266` — `fix: ignore immature WALCL releases`
+- `d15c468` — `fix: bound participating release overrides`
 
-This report is intentionally isolated in a final documentation-only commit.
+Report creation and follow-up updates are intentionally isolated in
+documentation-only commits.
 
 ## Fresh verification
 
@@ -178,24 +200,31 @@ command completed successfully.
 
 - Required focus:
   `npx vitest run test/dual-horizon-confidence.test.ts test/dual-horizon-db.test.ts test/worker.test.ts test/ui-assets.test.ts test/production-governance.test.ts`
-  — 5 files, 131/131 tests passed.
+  — 5 files, 133/133 tests passed.
 - `npm run test:correctness` — 5 files, 79/79 tests passed.
 - `npm run test:no-lookahead` — 4 files, 42/42 tests passed.
 - `npm run test:rebuild-consistency` — 1 file, 5/5 tests passed.
-- `npm test` (as `env -u NODE_OPTIONS npm test`) — 62 files, 858/858 tests
+- `npm test` (as `env -u NODE_OPTIONS npm test`) — 62 files, 860/860 tests
   passed.
 - `npx tsc --noEmit` (with the same environment cleanup) — passed.
 - `npm run lint` (with the same environment cleanup) — passed with zero
   warnings.
 - `git diff --check 2e1f3e3..HEAD` — passed.
 
+The first follow-up full-suite attempt ran concurrently with TypeScript and
+lint; one existing D1 snapshot test took 5.024 seconds and crossed its 5-second
+timeout without an assertion failure. The unchanged full suite was rerun alone
+and passed 860/860. No timeout or assertion was changed.
+
 ## Remaining limitations
 
 - Raw/Smooth remains the reviewed PR-11 evidence class and does not establish
   unseen out-of-sample promotion evidence. The result remains Shadow-only.
 - The AST production-governance test covers the current import surface. Its
-  possible future dynamic/re-export surface was recorded rather than broadened
-  during this correctness remediation; no current production bypass was found.
+  future-surface limitation remains: named-import tracking centers on one
+  helper, and the allowed lexical route region is not bound to the actual
+  pathname operand. This Minor was recorded rather than expanded during the two
+  requested correctness fixes; no current production bypass was found.
 - Work limits intentionally fail closed. If legitimate production revision
   density later exceeds a sentinel, changing the bound requires a separately
   governed review instead of silent truncation.
