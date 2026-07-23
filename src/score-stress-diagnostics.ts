@@ -52,12 +52,24 @@ if (sha256Hex(canonicalScoreStressProtocol(REGISTERED_SCORE_STRESS_ARTIFACT)) !=
   throw new Error('registered score/stress protocol literal mismatch; create an explicit amendment');
 }
 
+const SCORE_STRESS_PROTOCOL_AMENDMENTS = Object.freeze([Object.freeze({
+  amendmentId: 'PR16-API-STATUS-001' as const,
+  amendedAt: '2026-07-23T00:46:00Z',
+  basedOnCommit: '587f00fd5af6b489b688e8edca942b210df112c8',
+  canonicalProtocolDigest: SCORE_STRESS_PROTOCOL_DIGEST,
+  scope: 'FAIL_CLOSED_FIXED_SHAPE_API_ENUM_EXTENSION' as const,
+  addedStressEventStatuses: Object.freeze([
+    'INPUT_UNAVAILABLE', 'NO_FORMAL_PRICE_COVERAGE', 'FORMAL_INPUT_INVALID',
+  ] as const),
+})]);
+
 export const SCORE_STRESS_PROTOCOL = Object.freeze({
   protocol: 'SCORE_STRESS_DIAGNOSTICS_V1' as const,
   registeredAt: '2026-07-22T20:36:03Z',
   registrationCommit: 'd7aba3c2b5bd79cfaf7847cdc82770abb499fdcd',
   canonicalProtocolDigest: SCORE_STRESS_PROTOCOL_DIGEST,
   artifactSha256: '891f77f991ca40521639dee3ab50418999e4c3d9296e7bd675f693ee3801efa2',
+  amendments: SCORE_STRESS_PROTOCOL_AMENDMENTS,
   horizonsWeeks: Object.freeze([4, 8, 13] as const),
   outcomeToleranceDays: 14,
   alpha: .05,
@@ -376,7 +388,7 @@ export function deflatedSharpeRatio(input: {
   const variance = sharpes.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (trialCount - 1);
   if (!(variance > Number.EPSILON)) return unavailable('ZERO_TRIAL_VARIANCE');
   const gamma = .5772156649015329;
-  const expectedMaximumSharpe = mean + Math.sqrt(variance) * (
+  const expectedMaximumSharpe = Math.sqrt(variance) * (
     (1 - gamma) * inverseNormal(1 - 1 / trialCount)
     + gamma * inverseNormal(1 - 1 / (trialCount * Math.E))
   );

@@ -26,6 +26,9 @@ never substituted for the missing vector.
 The historical dimension counts are declarations from the frozen research
 records, not enumerated trial IDs. The API therefore reports 48 only as a
 conservative declared upper bound, never as an exact auditable trial count.
+Additive fail-closed API enum extensions are listed in
+`SCORE_STRESS_DIAGNOSTICS_AMENDMENTS.md` and expose their predecessor commit and
+the frozen canonical protocol digest.
 
 No threshold in this protocol can promote a challenger or alter the Champion.
 The PR-11/12 entries remain retrospective current-vintage audits and preserve

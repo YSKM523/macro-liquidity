@@ -49,6 +49,12 @@ describe('registered score/stress protocol', () => {
       canonicalProtocolDigest: '3ea92b2fc2f11745ab8f4810d9bab940f4ce4bed7892a50229822524176f38b3',
       artifactSha256: '891f77f991ca40521639dee3ab50418999e4c3d9296e7bd675f693ee3801efa2',
       horizonsWeeks: [4, 8, 13], alpha: .05,
+      amendments: [{
+        amendmentId: 'PR16-API-STATUS-001',
+        basedOnCommit: '587f00fd5af6b489b688e8edca942b210df112c8',
+        canonicalProtocolDigest: '3ea92b2fc2f11745ab8f4810d9bab940f4ce4bed7892a50229822524176f38b3',
+        addedStressEventStatuses: ['INPUT_UNAVAILABLE', 'NO_FORMAL_PRICE_COVERAGE', 'FORMAL_INPUT_INVALID'],
+      }],
     });
     expect(SCORE_STRESS_PROTOCOL.events).toHaveLength(8);
     expect(SCORE_STRESS_PROTOCOL.events.at(-1)).toMatchObject({ id: '2025_2026_RESERVE_MGMT', from: '2025-01-01', to: '2027-01-01' });
@@ -225,9 +231,9 @@ describe('multiplicity', () => {
       observedSharpe: 1.2, trialSharpes: [.2, .4, .6, .8], sampleT: 252, skewness: -.2, kurtosis: 3.5,
     });
     expect(complete.status).toBe('OK');
-    // Eq. 1 includes the trial mean (.5) plus the sample-variance interpolation (.271656945).
-    expect(complete.expectedMaximumSharpe).toBeCloseTo(.771656945, 8);
-    expect(complete.value).toBeCloseTo(.9999982474, 8);
+    // Registered DSR Equation 2 null threshold uses the variance interpolation, not the empirical trial mean.
+    expect(complete.expectedMaximumSharpe).toBeCloseTo(.271656945, 8);
+    expect(complete.value).toBeCloseTo(1, 6);
     expect(deflatedSharpeRatio({
       observedSharpe: 1.2, trialSharpes: [.2, null, .6], sampleT: 252, skewness: 0, kurtosis: 3,
     })).toEqual({ status: 'TRIAL_UNIVERSE_INCOMPLETE', value: null, expectedMaximumSharpe: null, trialCount: 3 });
