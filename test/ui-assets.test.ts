@@ -128,7 +128,7 @@ describe('static UI assets', () => {
     expect(css).toContain('.verdict.unknown');
     expect(css).toContain('.g-badge.unknown');
     expect(html).toContain('/styles.css?v=0721d');
-    expect(html).toContain('/app.js?v=0723a');
+    expect(html).toContain('/app.js?v=0723b');
   });
 
   it('renders market time separately from fetch and provider quality metadata', () => {
@@ -235,6 +235,37 @@ describe('static UI assets', () => {
       stress_events: [{ id: malicious, from: malicious, to: malicious, status: malicious,
         spxDrawdown: null, horizons: [{ n: null }] }],
       candidate_comparison: { status: malicious },
+    });
+    expect(rendered).not.toContain('<img');
+    expect(rendered).toContain('&lt;img');
+    expect(rendered).toContain('—');
+  });
+
+  it('renders the shadow liquidity-structure challenger and never presents it as Champion', () => {
+    const html = read('public/index.html');
+    const js = read('public/app.js');
+    expect(html).toContain('id="liquidity-structure-card"');
+    expect(html).toContain('LIQUIDITY_STRUCTURE_CHALLENGER_V1');
+    expect(js).toContain("fetch('/api/v1/challengers/liquidity-structure')");
+    expect(js).toContain('renderLiquidityStructureChallenger');
+    expect(js).toContain('Shadow only · Champion unchanged');
+    expect(js).toContain('TGA 冲击 / RRP 缓冲');
+    expect(js).toContain('政策阶段 WALCL');
+    expect(js).toContain('13 周 OOS IC');
+    expect(js).toContain('Beta 匹配 Sharpe 差');
+    expect(js).toContain('q10 尾部损失');
+    const start = js.indexOf('function rbFinite');
+    const end = js.indexOf('async function fetchLiquidityStructureChallenger');
+    expect(end).toBeGreaterThan(start);
+    const render = new Function(`${js.slice(start, end)}; return renderLiquidityStructureChallenger;`)() as (value: unknown) => string;
+    const malicious = '<img src=x onerror=globalThis.pwned=true>';
+    const rendered = render({
+      status: malicious, reason: malicious, mode: malicious,
+      tga_buffer: { status: malicious, bufferState: malicious },
+      policy_regime: { status: malicious, regime: malicious },
+      walcl_policy: { status: malicious, score: null },
+      weight_benchmarks: { status: malicious, equal8: null, current8: null, blend8: null },
+      formal_ablation_evaluation: { status: malicious, reason: malicious, arms: {} },
     });
     expect(rendered).not.toContain('<img');
     expect(rendered).toContain('&lt;img');
