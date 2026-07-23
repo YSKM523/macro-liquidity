@@ -77,11 +77,14 @@ Migration `0008` is additive: new PIT staging/raw/calendar/versioned-override/en
 Before any separately authorized deployment, revert the local PR-08 commits and rebuild:
 
 ```bash
-git revert --no-commit e415f5d..HEAD
+git revert --no-commit e415f5d..37fd6c4
 git commit -m "revert: remove PR-08 point-in-time storage"
 env -u NODE_OPTIONS npm test
 env -u NODE_OPTIONS npx tsc --noEmit
 ```
+
+The immutable range stops at the reviewed PR-08 head `37fd6c4`; later PRs are
+outside this rollback.
 
 After a migration has been applied in an environment, code rollback can safely ignore additive tables/columns. Dropping append-only PIT data is intentionally not automated; any schema/data removal requires a separately reviewed backup-and-restore migration.
 

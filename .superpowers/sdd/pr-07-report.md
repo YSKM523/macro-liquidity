@@ -152,13 +152,16 @@ No schema or migration file was added. Local migration execution is therefore no
 This PR has no schema rollback. Revert the local PR-07 commits, rebuild, and redeploy only through a separately authorized release process:
 
 ```bash
-git revert --no-commit 732880e..HEAD
+git revert --no-commit 732880e..e415f5d
 git commit -m "revert: remove PR-07 provider fallback"
 env -u NODE_OPTIONS npm test
 env -u NODE_OPTIONS npx tsc --noEmit
 ```
 
-At the final reviewed HEAD, the substantive reverse order is the report-only HEAD, `0c19c12`, `ba29492`, `9dec8fb`, `099c579`, then `28af59c`; the base-to-HEAD range is the authoritative rollback scope and avoids a self-referential hash for this report commit.
+The immutable PR-07 rollback range is `732880e..e415f5d`; it does not expand
+when later PRs advance the branch. Git reverts that range newest first,
+including the final PR-07 documentation commit and all implementation/review
+fixes through `28af59c`.
 
 Reverting restores the pre-PR-07 Yahoo/Stooq numeric API behavior. No database cleanup or data restoration is needed because PR-07 writes no provider data and adds no migration.
 

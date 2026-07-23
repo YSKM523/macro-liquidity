@@ -22,7 +22,7 @@
 | PR-10 | 已完成（本地） | `52b551a`–`a3c4262` | dashboard tiers、冻结快照 VIX stress proxy、同窗公平基准与尾部指标已实现；31 files / 551 tests、TypeScript、migration twice 已通过，双重复审 Ready（0 Critical / 0 Important），cache-bust focused 17/17 |
 | PR-11 | 已完成（本地） | `276eeb5`–`29c0094` | Raw/Smooth 连续净流动性、prior-only MAD、固定 OOS 评估与 schema-v2 FRED snapshot 已实现；结论 `INCONCLUSIVE` / `DROP_RESEARCH`，replacementEligible=false；40 files / 604 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor），Champion 不变 |
 | PR-12 | 已完成（本地） | `7f64d10`–`54daf01` | 动态准备金 prior-only challenger、独立 freshness/state/OOS 与 schema-v2 双源 artifact；32 files / 640 tests、TypeScript、migration twice 已通过，task/spec 与 whole-branch rereview 均 Ready（0 Critical / 0 Important / 0 Minor）；结论 `DROP_RESEARCH`，replacementEligible=false，Champion 不变 |
-| PR-13 | 已完成（本地） | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；未部署 |
+| PR-13 | 已完成（本地） | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；固定范围独立复审 Ready（0 Critical / 0 Important / 0 Minor）；未部署 |
 | PR-14 | 已完成（本地） | `3638c55`–`780e125` | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，双重复审 Ready；Champion 不变，未部署 |
 | PR-15 | 已完成（本地） | `710bb30`–`b79aab3` | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 759 tests、focused 103、双重复审 Ready；未部署、未修改远程数据库 |
 | PR-16 | 已完成（本地） | `d7aba3c`–`d0f59cd` | 共享正式 4/8/13 周 outcome、七个分数桶、冻结 ledger 与前序绑定修订、BH-FDR/DSR fail-closed、八个压力事件及固定形状 v1 API/UI；58 files / 777 tests、TypeScript、lint、迁移幂等与 dry-run 通过，双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion、PR-11/12 决策及数据库均不变，未部署 |
@@ -1806,7 +1806,7 @@ feat: point-in-time observation storage
 
 PR-08 已知限制：ALFRED 历史只提供 vintage 日期时仍使用保守日末发布时间；默认 next-weekday 规则尚未覆盖美股假日。resolver 不再保留全部 frame，但当前服务仍一次加载并排序 cutoff-visible PIT 行；stored timing 异常检查只返回至多一条坏行，不再额外物化全表。`snapshot_inputs` 仅是 endpoint audit index，不应被解释为全部评分行 manifest。这些限制留给 PR-09 的交易日历/执行引擎或独立的流式数据库读取改造，不在 PR-08 扩展模型公式、权重或阈值。
 
-PR-08 回滚：完整本地 PR 使用 `git revert --no-commit e415f5d..HEAD` 后创建单独 revert commit；仅本地验证库可删除对应 `--persist-to` 临时目录后从 0001 重建。0008 尚未应用远程数据库；若未来已远程应用，不应回写或删除 append-only PIT 数据或移除冻结保护，应先停止新写入并以向前 migration 恢复兼容结构。
+PR-08 回滚：完整本地 PR 使用固定范围 `git revert --no-commit e415f5d..37fd6c4` 后创建单独 revert commit；不得使用会随当前分支前进而扩大的动态 HEAD 终点。仅本地验证库可删除对应 `--persist-to` 临时目录后从 0001 重建。0008 尚未应用远程数据库；若未来已远程应用，不应回写或删除 append-only PIT 数据或移除冻结保护，应先停止新写入并以向前 migration 恢复兼容结构。
 
 ---
 
@@ -1918,12 +1918,21 @@ feat: model versioning, CI, staging, observability and backup
 
 内容：
 
-- config hash
-- commit sha
-- CI
-- logs
-- alert
-- backup
+- [x] 完整 Champion descriptor、确定性 config hash 与经过校验的 commit SHA
+- [x] v1 schema/API、精确 `as_of` replay provenance 与安全 JSON/CSV export
+- [x] 真实 TypeScript/lint/test/迁移/恢复/deploy-dry CI 门禁和三环境配置
+- [x] 结构化脱敏日志、SLO、管理审计、原子限流与可注入告警
+- [x] fail-closed stale-while-revalidate cache 与 bounded circuit breaker
+- [x] dry-run 默认备份、全 schema 双 D1 恢复演练、Model Card、runbook 与 Challenger registry
+- [x] independent whole-range rereview `29e84a3..2eb70ce`：Ready，0 Critical / 0 Important / 0 Minor
+
+PR-13 已知限制：staging D1 仍是明确 placeholder；真实 staging/production
+部署、远程日志检索、真实告警接收方和生产备份恢复均需要单独明确授权，
+本地 dry-run/fixture 不冒充这些外部验证。
+
+PR-13 回滚：固定代码范围为 `29e84a3..2eb70ce`。0010 为 additive
+migration；若未来已远程应用，不删除列、表或审计行，应回退应用行为或以
+forward migration 停用。当前未部署，因此没有生产回滚动作。
 
 ---
 

@@ -219,6 +219,32 @@ describe('production governance configuration', () => {
     expect(pkg.scripts['deploy:dry']).toMatch(/--dry-run.*--env staging/);
   });
 
+  it('pins completed PR rollback commands to immutable commit endpoints', () => {
+    const rollbackDocs = [
+      '.superpowers/sdd/pr-07-report.md',
+      '.superpowers/sdd/pr-08-report.md',
+      'public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md',
+    ];
+    for (const path of rollbackDocs) {
+      expect(read(path), path).not.toMatch(/git revert[^\n]*\.\.HEAD/);
+    }
+    expect(read('.superpowers/sdd/pr-07-report.md')).toContain('732880e..e415f5d');
+    expect(read('.superpowers/sdd/pr-08-report.md')).toContain('e415f5d..37fd6c4');
+  });
+
+  it('records the completed PR-13 independent review consistently', () => {
+    const report = read('docs/pr-reports/PR-13.md');
+    expect(report).not.toMatch(/independent re-review pending/i);
+    expect(report).toContain('29e84a3..2eb70ce');
+    expect(report).toContain('0 Critical / 0 Important / 0 Minor');
+
+    const plan = read('public/md/CODEX_PROFESSIONAL_UPGRADE_PLAN.md');
+    expect(plan).toMatch(/PR-13[\s\S]*?\[x\].*independent whole-range rereview/i);
+
+    const changelog = read('CHANGELOG.md');
+    expect(changelog).toMatch(/PR-13[\s\S]*?29e84a3\.\.2eb70ce[\s\S]*?0 Critical \/ 0 Important \/ 0 Minor/i);
+  });
+
   it('keeps dev/staging/production D1 bindings explicit and staging unmistakably unconfigured', () => {
     const config = read('wrangler.toml');
     expect(config).toContain('[env.dev]');
