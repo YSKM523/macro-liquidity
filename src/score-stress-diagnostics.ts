@@ -56,7 +56,8 @@ export const SCORE_STRESS_PROTOCOL = Object.freeze({
   protocol: 'SCORE_STRESS_DIAGNOSTICS_V1' as const,
   registeredAt: '2026-07-22T20:36:03Z',
   registrationCommit: 'd7aba3c2b5bd79cfaf7847cdc82770abb499fdcd',
-  protocolDigest: SCORE_STRESS_PROTOCOL_DIGEST,
+  canonicalProtocolDigest: SCORE_STRESS_PROTOCOL_DIGEST,
+  artifactSha256: '891f77f991ca40521639dee3ab50418999e4c3d9296e7bd675f693ee3801efa2',
   horizonsWeeks: Object.freeze([4, 8, 13] as const),
   outcomeToleranceDays: 14,
   alpha: .05,
@@ -147,30 +148,14 @@ export interface BhInput { hypothesisId: string; family: string; pValue: number 
 
 export interface HypothesisLedgerEntry {
   hypothesisId: string;
-  candidateId: string;
-  evidenceClass: string;
   family: string;
-  direction: string;
-  windows: string[];
-  trialDimensions: {
-    directionCount: number;
-    windowCount: number;
-    parameterSpecificationCount: number;
-  };
-  canonicalParameters: Record<string, unknown>;
-  parameterHash: string;
-  primaryMetric: string;
+  lifecycle: string;
+  declaredDirectionCount: number;
+  declaredWindowCount: number;
+  declaredParameterCount: number;
   pValue: number | null;
-  pValueSource: string;
   formalDailySharpe: number | null;
-  preregisteredThreshold: Record<string, unknown>;
-  registeredAt: string;
-  registrationCommit: string;
-  registrationClass: 'PREREGISTERED' | 'RETROSPECTIVE_REVIEW_AMENDMENT';
-  resultsVisibleAtRegistration: boolean;
-  originalPreregistrationCommit: string | null;
-  status: string;
-  supersedes: string | null;
+  reason: string;
 }
 
 export interface HypothesisLedger {
@@ -179,6 +164,27 @@ export interface HypothesisLedger {
   registeredAt: string;
   registrationCommit: string;
   entries: HypothesisLedgerEntry[];
+  candidateIds: string[];
+}
+
+interface LedgerInterpretationEntry {
+  hypothesisId: string;
+  candidateId: string;
+  registrationClass: 'PREREGISTERED' | 'RETROSPECTIVE_REVIEW_AMENDMENT';
+  resultsVisibleAtRegistration: boolean;
+  registeredAt: string;
+  registrationCommit: string;
+  supersedes?: string;
+}
+
+interface LedgerInterpretation {
+  schemaVersion: 'HYPOTHESIS_LEDGER_INTERPRETATION_V1';
+  amendmentId: string;
+  amendedAt: string;
+  basedOnCommit: string;
+  baseLedgerArtifactSha256: string;
+  trialUniverseStatus: 'DECLARED_UPPER_BOUND_NOT_ENUMERATED';
+  entries: LedgerInterpretationEntry[];
 }
 
 function canonicalize(value: unknown): unknown {
@@ -191,102 +197,96 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function canonicalParameterHash(value: unknown): string {
-  return sha256Hex(JSON.stringify(canonicalize(value)));
-}
-
 function requiredString(value: unknown, field: string): asserts value is string {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`invalid hypothesis ledger ${field}`);
 }
 
-export function validateHypothesisLedger(value: unknown): HypothesisLedger {
+const FROZEN_LEDGER_SEMANTIC_DIGEST = '573350572d9c73b029b7122465b2bcaf380f3c38e7d39ecee5a833e6a3324e3e';
+const FROZEN_LEDGER_ARTIFACT_SHA256 = 'fb3f32d8c783294a7c4f7302fab24f7369bb20bcb9808c189bc23843c9f6ee0d';
+const LEDGER_INTERPRETATION_SEMANTIC_DIGEST = '5164ca5c102bdf2b63deb66ade62229703439d65de016bfce2c7d0e47581a407';
+
+export function validateHypothesisLedger(value: unknown, interpretationValue: unknown): HypothesisLedger {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid hypothesis ledger');
   const ledger = value as Record<string, unknown>;
-  if (ledger.schemaVersion !== 'HYPOTHESIS_LEDGER_V1' || ledger.appendOnly !== true
+  if (ledger.schema_version !== 'HYPOTHESIS_LEDGER_V1' || ledger.append_only !== true
     || !Array.isArray(ledger.entries)) throw new Error('invalid hypothesis ledger header');
-  requiredString(ledger.registeredAt, 'registeredAt');
-  requiredString(ledger.registrationCommit, 'registrationCommit');
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(ledger.registeredAt)
-    || !/^[a-f0-9]{40}$/.test(ledger.registrationCommit)) throw new Error('invalid hypothesis ledger registration');
+  if (sha256Hex(JSON.stringify(canonicalize(value))) !== FROZEN_LEDGER_SEMANTIC_DIGEST) {
+    throw new Error('frozen ledger semantic mutation; append a separate interpretation amendment');
+  }
+  requiredString(ledger.registered_at, 'registered_at');
+  requiredString(ledger.registration_commit, 'registration_commit');
   const ids = new Set<string>();
-  const hashes = new Set<string>();
   const entries = ledger.entries.map((raw, index): HypothesisLedgerEntry => {
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`invalid hypothesis entry ${index}`);
     const entry = raw as Record<string, unknown>;
-    for (const field of ['hypothesisId', 'candidateId', 'evidenceClass', 'family', 'direction', 'parameterHash',
-      'primaryMetric', 'pValueSource', 'registeredAt', 'registrationCommit', 'registrationClass', 'status']) requiredString(entry[field], field);
-    if (ids.has(entry.hypothesisId as string)) throw new Error(`duplicate hypothesis id: ${entry.hypothesisId}`);
-    ids.add(entry.hypothesisId as string);
-    if (!Array.isArray(entry.windows) || entry.windows.length === 0
-      || entry.windows.some(window => typeof window !== 'string' || window.length === 0)) throw new Error('invalid hypothesis windows');
-    if (entry.trialDimensions == null || typeof entry.trialDimensions !== 'object'
-      || Array.isArray(entry.trialDimensions)) throw new Error('invalid trial dimensions');
-    const dimensions = entry.trialDimensions as Record<string, unknown>;
-    for (const field of ['directionCount', 'windowCount', 'parameterSpecificationCount']) {
-      if (!Number.isInteger(dimensions[field]) || (dimensions[field] as number) < 1) {
-        throw new Error(`invalid trial dimension ${field}`);
-      }
+    for (const field of ['hypothesis_id', 'family', 'lifecycle', 'reason']) requiredString(entry[field], field);
+    if (ids.has(entry.hypothesis_id as string)) throw new Error(`duplicate hypothesis id: ${entry.hypothesis_id}`);
+    ids.add(entry.hypothesis_id as string);
+    for (const field of ['direction_count', 'window_count', 'parameter_count']) {
+      if (!Number.isInteger(entry[field]) || (entry[field] as number) < 1) throw new Error(`invalid declared ${field}`);
     }
-    if (entry.canonicalParameters == null || typeof entry.canonicalParameters !== 'object'
-      || Array.isArray(entry.canonicalParameters)) throw new Error('invalid canonical parameters');
-    if (canonicalParameterHash(entry.canonicalParameters) !== entry.parameterHash) {
-      throw new Error(`parameter hash mismatch: ${entry.hypothesisId}`);
-    }
-    const familyHash = `${entry.family}|${entry.parameterHash}`;
-    if (hashes.has(familyHash)) throw new Error(`duplicate parameter hash in family: ${entry.family}`);
-    hashes.add(familyHash);
-    if (entry.pValue != null && (typeof entry.pValue !== 'number' || !Number.isFinite(entry.pValue)
-      || entry.pValue < 0 || entry.pValue > 1)) throw new Error('invalid hypothesis p-value');
-    if (entry.pValue == null && entry.pValueSource !== 'NOT_AVAILABLE') throw new Error('missing p-value source must be NOT_AVAILABLE');
-    if (entry.formalDailySharpe != null && (typeof entry.formalDailySharpe !== 'number'
-      || !Number.isFinite(entry.formalDailySharpe))) throw new Error('invalid formal daily Sharpe');
-    if (entry.preregisteredThreshold == null || typeof entry.preregisteredThreshold !== 'object'
-      || Array.isArray(entry.preregisteredThreshold)) throw new Error('invalid preregistered threshold');
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(entry.registeredAt as string)
-      || !/^[a-f0-9]{40}$/.test(entry.registrationCommit as string)) throw new Error('invalid hypothesis registration');
-    if (entry.registrationClass !== 'PREREGISTERED'
-      && entry.registrationClass !== 'RETROSPECTIVE_REVIEW_AMENDMENT') throw new Error('invalid registration class');
-    if (typeof entry.resultsVisibleAtRegistration !== 'boolean') throw new Error('invalid result visibility');
-    if ((entry.registrationClass === 'PREREGISTERED') === entry.resultsVisibleAtRegistration) {
-      throw new Error('inconsistent result visibility chronology');
-    }
-    if (entry.originalPreregistrationCommit != null
-      && (typeof entry.originalPreregistrationCommit !== 'string'
-        || !/^[a-f0-9]{40}$/.test(entry.originalPreregistrationCommit))) {
-      throw new Error('invalid original preregistration commit');
-    }
-    if (entry.registrationClass === 'RETROSPECTIVE_REVIEW_AMENDMENT'
-      && entry.originalPreregistrationCommit == null) throw new Error('retrospective amendment requires original preregistration');
-    if (entry.supersedes != null && typeof entry.supersedes !== 'string') throw new Error('invalid supersedes');
-    if (entry.supersedes != null && !ids.has(entry.supersedes)) throw new Error(`supersedes unknown or later hypothesis: ${entry.supersedes}`);
-    return entry as unknown as HypothesisLedgerEntry;
+    if (entry.p_value != null || entry.formal_daily_sharpe != null) throw new Error('frozen ledger result fields changed');
+    return {
+      hypothesisId: entry.hypothesis_id as string, family: entry.family as string,
+      lifecycle: entry.lifecycle as string, declaredDirectionCount: entry.direction_count as number,
+      declaredWindowCount: entry.window_count as number, declaredParameterCount: entry.parameter_count as number,
+      pValue: null, formalDailySharpe: null, reason: entry.reason as string,
+    };
   });
+  if (interpretationValue == null || typeof interpretationValue !== 'object' || Array.isArray(interpretationValue)) {
+    throw new Error('invalid ledger interpretation amendment');
+  }
+  const interpretation = interpretationValue as unknown as LedgerInterpretation;
+  if (sha256Hex(JSON.stringify(canonicalize(interpretationValue))) !== LEDGER_INTERPRETATION_SEMANTIC_DIGEST
+    || interpretation.schemaVersion !== 'HYPOTHESIS_LEDGER_INTERPRETATION_V1'
+    || interpretation.trialUniverseStatus !== 'DECLARED_UPPER_BOUND_NOT_ENUMERATED'
+    || interpretation.baseLedgerArtifactSha256 !== FROZEN_LEDGER_ARTIFACT_SHA256
+    || !Array.isArray(interpretation.entries)) throw new Error('ledger interpretation predecessor mismatch');
+  requiredString(interpretation.amendmentId, 'amendmentId');
+  requiredString(interpretation.amendedAt, 'amendedAt');
+  if (!/^[a-f0-9]{40}$/.test(interpretation.basedOnCommit)) throw new Error('invalid interpretation base commit');
+  if (interpretation.entries.length !== entries.length) throw new Error('ledger interpretation coverage mismatch');
+  const interpretedIds = new Set<string>();
+  const candidateIds: string[] = [];
+  for (const entry of interpretation.entries) {
+    if (!ids.has(entry.hypothesisId) || interpretedIds.has(entry.hypothesisId)) throw new Error('invalid interpreted hypothesis id');
+    interpretedIds.add(entry.hypothesisId);
+    requiredString(entry.candidateId, 'candidateId');
+    requiredString(entry.registeredAt, 'registeredAt');
+    requiredString(entry.registrationCommit, 'registrationCommit');
+    if ((entry.registrationClass === 'PREREGISTERED') === entry.resultsVisibleAtRegistration) {
+      throw new Error('inconsistent interpretation chronology');
+    }
+    if (entry.supersedes != null && !interpretedIds.has(entry.supersedes)) throw new Error('invalid interpretation supersession');
+    candidateIds.push(entry.candidateId);
+  }
   return { schemaVersion: 'HYPOTHESIS_LEDGER_V1', appendOnly: true,
-    registeredAt: ledger.registeredAt, registrationCommit: ledger.registrationCommit, entries };
+    registeredAt: ledger.registered_at, registrationCommit: ledger.registration_commit, entries, candidateIds };
 }
 
 export function summarizeHypothesisLedger(ledger: HypothesisLedger) {
-  const candidates = new Set(ledger.entries.map(entry => entry.candidateId));
   const dimensions = ledger.entries.map(entry => ({
     entry,
-    trials: entry.trialDimensions.directionCount * entry.trialDimensions.windowCount
-      * entry.trialDimensions.parameterSpecificationCount,
+    trials: entry.declaredDirectionCount * entry.declaredWindowCount * entry.declaredParameterCount,
   }));
   const families = [...new Set(ledger.entries.map(entry => entry.family))].sort().map(family => {
     const rows = dimensions.filter(row => row.entry.family === family);
     const trialCount = rows.reduce((sum, row) => sum + row.trials, 0);
-    // These historical artifacts have no primary-metric p-value. Every enumerated
-    // trial therefore enters the retrospective family conservatively as p=1.
-    return { family, trialCount, rejectedCount: 0, effectiveMissingPValue: 1, minimumAdjustedP: 1 };
+    return { family, exactTrialCount: null, declaredUpperBoundTrialCount: trialCount,
+      rejectedCount: null, effectiveMissingPValue: null, minimumAdjustedP: null };
   });
   return {
     status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT' as const,
+    trialUniverseStatus: 'DECLARED_UPPER_BOUND_NOT_ENUMERATED' as const,
     prospectiveGateApplied: false,
-    candidateCount: candidates.size,
-    directionSpecificationCount: ledger.entries.reduce((sum, entry) => sum + entry.trialDimensions.directionCount, 0),
-    windowSpecificationCount: ledger.entries.reduce((sum, entry) => sum + entry.trialDimensions.windowCount, 0),
-    parameterSpecificationCount: ledger.entries.reduce((sum, entry) => sum + entry.trialDimensions.parameterSpecificationCount, 0),
-    totalTrialCount: dimensions.reduce((sum, row) => sum + row.trials, 0),
+    candidateCount: new Set(ledger.candidateIds).size,
+    exactTrialCount: null,
+    declaredUpperBoundCounts: {
+      directionSpecifications: ledger.entries.reduce((sum, entry) => sum + entry.declaredDirectionCount, 0),
+      windows: ledger.entries.reduce((sum, entry) => sum + entry.declaredWindowCount, 0),
+      parameterSpecifications: ledger.entries.reduce((sum, entry) => sum + entry.declaredParameterCount, 0),
+      trials: dimensions.reduce((sum, row) => sum + row.trials, 0),
+    },
     families,
     dsr: {
       status: 'NOT_APPLICABLE_CURRENT_VINTAGE_RESEARCH' as const,
@@ -376,7 +376,7 @@ export function deflatedSharpeRatio(input: {
   const variance = sharpes.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (trialCount - 1);
   if (!(variance > Number.EPSILON)) return unavailable('ZERO_TRIAL_VARIANCE');
   const gamma = .5772156649015329;
-  const expectedMaximumSharpe = Math.sqrt(variance) * (
+  const expectedMaximumSharpe = mean + Math.sqrt(variance) * (
     (1 - gamma) * inverseNormal(1 - 1 / trialCount)
     + gamma * inverseNormal(1 - 1 / (trialCount * Math.E))
   );
@@ -449,4 +449,16 @@ export function evaluateStressEvents(
       worstEpisodeDrawdown: okRows.length === 0 ? null : Math.min(...okRows.map(row => row.worstDrawdown!)),
     };
   });
+}
+
+export type StressEventUnavailableStatus = 'INPUT_UNAVAILABLE' | 'NO_FORMAL_SIGNAL_COVERAGE'
+  | 'NON_PIT_PRICE_COVERAGE' | 'NO_FORMAL_PRICE_COVERAGE' | 'FORMAL_INPUT_INVALID';
+
+export function buildUnavailableStressEvents(status: StressEventUnavailableStatus) {
+  return SCORE_STRESS_PROTOCOL.events.map(event => ({
+    ...event,
+    status,
+    outcomeCount: 0,
+    candidateComparison: { status: 'CANDIDATE_NOT_PROVIDED' as const, candidate: null },
+  }));
 }

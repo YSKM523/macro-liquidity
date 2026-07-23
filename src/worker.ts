@@ -36,11 +36,13 @@ import {
   SCORE_STRESS_PROTOCOL,
   buildFormalOutcomes,
   buildScoreBuckets,
+  buildUnavailableStressEvents,
   evaluateStressEvents,
   summarizeHypothesisLedger,
   validateHypothesisLedger,
 } from './score-stress-diagnostics';
 import scoreStressLedgerArtifact from '../docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json';
+import scoreStressLedgerInterpretation from '../docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER_INTERPRETATION.json';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
 import {
@@ -355,11 +357,18 @@ export default {
     }
     if (p === '/api/v1/diagnostics') {
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
-      const multipleTesting = summarizeHypothesisLedger(validateHypothesisLedger(scoreStressLedgerArtifact));
-      const unavailable = (reason: string, detail: string | null = null) => json({
-        api_version: 'v1', status: 'DATA_INCOMPLETE', reason, detail,
-        as_of_cutoff: requestedAsOf ?? null, protocol: SCORE_STRESS_PROTOCOL,
-        score_buckets: [], stress_events: [], multiple_testing: multipleTesting,
+      const multipleTesting = summarizeHypothesisLedger(validateHypothesisLedger(
+        scoreStressLedgerArtifact, scoreStressLedgerInterpretation,
+      ));
+      const unavailable = (
+        reason: string,
+        eventStatus: Parameters<typeof buildUnavailableStressEvents>[0] = 'INPUT_UNAVAILABLE',
+        asOfCutoff: string | null = requestedAsOf ?? null,
+      ) => json({
+        api_version: 'v1', status: 'DATA_INCOMPLETE', reason,
+        as_of_cutoff: asOfCutoff, protocol: SCORE_STRESS_PROTOCOL,
+        score_buckets: buildScoreBuckets([]), stress_events: buildUnavailableStressEvents(eventStatus),
+        multiple_testing: multipleTesting,
         formal_dsr: {
           status: 'TRIAL_UNIVERSE_INCOMPLETE', value: null,
           reason: 'NO_COMPLETE_FORMAL_DAILY_NET_RETURN_TRIAL_VECTOR',
@@ -374,7 +383,19 @@ export default {
         if (/^(?:invalid|future) backtest as_of$/i.test(message)) {
           return errorJson(requestId, 'invalid_as_of', 'INVALID_AS_OF', 400);
         }
-        return unavailable('EVENT_INPUT_LOAD_FAILED', message);
+        structuredLog('diagnostics_failure', {
+          request_id: requestId, reason: 'EVENT_INPUT_LOAD_FAILED', error: message,
+        }, console.error);
+        return unavailable('EVENT_INPUT_LOAD_FAILED');
+      }
+      if (eventInputs.signals.length === 0) {
+        return unavailable('NO_FORMAL_SIGNAL_COVERAGE', 'NO_FORMAL_SIGNAL_COVERAGE', eventInputs.asOfCutoff ?? null);
+      }
+      if (eventInputs.prices.length === 0) {
+        return unavailable('NO_FORMAL_PRICE_COVERAGE', 'NO_FORMAL_PRICE_COVERAGE', eventInputs.asOfCutoff ?? null);
+      }
+      if (eventInputs.prices.some(price => price.provenanceStatus !== 'PIT_RAW')) {
+        return unavailable('NON_PIT_PRICE_COVERAGE', 'NON_PIT_PRICE_COVERAGE', eventInputs.asOfCutoff ?? null);
       }
       try {
         const outcomes = buildFormalOutcomes(eventInputs);
@@ -406,7 +427,11 @@ export default {
           candidate_comparison: { status: 'CANDIDATE_NOT_PROVIDED', candidate: null },
         });
       } catch (error) {
-        return unavailable('FORMAL_INPUT_INVALID', String((error as Error)?.message ?? error));
+        structuredLog('diagnostics_failure', {
+          request_id: requestId, reason: 'FORMAL_INPUT_INVALID',
+          error: String((error as Error)?.message ?? error),
+        }, console.error);
+        return unavailable('FORMAL_INPUT_INVALID', 'FORMAL_INPUT_INVALID', eventInputs.asOfCutoff ?? null);
       }
     }
     if (p === '/api/backtest' || p === '/api/v1/backtest') {

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "HYPOTHESIS_LEDGER_INTERPRETATION_V1",
+  "amendmentId": "PR16_LEDGER_INTERPRETATION_20260723",
+  "amendedAt": "2026-07-23T00:38:00Z",
+  "basedOnCommit": "1a780467873d5ee749fddd048eefd3d198528e22",
+  "baseLedgerArtifactSha256": "fb3f32d8c783294a7c4f7302fab24f7369bb20bcb9808c189bc23843c9f6ee0d",
+  "trialUniverseStatus": "DECLARED_UPPER_BOUND_NOT_ENUMERATED",
+  "entries": [
+    {
+      "hypothesisId": "NETLIQ_CHALLENGER_V1",
+      "candidateId": "net-liquidity-raw-smooth-agreement-v1",
+      "registrationClass": "PREREGISTERED",
+      "resultsVisibleAtRegistration": false,
+      "registeredAt": "2026-07-22T15:07:40Z",
+      "registrationCommit": "0b120a47551f6fbe49a669fd5e41da6c5e6308b8"
+    },
+    {
+      "hypothesisId": "NETLIQ_CHALLENGER_V2",
+      "candidateId": "net-liquidity-raw-smooth-agreement-v2",
+      "registrationClass": "RETROSPECTIVE_REVIEW_AMENDMENT",
+      "resultsVisibleAtRegistration": true,
+      "registeredAt": "2026-07-22T15:47:45Z",
+      "registrationCommit": "29c009486901c3d064adf569059cd77d00f33560",
+      "supersedes": "NETLIQ_CHALLENGER_V1"
+    },
+    {
+      "hypothesisId": "RESERVE_ADEQUACY_V1",
+      "candidateId": "reserve-adequacy-v1",
+      "registrationClass": "PREREGISTERED",
+      "resultsVisibleAtRegistration": false,
+      "registeredAt": "2026-07-22T15:59:04Z",
+      "registrationCommit": "7f64d10a8e3b7d07bf1288a7dd6e0d12119bc6ca"
+    },
+    {
+      "hypothesisId": "RESERVE_ADEQUACY_V2",
+      "candidateId": "reserve-adequacy-v2",
+      "registrationClass": "RETROSPECTIVE_REVIEW_AMENDMENT",
+      "resultsVisibleAtRegistration": true,
+      "registeredAt": "2026-07-22T16:18:50Z",
+      "registrationCommit": "79ac0d6bb51e7b790660b2ada92aa9d9682edf56",
+      "supersedes": "RESERVE_ADEQUACY_V1"
+    }
+  ]
+}

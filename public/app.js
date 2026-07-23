@@ -732,9 +732,12 @@ function renderScoreStressDiagnostics(result) {
 
   const multiple = result.multiple_testing || {};
   const dsr = result.formal_dsr || multiple.dsr || {};
+  const declaredTrials = multiple.declaredUpperBoundCounts?.trials;
+  const trialDisplay = multiple.exactTrialCount == null
+    ? `${rbCount(declaredTrials)}（声明上界，未枚举）` : rbCount(multiple.exactTrialCount);
   const multipleBlock = `<div class="rb-sub">多重检验与 DSR</div>`
     + `<div class="rb-stat"><span class="k">审计状态</span><span class="v">${rbEsc(multiple.status || '—')}</span></div>`
-    + `<div class="rb-stat"><span class="k">候选 / 总 trial</span><span class="v">${rbCount(multiple.candidateCount)} / ${rbCount(multiple.totalTrialCount)}</span></div>`
+    + `<div class="rb-stat"><span class="k">候选 / trial</span><span class="v">${rbCount(multiple.candidateCount)} / ${rbEsc(trialDisplay)}</span></div>`
     + `<div class="rb-stat"><span class="k">Deflated Sharpe</span><span class="v">${rbEsc(dsr.status || '—')} · ${nullable(dsr.value, 3)}</span></div>`
     + `<p class="rb-note">${rbEsc(dsr.reason || '没有完整正式日频 trial universe，不计算数值。')}</p>`;
 

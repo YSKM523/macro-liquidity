@@ -18,6 +18,7 @@ import {
   summarizeHypothesisLedger,
   validateHypothesisLedger,
 } from '../src/score-stress-diagnostics';
+import ledgerInterpretationArtifact from '../docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER_INTERPRETATION.json';
 
 function formalInput(): EventBacktestInputs {
   const priceDates = Array.from({ length: 130 }, (_, index) => addDays('2024-01-05', index));
@@ -45,14 +46,17 @@ describe('registered score/stress protocol', () => {
       protocol: 'SCORE_STRESS_DIAGNOSTICS_V1',
       registeredAt: '2026-07-22T20:36:03Z',
       registrationCommit: 'd7aba3c2b5bd79cfaf7847cdc82770abb499fdcd',
-      protocolDigest: '3ea92b2fc2f11745ab8f4810d9bab940f4ce4bed7892a50229822524176f38b3',
+      canonicalProtocolDigest: '3ea92b2fc2f11745ab8f4810d9bab940f4ce4bed7892a50229822524176f38b3',
+      artifactSha256: '891f77f991ca40521639dee3ab50418999e4c3d9296e7bd675f693ee3801efa2',
       horizonsWeeks: [4, 8, 13], alpha: .05,
     });
     expect(SCORE_STRESS_PROTOCOL.events).toHaveLength(8);
     expect(SCORE_STRESS_PROTOCOL.events.at(-1)).toMatchObject({ id: '2025_2026_RESERVE_MGMT', from: '2025-01-01', to: '2027-01-01' });
     const artifact = JSON.parse(readFileSync('docs/research/SCORE_STRESS_DIAGNOSTICS_PROTOCOL.json', 'utf8'));
     expect(createHash('sha256').update(canonicalScoreStressProtocol(artifact)).digest('hex'))
-      .toBe(SCORE_STRESS_PROTOCOL.protocolDigest);
+      .toBe(SCORE_STRESS_PROTOCOL.canonicalProtocolDigest);
+    expect(createHash('sha256').update(readFileSync('docs/research/SCORE_STRESS_DIAGNOSTICS_PROTOCOL.json')).digest('hex'))
+      .toBe(SCORE_STRESS_PROTOCOL.artifactSha256);
   });
 });
 
@@ -161,53 +165,44 @@ describe('score buckets', () => {
 
 describe('multiplicity', () => {
   it('validates the append-only ledger full schema, canonical hashes, and supersession graph', () => {
-    const ledger = JSON.parse(readFileSync('docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json', 'utf8'));
-    const validated = validateHypothesisLedger(ledger);
+    const ledgerText = readFileSync('docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json', 'utf8');
+    expect(createHash('sha256').update(ledgerText).digest('hex'))
+      .toBe('fb3f32d8c783294a7c4f7302fab24f7369bb20bcb9808c189bc23843c9f6ee0d');
+    const validated = validateHypothesisLedger(JSON.parse(ledgerText), ledgerInterpretationArtifact);
     expect(validated.entries).toHaveLength(4);
     expect(validated.entries[0]).toEqual(expect.objectContaining({
-      hypothesisId: expect.any(String), candidateId: expect.any(String), evidenceClass: expect.any(String),
-      direction: expect.any(String), windows: expect.any(Array), canonicalParameters: expect.any(Object),
-      parameterHash: expect.stringMatching(/^[a-f0-9]{64}$/), primaryMetric: expect.any(String),
-      pValue: null, pValueSource: 'NOT_AVAILABLE', formalDailySharpe: null,
-      preregisteredThreshold: expect.any(Object), registeredAt: expect.any(String),
-      registrationCommit: expect.stringMatching(/^[a-f0-9]{40}$/), status: expect.any(String), supersedes: null,
+      hypothesisId: 'NETLIQ_CHALLENGER_V1', family: 'NET_LIQUIDITY_CHALLENGER',
+      declaredDirectionCount: 2, declaredWindowCount: 3, declaredParameterCount: 2,
+      pValue: null, formalDailySharpe: null,
     }));
-    expect(validated.entries[1].supersedes).toBe(validated.entries[0].hypothesisId);
-    expect(validated.entries.map(entry => entry.registrationClass)).toEqual([
-      'PREREGISTERED', 'RETROSPECTIVE_REVIEW_AMENDMENT',
-      'PREREGISTERED', 'RETROSPECTIVE_REVIEW_AMENDMENT',
-    ]);
     expect(summarizeHypothesisLedger(validated)).toMatchObject({
       status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT',
+      trialUniverseStatus: 'DECLARED_UPPER_BOUND_NOT_ENUMERATED',
       candidateCount: 4,
-      directionSpecificationCount: 6,
-      windowSpecificationCount: 12,
-      parameterSpecificationCount: 12,
-      totalTrialCount: 48,
+      exactTrialCount: null,
+      declaredUpperBoundCounts: {
+        directionSpecifications: 6, windows: 12, parameterSpecifications: 12, trials: 48,
+      },
       dsr: { status: 'NOT_APPLICABLE_CURRENT_VINTAGE_RESEARCH', value: null },
       families: [
-        { family: 'NET_LIQUIDITY_CHALLENGER', trialCount: 24, rejectedCount: 0 },
-        { family: 'RESERVE_ADEQUACY_CHALLENGER', trialCount: 24, rejectedCount: 0 },
+        { family: 'NET_LIQUIDITY_CHALLENGER', exactTrialCount: null, declaredUpperBoundTrialCount: 24 },
+        { family: 'RESERVE_ADEQUACY_CHALLENGER', exactTrialCount: null, declaredUpperBoundTrialCount: 24 },
       ],
     });
   });
 
-  it('rejects duplicate IDs, duplicate parameter hashes in a family, bad hashes, and dangling supersession', () => {
-    const ledger = validateHypothesisLedger(JSON.parse(readFileSync('docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json', 'utf8')));
-    const clone = () => structuredClone(ledger);
+  it('rejects mutation of frozen entries and an interpretation bound to the wrong predecessor hash', () => {
+    const raw = JSON.parse(readFileSync('docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json', 'utf8'));
+    const clone = () => structuredClone(raw);
     const duplicateId = clone();
-    duplicateId.entries[1].hypothesisId = duplicateId.entries[0].hypothesisId;
-    expect(() => validateHypothesisLedger(duplicateId)).toThrow(/duplicate hypothesis/i);
-    const duplicateHash = clone();
-    duplicateHash.entries[1].parameterHash = duplicateHash.entries[0].parameterHash;
-    duplicateHash.entries[1].canonicalParameters = duplicateHash.entries[0].canonicalParameters;
-    expect(() => validateHypothesisLedger(duplicateHash)).toThrow(/duplicate parameter hash/i);
-    const badHash = clone();
-    badHash.entries[0].parameterHash = '0'.repeat(64);
-    expect(() => validateHypothesisLedger(badHash)).toThrow(/parameter hash/i);
-    const dangling = clone();
-    dangling.entries[1].supersedes = 'ABSENT';
-    expect(() => validateHypothesisLedger(dangling)).toThrow(/supersedes/i);
+    duplicateId.entries[1].hypothesis_id = duplicateId.entries[0].hypothesis_id;
+    expect(() => validateHypothesisLedger(duplicateId, ledgerInterpretationArtifact)).toThrow(/frozen ledger|duplicate/i);
+    const mutated = clone();
+    mutated.entries[0].direction_count = 99;
+    expect(() => validateHypothesisLedger(mutated, ledgerInterpretationArtifact)).toThrow(/frozen ledger/i);
+    const wrongPredecessor = structuredClone(ledgerInterpretationArtifact);
+    wrongPredecessor.baseLedgerArtifactSha256 = '0'.repeat(64);
+    expect(() => validateHypothesisLedger(raw, wrongPredecessor)).toThrow(/predecessor/i);
   });
 
   it('runs BH independently by family, stably breaks ties, treats missing p as one, and rejects duplicate ids', () => {
@@ -230,9 +225,9 @@ describe('multiplicity', () => {
       observedSharpe: 1.2, trialSharpes: [.2, .4, .6, .8], sampleT: 252, skewness: -.2, kurtosis: 3.5,
     });
     expect(complete.status).toBe('OK');
-    // Hand check: sample variance=1/15 and the registered Euler–Mascheroni interpolation gives 0.271656945.
-    expect(complete.expectedMaximumSharpe).toBeCloseTo(.271656945, 8);
-    expect(complete.value).toBeCloseTo(1, 6);
+    // Eq. 1 includes the trial mean (.5) plus the sample-variance interpolation (.271656945).
+    expect(complete.expectedMaximumSharpe).toBeCloseTo(.771656945, 8);
+    expect(complete.value).toBeCloseTo(.9999982474, 8);
     expect(deflatedSharpeRatio({
       observedSharpe: 1.2, trialSharpes: [.2, null, .6], sampleT: 252, skewness: 0, kurtosis: 3,
     })).toEqual({ status: 'TRIAL_UNIVERSE_INCOMPLETE', value: null, expectedMaximumSharpe: null, trialCount: 3 });

@@ -216,7 +216,8 @@ describe('/api/v1 governance routes', () => {
       api_version: 'v1', status: 'OK', as_of_cutoff: cutoff,
       protocol: { protocol: 'SCORE_STRESS_DIAGNOSTICS_V1' },
       multiple_testing: {
-        status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT', totalTrialCount: 48,
+        status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT', exactTrialCount: null,
+        declaredUpperBoundCounts: { trials: 48 },
         dsr: { status: 'NOT_APPLICABLE_CURRENT_VINTAGE_RESEARCH', value: null },
       },
       candidate_comparison: { status: 'CANDIDATE_NOT_PROVIDED' },
@@ -227,17 +228,39 @@ describe('/api/v1 governance routes', () => {
   });
 
   it('fails diagnostics closed without changing legacy routes and validates as_of', async () => {
-    vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('event input unavailable'));
+    vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('authorization=Bearer super-secret'));
     const unavailable = await worker.fetch(new Request('https://example.test/api/v1/diagnostics'), env);
     expect(unavailable.status).toBe(200);
-    await expect(unavailable.json()).resolves.toMatchObject({
+    const unavailableBody = await unavailable.json() as any;
+    expect(unavailableBody).toMatchObject({
       api_version: 'v1', status: 'DATA_INCOMPLETE', reason: 'EVENT_INPUT_LOAD_FAILED',
-      score_buckets: [], stress_events: [],
+      score_buckets: expect.any(Array), stress_events: expect.any(Array),
     });
+    expect(JSON.stringify(unavailableBody)).not.toContain('super-secret');
     vi.mocked(loadEventBacktestInputs).mockRejectedValueOnce(new Error('invalid backtest as_of'));
     const invalid = await worker.fetch(new Request('https://example.test/api/v1/diagnostics?as_of=bad'), env);
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({ error_code: 'INVALID_AS_OF' });
+  });
+
+  it('keeps the 21/8 diagnostic shape for empty and non-PIT formal coverage', async () => {
+    dbState.eventInputs = formalEventInputs(0);
+    let response = await worker.fetch(new Request('https://example.test/api/v1/diagnostics?as_of=2030-01-01T00:00:00Z'), env);
+    let body = await response.json() as any;
+    expect(body).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'NO_FORMAL_SIGNAL_COVERAGE' });
+    expect(body.score_buckets).toHaveLength(21);
+    expect(body.score_buckets.every((row: any) => row.status === 'NO_OBSERVATIONS')).toBe(true);
+    expect(body.stress_events).toHaveLength(8);
+    expect(body.stress_events.every((row: any) => row.status === 'NO_FORMAL_SIGNAL_COVERAGE')).toBe(true);
+
+    dbState.eventInputs = formalEventInputs(2);
+    dbState.eventInputs.prices[0].provenanceStatus = 'SYNTHETIC_BACKFILL';
+    response = await worker.fetch(new Request('https://example.test/api/v1/diagnostics?as_of=2030-01-01T00:00:00Z'), env);
+    body = await response.json() as any;
+    expect(body).toMatchObject({ status: 'DATA_INCOMPLETE', reason: 'NON_PIT_PRICE_COVERAGE' });
+    expect(body.score_buckets).toHaveLength(21);
+    expect(body.stress_events).toHaveLength(8);
+    expect(body.stress_events.every((row: any) => row.status === 'NON_PIT_PRICE_COVERAGE')).toBe(true);
   });
 
   it('returns a migration-backfilled legacy snapshot honestly instead of permanently rejecting it', async () => {
