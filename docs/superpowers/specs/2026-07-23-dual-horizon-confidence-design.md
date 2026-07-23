@@ -25,14 +25,14 @@ The tactical score uses the same eight positive-weight Champion factors and the 
 
 | Factor | Weight |
 | --- | ---: |
-| `netliqTrend` | 0.25 |
-| `dollar` | 0.20 |
-| `reserveAdequacy` | 0.15 |
-| `curve` | 0.10 |
-| `credit` | 0.10 |
-| `funding` | 0.10 |
-| `globalLiquidity` | 0.05 |
-| `stablecoin` | 0.05 |
+| `netliqTrend` | 0.35 |
+| `impulse` | 0.05 |
+| `credit` | 0.06 |
+| `funding` | 0.04 |
+| `rates` | 0.05 |
+| `dollar` | 0.18 |
+| `reserveAdequacy` | 0.12 |
+| `curve` | 0.15 |
 
 Seven factor scores are copied from the same formal snapshot cohort. Only `netliqTrend` is recalculated, by calling the existing net-liquidity trend scorer with a four-week lookback instead of the Champion's 13-week lookback. The underlying net-liquidity definition, four-week slope term, normalization, component mixing, and score bounds remain unchanged.
 
