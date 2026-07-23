@@ -1283,6 +1283,31 @@ export async function countOfficialSnapshots(db: D1Database): Promise<number> {
   return row?.n ?? 0;
 }
 
+export interface DualHorizonSnapshotRow {
+  date: string;
+  decisionAt: string;
+  recordedAt: string;
+  score: number;
+  verdict: string;
+  netliqDir: string;
+  snapshotVixEod: number | null;
+  qeQtRegime: string;
+  factors: Record<string, unknown>;
+  factorResults: Record<string, unknown>;
+  modelVersion: string;
+  configHash: string;
+  codeCommitSha: string;
+  dataRunId: string;
+  dataCutoff: string;
+  createdAt: string;
+}
+
+export interface DualHorizonSnapshotInputs {
+  asOfCutoff: string;
+  snapshots: DualHorizonSnapshotRow[];
+  provenance: { methodology: 'GOVERNED_WEEKLY_AS_OF'; rowCount: number };
+}
+
 export type StoredPolicyRegime = 'QE' | 'QT' | 'RESERVE_MANAGEMENT' | 'REINVESTMENT_ONLY'
   | 'CRISIS_LIQUIDITY' | 'NEUTRAL' | 'UNKNOWN';
 
@@ -1297,6 +1322,113 @@ function requirePolicyDate(value: string, field: string): void {
     || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
     throw new Error(`invalid ${field}`);
   }
+}
+
+function parseObjectJson(value: unknown, field: string): Record<string, unknown> {
+  if (typeof value !== 'string') throw new Error(`dual-horizon ${field} missing`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`dual-horizon ${field} invalid`);
+  }
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`dual-horizon ${field} invalid`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseDualHorizonSnapshotRow(row: Record<string, unknown>): DualHorizonSnapshotRow {
+  if (typeof row.date !== 'string') throw new Error('dual-horizon snapshot date missing');
+  requirePolicyDate(row.date, 'dual-horizon snapshot date');
+  for (const field of ['decision_at', 'recorded_at', 'data_cutoff', 'created_at'] as const) {
+    if (typeof row[field] !== 'string') throw new Error(`dual-horizon ${field} missing`);
+    requireIsoTimestamp(row[field], `dual-horizon ${field}`);
+  }
+  if (typeof row.score !== 'number' || !Number.isFinite(row.score)
+    || row.score < 0 || row.score > 100) throw new Error('dual-horizon snapshot score invalid');
+  const fieldIssue = officialPortfolioFieldIssue({
+    score: row.score,
+    verdict: row.verdict,
+    netliqDir: row.netliq_dir,
+    snapshotVixEod: row.vix_eod,
+  });
+  if (fieldIssue) throw new Error(fieldIssue);
+  if (typeof row.qe_qt_regime !== 'string' || row.qe_qt_regime.length === 0) {
+    throw new Error('dual-horizon qe_qt_regime missing');
+  }
+  if (typeof row.model_version !== 'string' || row.model_version === 'LEGACY_UNVERSIONED') {
+    throw new Error('dual-horizon model version invalid');
+  }
+  if (typeof row.config_hash !== 'string' || !/^[a-f0-9]{64}$/.test(row.config_hash)) {
+    throw new Error('dual-horizon config hash invalid');
+  }
+  if (typeof row.code_commit_sha !== 'string'
+    || !(row.code_commit_sha === 'LOCAL_UNCONFIGURED' || /^[a-f0-9]{40}$/.test(row.code_commit_sha))) {
+    throw new Error('dual-horizon commit SHA invalid');
+  }
+  if (typeof row.data_run_id !== 'string' || row.data_run_id.length === 0) {
+    throw new Error('dual-horizon data run id missing');
+  }
+  return {
+    date: row.date,
+    decisionAt: row.decision_at as string,
+    recordedAt: row.recorded_at as string,
+    score: row.score,
+    verdict: row.verdict as string,
+    netliqDir: row.netliq_dir as string,
+    snapshotVixEod: row.vix_eod as number | null,
+    qeQtRegime: row.qe_qt_regime,
+    factors: parseObjectJson(row.factors_json, 'factors_json'),
+    factorResults: parseObjectJson(row.factor_quality_json, 'factor_quality_json'),
+    modelVersion: row.model_version,
+    configHash: row.config_hash,
+    codeCommitSha: row.code_commit_sha,
+    dataRunId: row.data_run_id,
+    dataCutoff: row.data_cutoff as string,
+    createdAt: row.created_at as string,
+  };
+}
+
+export async function loadDualHorizonSnapshotInputs(
+  db: D1Database,
+  requestedAsOf?: string,
+): Promise<DualHorizonSnapshotInputs> {
+  const clock = await db.prepare(
+    `WITH clock AS (SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now') AS db_now)
+     SELECT db_now,CASE WHEN ? IS NULL THEN db_now ELSE ? END AS cutoff FROM clock`,
+  ).bind(requestedAsOf ?? null, requestedAsOf ?? null)
+    .first<{ db_now: string; cutoff: string }>();
+  if (!clock) throw new Error('dual-horizon database clock unavailable');
+  requireIsoTimestamp(clock.db_now, 'dual-horizon database now');
+  try {
+    requireIsoTimestamp(clock.cutoff, 'dual-horizon as_of');
+  } catch {
+    throw new Error('invalid dual-horizon as_of');
+  }
+  if (compareIsoTimestamps(clock.cutoff, clock.db_now) > 0) {
+    throw new Error('future dual-horizon as_of');
+  }
+
+  const rows = await db.prepare(
+    `SELECT date,decision_at,recorded_at,score,verdict,netliq_dir,vix_eod,qe_qt_regime,
+            factors_json,factor_quality_json,model_version,config_hash,code_commit_sha,
+            data_run_id,data_cutoff,created_at
+     FROM model_snapshot_weekly
+     WHERE decision_status='OK' AND pit_status='PIT'
+       AND model_version<>'LEGACY_UNVERSIONED'
+       AND decision_at IS NOT NULL AND recorded_at IS NOT NULL
+       AND julianday(decision_at)<julianday(?) AND julianday(recorded_at)<julianday(?)
+     ORDER BY julianday(decision_at),date
+     LIMIT 601`,
+  ).bind(clock.cutoff, clock.cutoff).all<Record<string, unknown>>();
+
+  const snapshots = (rows.results ?? []).map(row => parseDualHorizonSnapshotRow(row));
+  return {
+    asOfCutoff: clock.cutoff,
+    snapshots,
+    provenance: { methodology: 'GOVERNED_WEEKLY_AS_OF', rowCount: snapshots.length },
+  };
 }
 
 export async function resolvePolicyRegime(db: D1Database, input: {
@@ -1400,7 +1532,7 @@ export async function loadLiquidityStructureSeries(
             AND julianday(candidate.created_at)<julianday(?)
           ORDER BY julianday(candidate.created_at) DESC LIMIT 1
         )
-       WHERE raw.series_id IN ('WALCL','WDTGAL','RRPONTSYD')
+       WHERE raw.series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
          AND raw.observation_date<=?
          AND julianday(raw.fetched_at)<julianday(?)
      ), eligible AS (
@@ -1416,11 +1548,12 @@ export async function loadLiquidityStructureSeries(
      SELECT series_id,observation_date,vintage_date,value,fetched_at,data_run_id
      FROM eligible WHERE revision_rank=1 ORDER BY series_id,observation_date`,
   ).bind(cutoff, decisionDate, cutoff, cutoff, cutoff).all<{
-    series_id: 'WALCL' | 'WDTGAL' | 'RRPONTSYD'; observation_date: string; vintage_date: string;
+    series_id: 'WALCL' | 'WDTGAL' | 'WTREGEN' | 'RRPONTSYD';
+    observation_date: string; vintage_date: string;
     value: number; fetched_at: string; data_run_id: string;
   }>();
   const result = rows.results ?? [];
-  const seriesMap: SeriesMap = { WALCL: [], WDTGAL: [], RRPONTSYD: [] };
+  const seriesMap: SeriesMap = { WALCL: [], WDTGAL: [], WTREGEN: [], RRPONTSYD: [] };
   const runIds = new Set<string>();
   let maxFetchedAt: string | null = null;
   for (const row of result) {
