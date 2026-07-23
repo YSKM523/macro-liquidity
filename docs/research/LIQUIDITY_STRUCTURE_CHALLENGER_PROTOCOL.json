@@ -1,0 +1,59 @@
+{
+  "protocol": "LIQUIDITY_STRUCTURE_CHALLENGER_V1",
+  "registered_at": "2026-07-23T00:50:00Z",
+  "base_commit": "52d1276426987537ad09c4e1ba1fa1c80d86c468",
+  "champion_change": false,
+  "mode": "SHADOW_ONLY",
+  "tga_buffer": {
+    "shock": "LATEST_WDTGAL_MINUS_PRIOR_WDTGAL",
+    "cadence_calendar_days": [5, 10],
+    "rrp_alignment": "LATEST_RRP_ON_OR_BEFORE_EACH_STRICTLY_PRIOR_TGA_DATE",
+    "threshold_history_weeks": [52, 156],
+    "quantile_rule": "TYPE7_LINEAR",
+    "q20_state": "DEPLETED",
+    "q50_state": "LOW",
+    "above_q50_state": "SUFFICIENT",
+    "multipliers": { "DEPLETED": 1.0, "LOW": 0.6, "SUFFICIENT": 0.25 }
+  },
+  "policy_events": {
+    "visibility": "CREATED_AT_STRICTLY_BEFORE_AS_OF",
+    "publication": "SOURCE_PUBLISHED_AT_ON_OR_BEFORE_DECISION_AT",
+    "interval": "EFFECTIVE_FROM_CLOSED_EFFECTIVE_TO_OPEN",
+    "revision": "LATEST_VISIBLE_REVISION_PER_EVENT_KEY",
+    "overlap": "FAIL_CLOSED",
+    "seed_policy": "NO_UNVERIFIED_DATES"
+  },
+  "walcl_policy_matrix": {
+    "QE": { "EXPANDING": 80, "FLAT": 60, "CONTRACTING": 40 },
+    "QT": { "EXPANDING": 50, "FLAT": 40, "CONTRACTING": 30 },
+    "RESERVE_MANAGEMENT": { "EXPANDING": 57.5, "FLAT": 52.5, "CONTRACTING": 42.5 },
+    "REINVESTMENT_ONLY": { "EXPANDING": 52.5, "FLAT": 50, "CONTRACTING": 45 },
+    "NEUTRAL": { "EXPANDING": 55, "FLAT": 50, "CONTRACTING": 45 },
+    "CRISIS_LIQUIDITY": null,
+    "UNKNOWN": null
+  },
+  "ablation": {
+    "complete_cohort_only": true,
+    "hysteresis": "ONE_SEQUENTIAL_PASS_PER_ARM",
+    "arms": {
+      "A_CURRENT_8": [],
+      "B_WITHOUT_CREDIT": ["credit"],
+      "C_WITHOUT_FUNDING": ["funding"],
+      "D_WITHOUT_CREDIT_FUNDING": ["credit", "funding"]
+    },
+    "removed_weight_rule": "RENORMALIZE_REMAINING_POSITIVE_WEIGHTS",
+    "fragility_sidecar": ["credit", "funding"],
+    "primary_horizon_weeks": 13,
+    "secondary_horizon_weeks": [4, 8],
+    "candidate_promotion": false
+  },
+  "weight_benchmarks": {
+    "factor_keys": ["netliqTrend", "impulse", "credit", "funding", "rates", "dollar", "reserveAdequacy", "curve"],
+    "equal_8": "ONE_EIGHTH_EACH",
+    "current_8": "FROZEN_CHAMPION_POSITIVE_WEIGHTS",
+    "blend_8": "HALF_EQUAL_8_PLUS_HALF_CURRENT_8",
+    "vol": "EXCLUDED_LEGACY_ZERO_WEIGHT_DIAGNOSTIC"
+  },
+  "api": "/api/v1/challengers/liquidity-structure?as_of=",
+  "promotion_threshold": null
+}
