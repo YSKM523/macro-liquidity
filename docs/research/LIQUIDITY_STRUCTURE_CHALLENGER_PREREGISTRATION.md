@@ -1,7 +1,7 @@
 # Liquidity-structure challenger preregistration
 
-Protocol: `LIQUIDITY_STRUCTURE_CHALLENGER_V1`  
-Registered: `2026-07-23T00:50:00Z`  
+Protocol: `LIQUIDITY_STRUCTURE_CHALLENGER_V1`
+Registered: `2026-07-23T00:50:00Z`
 Base commit: `52d1276426987537ad09c4e1ba1fa1c80d86c468`
 
 This results-before-code contract covers ALG-04 and ALG-06 through ALG-09. It
@@ -15,7 +15,7 @@ policy dates are seeded without primary-source evidence; an empty policy ledger
 must return typed unavailable output.
 
 Raw artifact SHA-256:
-`946b95679e2bbacb618251969ebb7967d8a82541d277c72297b6b0a5023cbfa0`.  
+`946b95679e2bbacb618251969ebb7967d8a82541d277c72297b6b0a5023cbfa0`.
 Key-sorted canonical JSON digest:
 `b9560fe595969a7f6f8420d48cdaf8f2cfd3ad45f616974469d59115ea234c38`.
 

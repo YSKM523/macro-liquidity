@@ -1,7 +1,7 @@
 # PR-17 implementation plan — governed liquidity-structure challenger
 
-Base: `52d1276`  
-Scope: ALG-04 and ALG-06 through ALG-09 only  
+Base: `52d1276`
+Scope: ALG-04 and ALG-06 through ALG-09 only
 Constraint: additive shadow diagnostics; Champion score, weights, thresholds,
 hysteresis, official snapshots and production portfolio policy remain unchanged.
 
