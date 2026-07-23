@@ -144,7 +144,7 @@ function formalAblationInputs(): EventBacktestInputs {
   const start = Date.parse('2023-01-02T00:00:00Z');
   const date = (days: number) => new Date(start + days * 86_400_000).toISOString().slice(0, 10);
   const timestamp = (days: number, time = '12:00:00') => `${date(days)}T${time}Z`;
-  const scores = [60, 50, 40, 50, 62, 48, 38, 52, 65, 50, 35, 50, 61, 47, 39, 53, 64, 49, 37, 51];
+  const scores = [50, 60, 50, 40, 62, 48, 38, 52, 65, 50, 35, 50, 61, 47, 39, 53, 64, 49, 37, 51];
   const factorKeys = ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve'];
   const asOfCutoff = '2024-01-01T00:00:00Z';
   return {
@@ -193,7 +193,7 @@ describe('formal funding/credit ablation evaluation', () => {
       'A_CURRENT_8', 'B_WITHOUT_CREDIT', 'C_WITHOUT_FUNDING', 'D_WITHOUT_CREDIT_FUNDING',
     ]);
     for (const arm of Object.values(result.arms)) {
-      expect(arm.verdictTrace.slice(0, 4)).toEqual(['BULLISH', 'BULLISH', 'BEARISH', 'BEARISH']);
+      expect(arm.verdictTrace.slice(0, 4)).toEqual(['NEUTRAL', 'BULLISH', 'BULLISH', 'BEARISH']);
       expect(Object.keys(arm.horizons)).toEqual(['4', '8', '13']);
       expect(arm.horizons[13]).toMatchObject({ overlapping: { n: expect.any(Number) }, independent: { n: expect.any(Number) } });
       expect(arm.horizons[13].independent.n).toBeLessThan(arm.horizons[13].overlapping.n);
