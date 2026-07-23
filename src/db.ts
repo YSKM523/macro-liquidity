@@ -1348,6 +1348,81 @@ export async function resolvePolicyRegime(db: D1Database, input: {
   };
 }
 
+export interface LiquidityStructureSeriesInputs {
+  asOfCutoff: string;
+  decisionDate: string;
+  seriesMap: SeriesMap;
+  provenance: {
+    methodology: 'APPEND_ONLY_AS_OF';
+    rowCount: number;
+    dataRunCount: number;
+    maxFetchedAt: string | null;
+  };
+}
+
+export async function loadLiquidityStructureSeries(
+  db: D1Database,
+  requestedAsOf?: string,
+): Promise<LiquidityStructureSeriesInputs> {
+  const clock = await db.prepare(
+    `WITH clock AS (SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now') AS db_now)
+     SELECT db_now,CASE WHEN ? IS NULL THEN db_now ELSE ? END AS cutoff FROM clock`,
+  ).bind(requestedAsOf ?? null, requestedAsOf ?? null)
+    .first<{ db_now: string; cutoff: string }>();
+  if (!clock) throw new Error('liquidity-structure database clock unavailable');
+  requireIsoTimestamp(clock.db_now, 'liquidity-structure database now');
+  try {
+    requireIsoTimestamp(clock.cutoff, 'liquidity-structure as_of');
+  } catch {
+    throw new Error('invalid liquidity-structure as_of');
+  }
+  if (compareIsoTimestamps(clock.cutoff, clock.db_now) > 0) {
+    throw new Error('future liquidity-structure as_of');
+  }
+  const cutoff = clock.cutoff;
+  const decisionClock = new Date(isoTimestampMs(cutoff, 'liquidity-structure cutoff') - 1);
+  const decisionDate = decisionClock.toISOString().slice(0, 10);
+  const rows = await db.prepare(
+    `WITH eligible AS (
+       SELECT series_id,observation_date,value,fetched_at,data_run_id,
+              ROW_NUMBER() OVER (
+                PARTITION BY series_id,observation_date
+                ORDER BY julianday(fetched_at) DESC,vintage_date DESC,checksum DESC
+              ) AS revision_rank
+       FROM observations_pit
+       WHERE series_id IN ('WALCL','WDTGAL','RRPONTSYD')
+         AND observation_date<=?
+         AND julianday(fetched_at)<julianday(?)
+         AND julianday(released_at)<julianday(?)
+         AND julianday(tradable_at)<julianday(?)
+     )
+     SELECT series_id,observation_date,value,fetched_at,data_run_id
+     FROM eligible WHERE revision_rank=1 ORDER BY series_id,observation_date`,
+  ).bind(decisionDate, cutoff, cutoff, cutoff).all<{
+    series_id: 'WALCL' | 'WDTGAL' | 'RRPONTSYD'; observation_date: string;
+    value: number; fetched_at: string; data_run_id: string;
+  }>();
+  const result = rows.results ?? [];
+  const seriesMap: SeriesMap = { WALCL: [], WDTGAL: [], RRPONTSYD: [] };
+  const runIds = new Set<string>();
+  let maxFetchedAt: string | null = null;
+  for (const row of result) {
+    requirePolicyDate(row.observation_date, 'liquidity-structure observation date');
+    requireIsoTimestamp(row.fetched_at, 'liquidity-structure fetchedAt');
+    if (!Number.isFinite(row.value)) throw new Error('invalid liquidity-structure observation value');
+    seriesMap[row.series_id].push({ date: row.observation_date, value: row.value });
+    runIds.add(row.data_run_id);
+    if (maxFetchedAt == null || compareIsoTimestamps(row.fetched_at, maxFetchedAt) > 0) maxFetchedAt = row.fetched_at;
+  }
+  return {
+    asOfCutoff: cutoff, decisionDate, seriesMap,
+    provenance: {
+      methodology: 'APPEND_ONLY_AS_OF', rowCount: result.length,
+      dataRunCount: runIds.size, maxFetchedAt,
+    },
+  };
+}
+
 export async function officialSnapshotOnOrBefore(db: D1Database, date: string) {
   return db.prepare("SELECT * FROM model_snapshot_weekly WHERE date <= ? AND decision_status = 'OK' ORDER BY date DESC LIMIT 1")
     .bind(date).first();

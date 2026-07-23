@@ -11,13 +11,15 @@ import {
   loadSeriesMap,
   ingestRunSummary,
   loadEventBacktestInputs,
+  loadLiquidityStructureSeries,
+  resolvePolicyRegime,
   exportOfficialSnapshots,
   recordAdminAudit,
   reserveAdminRateLimit,
 } from './db';
 import { factorContributions, attributeScoreChange, decomposeNetliq, sameScoringFactorAvailability } from './explain';
 import { fetchLivePrices, fetchStressSeries, evaluateLiveStress } from './prices';
-import { policyRegime, deriveDecisionState } from './metrics';
+import { balanceSheetImpulse, policyRegime, deriveDecisionState } from './metrics';
 import {
   INGEST_STALE_HOURS,
   COVERAGE_FACTORS,
@@ -31,7 +33,7 @@ import { runBacktest } from './backtest';
 import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
-import { formalValidationUnavailable, runFormalValidation } from './evaluation-protocol';
+import { formalValidationUnavailable, runFormalValidation, validateFormalSignal } from './evaluation-protocol';
 import {
   SCORE_STRESS_PROTOCOL,
   buildFormalOutcomes,
@@ -69,6 +71,13 @@ import {
   failClosedCachedStress,
 } from './live-data';
 import type { LivePrices, LiveStress } from './prices';
+import {
+  LIQUIDITY_STRUCTURE_PROTOCOL,
+  buildEightFactorBenchmarks,
+  buildFundingCreditAblations,
+  evaluateTgaBuffer,
+  scorePolicyAwareWalcl,
+} from './liquidity-structure-challenger';
 
 const livePricesCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
 const liveStressCache = new LiveDataCache<any>({ freshMs: 30_000, staleMs: 120_000, failureThreshold: 3, openMs: 60_000 });
@@ -354,6 +363,89 @@ export default {
     if (p === '/api/prices') {
       const liveData = await loadLive(env, ctx);
       return json({ ...liveData.live, cache_status: liveData.cache.prices });
+    }
+    if (p === '/api/v1/challengers/liquidity-structure') {
+      const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
+      let structureInputs: Awaited<ReturnType<typeof loadLiquidityStructureSeries>>;
+      let eventInputs: Awaited<ReturnType<typeof loadEventBacktestInputs>>;
+      try {
+        [structureInputs, eventInputs] = await Promise.all([
+          loadLiquidityStructureSeries(env.DB, requestedAsOf),
+          loadEventBacktestInputs(env.DB, requestedAsOf),
+        ]);
+      } catch (error) {
+        const message = String((error as Error)?.message ?? error);
+        if (/^(?:invalid|future) (?:liquidity-structure|backtest) as_of$/i.test(message)) {
+          return errorJson(requestId, 'invalid_as_of', 'INVALID_AS_OF', 400);
+        }
+        structuredLog('liquidity_structure_failure', {
+          request_id: requestId, reason: 'INPUT_LOAD_FAILED', error: message,
+        }, console.error);
+        return json({
+          api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
+          mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
+          status: 'DATA_INCOMPLETE', reason: 'INPUT_LOAD_FAILED',
+          as_of_cutoff: requestedAsOf ?? null, protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
+        });
+      }
+      const signals = [...eventInputs.signals].sort((left, right) => left.decisionAt.localeCompare(right.decisionAt));
+      const latestSignal = signals.at(-1);
+      if (!latestSignal || !eventInputs.asOfCutoff) {
+        return json({
+          api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
+          mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
+          status: 'DATA_INCOMPLETE', reason: 'NO_GOVERNED_SIGNAL_COVERAGE',
+          as_of_cutoff: eventInputs.asOfCutoff ?? structureInputs.asOfCutoff,
+          protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
+        });
+      }
+      try {
+        validateFormalSignal(latestSignal, Date.parse(eventInputs.asOfCutoff));
+      } catch (error) {
+        structuredLog('liquidity_structure_failure', {
+          request_id: requestId, reason: 'FORMAL_SIGNAL_INVALID',
+          error: String((error as Error)?.message ?? error),
+        }, console.error);
+        return json({
+          api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
+          mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
+          status: 'DATA_INCOMPLETE', reason: 'FORMAL_SIGNAL_INVALID',
+          as_of_cutoff: eventInputs.asOfCutoff, protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
+        });
+      }
+      const policy = await resolvePolicyRegime(env.DB, {
+        decisionDate: latestSignal.signalDate,
+        decisionAt: latestSignal.decisionAt,
+        asOfCutoff: eventInputs.asOfCutoff,
+      });
+      const tgaBuffer = evaluateTgaBuffer(structureInputs.seriesMap, structureInputs.decisionDate);
+      const walcl = (structureInputs.seriesMap.WALCL ?? [])
+        .filter(row => row.date <= structureInputs.decisionDate);
+      const impulse = walcl.length >= 14 ? balanceSheetImpulse(walcl.map(row => row.value)) : null;
+      const walclPolicy = policy.status === 'OK' && impulse != null
+        ? { ...scorePolicyAwareWalcl(policy.regime, impulse), impulse }
+        : { status: 'POLICY_OR_WALCL_UNAVAILABLE' as const, score: null, impulse };
+      const weightBenchmarks = buildEightFactorBenchmarks(latestSignal.factors ?? {});
+      const ablations = buildFundingCreditAblations(latestSignal.factors ?? {});
+      const complete = tgaBuffer.status === 'OK' && policy.status === 'OK'
+        && walclPolicy.status === 'OK' && weightBenchmarks.status === 'OK' && ablations.status === 'OK';
+      return json({
+        api_version: 'v1', challenger_id: LIQUIDITY_STRUCTURE_PROTOCOL.protocol,
+        mode: LIQUIDITY_STRUCTURE_PROTOCOL.mode, champion_change: false,
+        status: complete ? 'OK' : 'DATA_INCOMPLETE', reason: complete ? null : 'CHALLENGER_COMPONENT_INCOMPLETE',
+        as_of_cutoff: eventInputs.asOfCutoff, protocol: LIQUIDITY_STRUCTURE_PROTOCOL,
+        provenance: structureInputs.provenance,
+        signal_provenance: {
+          signal_date: latestSignal.signalDate, decision_at: latestSignal.decisionAt,
+          model_version: latestSignal.modelVersion, config_hash: latestSignal.configHash,
+        },
+        tga_buffer: tgaBuffer, policy_regime: policy, walcl_policy: walclPolicy,
+        weight_benchmarks: weightBenchmarks, funding_credit_ablation: ablations,
+        formal_ablation_evaluation: {
+          status: 'PENDING_GOVERNED_EVALUATION',
+          reason: 'SNAPSHOT_ARM_SCORES_ONLY_NO_PORTFOLIO_RESULT_CLAIMED',
+        },
+      });
     }
     if (p === '/api/v1/diagnostics') {
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
