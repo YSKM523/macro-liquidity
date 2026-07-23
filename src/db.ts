@@ -1566,14 +1566,22 @@ async function validateDualHorizonOverrideTimings(
   limit: number,
 ): Promise<void> {
   const rows = await db.prepare(
-    `SELECT series_id,vintage_date,created_at,released_at,tradable_at
-     FROM release_calendar_overrides
-     WHERE series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
-       AND vintage_date>=? AND vintage_date<=?
-       AND julianday(created_at)<julianday(?)
-     ORDER BY series_id,vintage_date,julianday(created_at)
+    `SELECT overrides.series_id,overrides.vintage_date,overrides.created_at,
+            overrides.released_at,overrides.tradable_at
+     FROM release_calendar_overrides overrides
+     WHERE julianday(overrides.created_at)<julianday(?)
+       AND EXISTS (
+         SELECT 1
+         FROM observations_pit raw
+         WHERE raw.series_id=overrides.series_id
+           AND raw.vintage_date=overrides.vintage_date
+           AND raw.series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
+           AND raw.observation_date>=? AND raw.observation_date<=?
+           AND julianday(raw.fetched_at)<julianday(?)
+       )
+     ORDER BY overrides.series_id,overrides.vintage_date,julianday(overrides.created_at)
      LIMIT ?`,
-  ).bind(firstObservationDate, decisionDate, cutoff, limit + 1).all<{
+  ).bind(cutoff, firstObservationDate, decisionDate, cutoff, limit + 1).all<{
     series_id: string;
     vintage_date: string;
     created_at: string;

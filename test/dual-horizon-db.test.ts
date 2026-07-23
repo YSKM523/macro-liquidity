@@ -220,6 +220,43 @@ describe('dual-horizon PIT inputs', () => {
     await mf.dispose();
   });
 
+  it('counts visible overrides joined through a selected raw vintage outside the observation window', async () => {
+    const { mf, db } = await migratedDb();
+    await seedPitRow(
+      db,
+      'WALCL',
+      '2024-01-03',
+      '1900-01-01',
+      '2024-01-05T00:00:00Z',
+      7_000,
+    );
+    await db.prepare(
+      `INSERT INTO release_calendar_overrides
+        (series_id,vintage_date,released_at,tradable_at,reason,created_at)
+       VALUES
+        ('WALCL','1900-01-01','2024-01-05T12:00:00Z','2024-01-05T13:00:00Z',
+         'first visible override','2024-01-06T00:00:00Z'),
+        ('WALCL','1900-01-01','2024-01-05T14:00:00Z','2024-01-05T15:00:00Z',
+         'second visible override','2024-01-07T00:00:00Z')`,
+    ).run();
+
+    await expect(loadDualHorizonLiquiditySeries(
+      db,
+      '2024-01-10T00:00:00Z',
+      { rawRevisionLimit: 5, overrideLimit: 1, selectedRowLimit: 5 },
+    )).rejects.toMatchObject({
+      name: DualHorizonDomainError.name,
+      reason: 'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      asOf: '2024-01-10T00:00:00Z',
+      availableDiagnostics: {
+        work: 'VISIBLE_OVERRIDES',
+        limit: 1,
+        observedAtLeast: 2,
+      },
+    });
+    await mf.dispose();
+  });
+
   it('fails closed before selected dual-horizon rows exceed their sentinel', async () => {
     const { mf, db } = await migratedDb();
     await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 7_000);
