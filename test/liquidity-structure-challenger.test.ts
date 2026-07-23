@@ -11,9 +11,12 @@ import {
   buildEightFactorBenchmarks,
   buildFundingCreditAblations,
   canonicalLiquidityStructureProtocol,
+  evaluateFundingCreditAblation,
   evaluateTgaBuffer,
   scorePolicyAwareWalcl,
 } from '../src/liquidity-structure-challenger';
+import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
+import type { EventBacktestInputs } from '../src/event-backtest';
 
 function weeklySeries(count = 60): SeriesMap {
   const map: SeriesMap = { WDTGAL: [], RRPONTSYD: [] };
@@ -134,5 +137,86 @@ describe('eight-factor weight and funding/credit ablations', () => {
         / (1 - WEIGHTS.credit - WEIGHTS.funding),
     );
     expect(result.fragilitySidecar).toEqual({ credit: 20, funding: 40 });
+  });
+});
+
+function formalAblationInputs(): EventBacktestInputs {
+  const start = Date.parse('2023-01-02T00:00:00Z');
+  const date = (days: number) => new Date(start + days * 86_400_000).toISOString().slice(0, 10);
+  const timestamp = (days: number, time = '12:00:00') => `${date(days)}T${time}Z`;
+  const scores = [60, 50, 40, 50, 62, 48, 38, 52, 65, 50, 35, 50, 61, 47, 39, 53, 64, 49, 37, 51];
+  const factorKeys = ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve'];
+  const asOfCutoff = '2024-01-01T00:00:00Z';
+  return {
+    asOfCutoff,
+    signals: scores.map((score, index) => ({
+      signalDate: date(index * 7), decisionAt: timestamp(index * 7), tradableAt: timestamp(index * 7),
+      score, verdict: score > 55 ? 'BULLISH' : score < 45 ? 'BEARISH' : 'NEUTRAL',
+      netliqDir: index % 3 === 0 ? 'DOWN' : 'UP', snapshotVixEod: 20,
+      targetExposure: score > 55 ? 1 : score < 45 ? .25 : .75,
+      portfolioTier: score > 55 ? 'STRONG_TAILWIND' : score < 45 ? 'HEADWIND' : 'NEUTRAL',
+      portfolioMethodology: 'DASHBOARD_EXPOSURE_TIERS_V1', stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
+      factors: Object.fromEntries(factorKeys.map(key => [key, score])),
+      recordedAt: timestamp(index * 7, '12:00:01'), createdAt: timestamp(index * 7, '12:00:01'),
+      dataCutoff: timestamp(index * 7, '11:59:59'), dataRunId: `signal-${index}`,
+      modelVersion: CHAMPION_MODEL_VERSION, configHash: championConfigDigest(),
+      codeCommitSha: '0123456789abcdef0123456789abcdef01234567',
+    })),
+    prices: Array.from({ length: 260 }, (_, index) => ({
+      date: date(index), adjustedClose: 100 + index * .2 + Math.sin(index / 5) * 2,
+      source: 'FRED:SP500', fetchedAt: '2023-12-01T00:00:00Z', dataRunId: 'price-run',
+      activationRunId: `price-activation-${index}`, activatedAt: '2023-12-02T00:00:00Z',
+      provenanceStatus: 'PIT_RAW' as const,
+    })),
+    vix: Array.from({ length: 260 }, (_, index) => ({
+      date: date(index), value: 20, source: 'FRED:VIXCLS', fetchedAt: '2023-12-01T00:00:00Z',
+      dataRunId: 'vix-run', activationRunId: `vix-activation-${index}`,
+      activatedAt: '2023-12-02T00:00:00Z', provenanceStatus: 'PIT_RAW' as const,
+    })),
+    cashRates: Array.from({ length: 261 }, (_, index) => ({
+      date: date(index - 1), rate: 5, source: 'FRED:SOFR', fetchedAt: '2023-12-01T00:00:00Z',
+      dataRunId: 'cash-run', activationRunId: `cash-activation-${index}`,
+      activatedAt: '2023-12-02T00:00:00Z', provenanceStatus: 'PIT_RAW' as const,
+    })),
+  };
+}
+
+describe('formal funding/credit ablation evaluation', () => {
+  it('runs one hysteresis path per arm on one complete governed cohort and reports every frozen metric', () => {
+    const result = evaluateFundingCreditAblation(formalAblationInputs());
+    expect(result).toMatchObject({
+      status: 'OK', reason: null,
+      cohort: { signalCount: 20, completeFactorCount: 20, provenance: 'GOVERNED_PIT' },
+      primaryHorizonWeeks: 13, secondaryHorizonWeeks: [4, 8], championChange: false,
+    });
+    expect(Object.keys(result.arms)).toEqual([
+      'A_CURRENT_8', 'B_WITHOUT_CREDIT', 'C_WITHOUT_FUNDING', 'D_WITHOUT_CREDIT_FUNDING',
+    ]);
+    for (const arm of Object.values(result.arms)) {
+      expect(arm.verdictTrace.slice(0, 4)).toEqual(['BULLISH', 'BULLISH', 'BEARISH', 'BEARISH']);
+      expect(Object.keys(arm.horizons)).toEqual(['4', '8', '13']);
+      expect(arm.horizons[13]).toMatchObject({ overlapping: { n: expect.any(Number) }, independent: { n: expect.any(Number) } });
+      expect(arm.horizons[13].independent.n).toBeLessThan(arm.horizons[13].overlapping.n);
+      expect(arm.portfolio).toMatchObject({
+        strategySharpe: expect.any(Number), betaMatchedSharpe: expect.any(Number),
+        betaMatchedSharpeDelta: expect.any(Number), maxDrawdown: expect.any(Number),
+      });
+      expect(arm.horizons[13].tailLossQ10).toEqual(expect.any(Number));
+    }
+  });
+
+  it('fails closed for a mixed or incomplete cohort instead of changing the sample by arm', () => {
+    const incomplete = formalAblationInputs();
+    delete incomplete.signals[3].factors!.credit;
+    expect(evaluateFundingCreditAblation(incomplete)).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'INCOMPLETE_FACTOR_COHORT', arms: {},
+    });
+    const legacy = formalAblationInputs();
+    legacy.signals[0].modelVersion = 'LEGACY_UNVERSIONED';
+    legacy.signals[0].configHash = 'LEGACY_UNVERSIONED';
+    legacy.signals[0].codeCommitSha = 'LEGACY_UNVERSIONED';
+    expect(evaluateFundingCreditAblation(legacy)).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'NON_GOVERNED_SIGNAL_COHORT', arms: {},
+    });
   });
 });
