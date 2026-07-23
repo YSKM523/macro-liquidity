@@ -51,7 +51,7 @@ describe('append-only policy regime events', () => {
     await mf.dispose();
   }, 30_000);
 
-  it('resolves only the latest revision visible at both system and decision clocks', async () => {
+  it('uses the as-of clock for ledger visibility and the decision clock for source publication', async () => {
     const { mf, db } = await migratedDb();
     await insert(db, { id: 'qe-v1', key: 'qe-cycle', revision: 1 });
     await insert(db, {
@@ -64,6 +64,18 @@ describe('append-only policy regime events', () => {
     await expect(resolvePolicyRegime(db, {
       decisionDate: '2024-07-01', decisionAt: '2024-07-01T20:00:00Z', asOfCutoff: '2024-07-02T00:00:00Z',
     })).resolves.toEqual({ status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' });
+    await mf.dispose();
+  }, 30_000);
+
+  it('accepts a ledger row recorded after decision time when its source was already published', async () => {
+    const { mf, db } = await migratedDb();
+    await insert(db, {
+      id: 'qe-late-entry', key: 'qe-cycle', revision: 1,
+      published: '2024-06-30T19:00:00Z', created: '2024-07-01T21:00:00Z',
+    });
+    await expect(resolvePolicyRegime(db, {
+      decisionDate: '2024-07-01', decisionAt: '2024-07-01T20:00:00Z', asOfCutoff: '2024-07-02T00:00:00Z',
+    })).resolves.toMatchObject({ status: 'OK', eventId: 'qe-late-entry', regime: 'QE' });
     await mf.dispose();
   }, 30_000);
 
