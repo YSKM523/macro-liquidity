@@ -23,9 +23,9 @@ function deployFixture() {
   execFileSync('git', ['add', 'tracked.txt', 'npx'], { cwd: root });
   execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
-  const run = (sha: string) => spawnSync(process.execPath, [
+  const run = (sha: string, schema = '0011') => spawnSync(process.execPath, [
     resolve('scripts/deploy-production.mjs'), '--execute',
-    '--confirm-production=DEPLOY_PRODUCTION', '--schema-confirmed=0010',
+    '--confirm-production=DEPLOY_PRODUCTION', `--schema-confirmed=${schema}`,
   ], {
     cwd: root, encoding: 'utf8',
     env: {
@@ -77,8 +77,20 @@ describe('production governance configuration', () => {
     expect(pkg.scripts.deploy).toBe('node scripts/deploy-production.mjs');
     const guard = read('scripts/deploy-production.mjs');
     expect(guard).toContain('--confirm-production=DEPLOY_PRODUCTION');
-    expect(guard).toContain('--schema-confirmed=0010');
+    expect(guard).toContain('--schema-confirmed=0011');
     expect(guard).toContain('CODE_COMMIT_SHA');
+  });
+
+  it('refuses the superseded 0010 schema confirmation before invoking Wrangler', () => {
+    const fixture = deployFixture();
+    try {
+      const result = fixture.run(fixture.head, '0010');
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('"schemaConfirmed":false');
+      expect(result.stderr).not.toContain('unexpected-npx');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it('refuses a valid-looking deployment SHA that is not the checked-out HEAD', () => {

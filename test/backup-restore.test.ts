@@ -69,10 +69,10 @@ else if (args.includes('export')) fs.writeFileSync(args[args.indexOf('--output')
     const output = execFileSync(process.execPath, ['scripts/restore-drill.mjs'], { encoding: 'utf8' });
     const result = JSON.parse(output);
     expect(result).toMatchObject({ status: 'PASS', remoteAccess: false });
-    expect(result.migrations).toEqual({ first: 10, restored: 10 });
+    expect(result.migrations).toEqual({ first: 11, restored: 11 });
     expect(result.tables).toEqual(expect.arrayContaining([
       'model_snapshot_weekly', 'nowcast_snapshot_daily', 'snapshot_inputs',
-      'observations', 'ingest_runs', 'market_prices_daily', 'cash_rates_daily',
+      'observations', 'ingest_runs', 'market_prices_daily', 'cash_rates_daily', 'policy_regime_events',
     ]));
     expect(result.indexes).toEqual(expect.arrayContaining([
       'ingest_runs_started_at', 'idx_market_prices_daily_asof',
