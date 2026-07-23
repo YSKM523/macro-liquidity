@@ -83,7 +83,7 @@ vi.mock('../src/db', () => ({
 
 import worker from '../src/worker';
 import { runIngest } from '../src/service';
-import { loadEventBacktestInputs } from '../src/db';
+import { loadEventBacktestInputs, loadLiquidityStructureSeries, resolvePolicyRegime } from '../src/db';
 import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
 
 const env = {
@@ -254,7 +254,33 @@ describe('/api/v1 governance routes', () => {
       walcl_policy: { status: 'OK', score: 80 },
       weight_benchmarks: { status: 'OK', factorCount: 8 },
       funding_credit_ablation: { status: 'OK' },
+      formal_ablation_evaluation: { status: 'DATA_INCOMPLETE' },
     });
+  });
+
+  it('validates challenger as_of and returns a fixed redacted policy-ledger failure', async () => {
+    vi.mocked(loadLiquidityStructureSeries).mockRejectedValueOnce(new Error('invalid liquidity-structure as_of'));
+    const invalid = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/liquidity-structure?as_of=bad',
+    ), env);
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({ error_code: 'INVALID_AS_OF' });
+
+    dbState.eventInputs = formalEventInputs(4);
+    const errorSink = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(resolvePolicyRegime).mockRejectedValueOnce(new Error('authorization=Bearer super-secret'));
+    const unavailable = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/liquidity-structure?as_of=2030-01-01T00:00:00Z',
+    ), env);
+    const body = await unavailable.json() as any;
+    expect(unavailable.status).toBe(200);
+    expect(body).toMatchObject({
+      api_version: 'v1', status: 'DATA_INCOMPLETE', reason: 'POLICY_REGIME_INVALID',
+      tga_buffer: null, policy_regime: null, walcl_policy: null,
+      weight_benchmarks: null, funding_credit_ablation: null, formal_ablation_evaluation: null,
+    });
+    expect(JSON.stringify(body)).not.toContain('super-secret');
+    expect(errorSink.mock.calls.at(-1)?.[0]).not.toMatch(/super-secret/);
   });
 
   it('returns strict PIT score buckets, multiplicity status, and all registered stress events', async () => {
