@@ -145,20 +145,25 @@ export async function stagePitObservations(
     isoTimestampMs(row.fetchedAt, 'raw fetchedAt');
     validateReleaseOverride({ releasedAt: row.releasedAt, tradableAt: row.tradableAt });
   }
-  const statement = db.prepare(
-    `INSERT INTO staging_observations_pit
-       (run_id,series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
-        source,checksum,release_time_status,value)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(run_id,series_id,observation_date,vintage_date) DO UPDATE SET
-       released_at=excluded.released_at,fetched_at=excluded.fetched_at,tradable_at=excluded.tradable_at,
-       source=excluded.source,checksum=excluded.checksum,
-       release_time_status=excluded.release_time_status,value=excluded.value`,
-  );
-  const writes = rows.map(row => statement.bind(
-    runId, row.seriesId, row.observationDate, row.vintageDate, row.releasedAt, row.fetchedAt,
-    row.tradableAt, row.source, row.checksum, row.releaseTimeStatus, row.value,
-  ));
+  const writes: D1PreparedStatement[] = [];
+  for (let index = 0; index < rows.length; index += 9) {
+    const chunk = rows.slice(index, index + 9);
+    const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?)').join(',');
+    const statement = db.prepare(
+      `INSERT INTO staging_observations_pit
+         (run_id,series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,
+          source,checksum,release_time_status,value)
+       VALUES ${placeholders}
+       ON CONFLICT(run_id,series_id,observation_date,vintage_date) DO UPDATE SET
+         released_at=excluded.released_at,fetched_at=excluded.fetched_at,tradable_at=excluded.tradable_at,
+         source=excluded.source,checksum=excluded.checksum,
+         release_time_status=excluded.release_time_status,value=excluded.value`,
+    );
+    writes.push(statement.bind(...chunk.flatMap(row => [
+      runId, row.seriesId, row.observationDate, row.vintageDate, row.releasedAt, row.fetchedAt,
+      row.tradableAt, row.source, row.checksum, row.releaseTimeStatus, row.value,
+    ])));
+  }
   for (let index = 0; index < writes.length; index += 100) await db.batch(writes.slice(index, index + 100));
 }
 
@@ -269,12 +274,17 @@ export async function stageSeriesAttempt(
   completedAt?: string,
 ): Promise<void> {
   if (rows.length > 0) {
-    const statement = db.prepare(
-      `INSERT INTO staging_observations (run_id, series_id, date, value)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(run_id, series_id, date) DO UPDATE SET value = excluded.value`
-    );
-    const writes = rows.map(row => statement.bind(runId, seriesId, row.date, row.value));
+    const writes: D1PreparedStatement[] = [];
+    for (let index = 0; index < rows.length; index += 25) {
+      const chunk = rows.slice(index, index + 25);
+      const placeholders = chunk.map(() => '(?,?,?,?)').join(',');
+      const statement = db.prepare(
+        `INSERT INTO staging_observations (run_id, series_id, date, value)
+         VALUES ${placeholders}
+         ON CONFLICT(run_id, series_id, date) DO UPDATE SET value = excluded.value`
+      );
+      writes.push(statement.bind(...chunk.flatMap(row => [runId, seriesId, row.date, row.value])));
+    }
     for (let index = 0; index < writes.length; index += 100) {
       await db.batch(writes.slice(index, index + 100));
     }

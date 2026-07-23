@@ -43,6 +43,44 @@ describe('ingest repository contracts', () => {
     )).toThrow(/NEW.*empty/i);
   });
 
+  it('packs staging rows into bounded multi-value statements', async () => {
+    const batchSizes: number[] = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          sql,
+          bind(..._values: unknown[]) { return this; },
+          run: vi.fn(async () => ({ meta: { changes: 1 } })),
+        };
+      },
+      batch: vi.fn(async (statements: D1PreparedStatement[]) => {
+        batchSizes.push(statements.length);
+        return statements.map(() => ({ success: true }));
+      }),
+    } as unknown as D1Database;
+    const observations = Array.from({ length: 250 }, (_, index) => ({
+      date: `2024-${String(Math.floor(index / 28) + 1).padStart(2, '0')}-${String(index % 28 + 1).padStart(2, '0')}`,
+      value: index,
+    }));
+    const pit = Array.from({ length: 20 }, (_, index) => ({
+      seriesId: 'WALCL',
+      observationDate: `2024-01-${String(index + 1).padStart(2, '0')}`,
+      vintageDate: '2024-02-01',
+      releasedAt: '2024-02-01T23:59:59Z',
+      fetchedAt: '2024-02-02T00:00:00Z',
+      tradableAt: '2024-02-02T14:30:00Z',
+      source: 'ALFRED' as const,
+      checksum: `checksum-${index}`,
+      releaseTimeStatus: 'CONSERVATIVE_DATE_END' as const,
+      value: index,
+    }));
+
+    await ingestDb.stageSeriesAttempt(db, 'run-1', 'WALCL', observations);
+    await ingestDb.stagePitObservations(db, 'run-1', pit);
+
+    expect(batchSizes).toEqual([10, 3]);
+  });
+
   it('uses database-current time in one conditional acquisition statement', async () => {
     expect(typeof (ingestDb as any).acquireIngestLock).toBe('function');
     if (typeof (ingestDb as any).acquireIngestLock !== 'function') return;

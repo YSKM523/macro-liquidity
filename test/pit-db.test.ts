@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare';
 import { SERIES_IDS } from '../src/config';
 import {
   activateIngestRun, loadPitObservations, loadReleaseRules, officialPitDecisionEvents,
-  stagePitObservations,
+  stagePitObservations, stageSeriesAttempt,
 } from '../src/db';
 
 async function migratedDb() {
@@ -34,6 +34,41 @@ async function migratedDb() {
 }
 
 describe('point-in-time schema', () => {
+  it('executes packed multi-value staging against D1', async () => {
+    const { mf, db } = await migratedDb();
+    await db.batch([
+      db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('packed','RUNNING','FULL','2024-01-01T00:00:00Z')"),
+      db.prepare("INSERT INTO ingest_series_attempts (run_id,series_id,status,started_at,row_count) VALUES ('packed','WALCL','RUNNING','2024-01-01T00:00:00Z',0)"),
+    ]);
+    const dateAt = (index: number) =>
+      new Date(Date.UTC(2024, 0, 1) + index * 86_400_000).toISOString().slice(0, 10);
+    const observations = Array.from({ length: 250 }, (_, index) => ({
+      date: dateAt(index),
+      value: index,
+    }));
+    const pit = Array.from({ length: 20 }, (_, index) => ({
+      seriesId: 'WALCL',
+      observationDate: dateAt(index),
+      vintageDate: '2024-02-01',
+      releasedAt: '2024-02-01T23:59:59Z',
+      fetchedAt: '2024-02-02T00:00:00Z',
+      tradableAt: '2024-02-02T14:30:00Z',
+      source: 'ALFRED' as const,
+      checksum: `checksum-${index}`,
+      releaseTimeStatus: 'CONSERVATIVE_DATE_END' as const,
+      value: index,
+    }));
+
+    await stageSeriesAttempt(db, 'packed', 'WALCL', observations, '2024-02-02T00:00:00Z');
+    await stagePitObservations(db, 'packed', pit);
+
+    await expect(db.prepare("SELECT COUNT(*) AS n FROM staging_observations WHERE run_id='packed'").first())
+      .resolves.toEqual({ n: 250 });
+    await expect(db.prepare("SELECT COUNT(*) AS n FROM staging_observations_pit WHERE run_id='packed'").first())
+      .resolves.toEqual({ n: 20 });
+    await mf.dispose();
+  }, 30_000);
+
   it('makes raw vintages and official manifests append-only and records revisions', async () => {
     const { mf, db } = await migratedDb();
     await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('pit-run','RUNNING','FULL','2024-01-01T00:00:00Z')").run();

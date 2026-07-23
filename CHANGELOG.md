@@ -24,6 +24,10 @@ All notable changes to Macro Liquidity Dashboard are documented here.
   checkpoint because FRED reports that this series does not exist in ALFRED.
   No synthetic PIT vintage is created: downstream storage keeps its existing
   `LEGACY_NO_PIT` provenance and formal PIT diagnostics remain fail-closed.
+- Packed staging writes into multi-value statements within D1's 100-bind
+  ceiling, reducing first-run write amplification that could exhaust a Worker
+  invocation mid-series. Atomic activation and append-only PIT semantics are
+  unchanged.
 
 ### PR-17 — Governed liquidity-structure challenger
 
