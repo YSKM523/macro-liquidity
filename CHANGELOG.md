@@ -4,6 +4,15 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-16 — Score monotonicity, multiplicity, and registered stress diagnostics
+
+- Added one shared formal event-time outcome builder for 4/8/13-week horizons. PR-15's 13-week path delegates to it and retains exact entry/exit/return semantics; persisted Champion signals, PIT daily prices, clocks, model/config cohort, policy fields, and provenance all fail closed through the same gate.
+- Added the seven preregistered score buckets with mean/median return, negative-return probability, Type-7 q10, worst intrahorizon episode drawdown, overlapping `n`, greedily interval-non-overlapping `n`, and explicit small-sample/null statuses.
+- Added an append-only historical hypothesis ledger, conservative trial-dimension counts, family-isolated Benjamini–Hochberg logic, and Bailey–López de Prado DSR primitives. PR-11/PR-12 remain current-vintage retrospective `DROP_RESEARCH`; absent primary p-values enter retrospective multiplicity accounting as `p=1`, while missing formal daily trial NAV makes DSR explicitly not applicable rather than zero.
+- Froze eight half-open stress-event windows before implementation results, reports 4/8/13-week coverage and persisted verdict/exposure behavior, and keeps the open 2025–2026 window typed `OPEN_EVENT_WINDOW`. A candidate comparison remains `CANDIDATE_NOT_PROVIDED` until an independently versioned PIT artifact exists.
+- Added `GET /api/v1/diagnostics` and a separate safely escaped dashboard card. Mature missing-price coverage is distinct from pending outcomes; incomplete inputs return typed data-incomplete responses and never fall back to legacy weekly/current-vintage prices.
+- Changed no Champion formula, factor weight, threshold, hysteresis, stress rule, portfolio target, snapshot, or migration. No push, deployment, remote database/R2 access, secret, real alert, or production shadow runtime was performed.
+
 ### PR-15 — Purged validation and outcome taxonomy
 
 - Added `PURGED_VALIDATION_V1`: strict date-ordered 13-week labels, outcome-overlap purging, a 91-calendar-day pre-test embargo, and separate overlapping versus greedily interval-non-overlapping sample counts.
