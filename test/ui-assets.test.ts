@@ -274,6 +274,34 @@ describe('static UI assets', () => {
     expect(rendered).toContain('—');
   });
 
+  it('renders dual-horizon analysis as Shadow and never as the formal recommendation', () => {
+    const html = read('public/index.html');
+    const js = read('public/app.js');
+    expect(html).toContain('id="dual-horizon-card"');
+    expect(html).toContain('DUAL_HORIZON_CONFIDENCE_SHADOW_V1');
+    expect(js).toContain("fetch('/api/v1/challengers/dual-horizon')");
+    expect(js).toContain('renderDualHorizonShadow');
+    expect(js).toContain('Shadow only · Champion unchanged');
+    expect(js).toContain('战略 13 周');
+    expect(js).toContain('战术 4 周');
+    expect(js).not.toContain('正式建议：采用 Shadow 仓位');
+
+    const start = js.indexOf('function renderDualHorizonShadow');
+    const end = js.indexOf('async function fetchDualHorizonShadow');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const render = new Function(
+      `${js.slice(js.indexOf('function rbFinite'), end)}; return renderDualHorizonShadow;`,
+    )() as (value: unknown) => string;
+    const malicious = '<img src=x onerror=globalThis.pwned=true>';
+    const rendered = render({
+      status: 'DATA_INCOMPLETE', reason: malicious,
+      result: { status: 'DATA_INCOMPLETE', reasons: [malicious] },
+    });
+    expect(rendered).not.toContain('<img');
+    expect(rendered).toContain('&lt;img');
+  });
+
   it('renders adversarial validation status and all-null metrics without unsafe HTML or exceptions', () => {
     const js = read('public/app.js');
     const start = js.indexOf('function rbFinite');

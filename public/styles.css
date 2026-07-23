@@ -316,7 +316,8 @@ body{margin:0;background:var(--surface);color:var(--ink);
   #provenance-card{order:8}
   #score-stress-card{order:9}
   #liquidity-structure-card{order:10}
-  #event-backtest-card{order:11}
+  #dual-horizon-card{order:11}
+  #event-backtest-card{order:12}
   .chart-panel{min-height:0}
   #chart{height:340px;min-height:300px;max-width:100%}
   .factor-table,.rb-table{display:block;max-width:100%;overflow-x:auto}

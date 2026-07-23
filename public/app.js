@@ -69,6 +69,7 @@ async function main() {
   fetchRobust();
   fetchScoreStressDiagnostics();
   fetchLiquidityStructureChallenger();
+  if (typeof document !== 'undefined') fetchDualHorizonShadow();
   fetchEventBacktest();
   let snapRes, histRes;
   try {
@@ -817,6 +818,38 @@ async function fetchLiquidityStructureChallenger() {
     body.innerHTML = renderLiquidityStructureChallenger(result);
   } catch (error) {
     body.innerHTML = '<p class="rb-note">流动性结构 Challenger 加载失败，稍后重试</p>';
+  }
+  card.style.display = '';
+}
+
+function renderDualHorizonShadow(payload) {
+  const result = payload && payload.result;
+  const status = rbEsc(payload?.status || result?.status || 'DATA_INCOMPLETE');
+  const header = `<div class="rb-concl">${status} · Shadow only · Champion unchanged</div>`;
+  if (!result || result.status !== 'OK') {
+    const reasons = Array.isArray(result?.reasons) ? result.reasons.join(' · ') : payload?.reason;
+    return header + `<p class="rb-note">数据不完整：${rbEsc(reasons || 'INPUT_UNAVAILABLE')}</p>`;
+  }
+  const components = result.confidenceComponents || {};
+  const reason = Array.isArray(result.reasons) ? result.reasons.join(' · ') : '—';
+  return header
+    + `<div class="rb-stat"><span class="k">战略 13 周 / 战术 4 周</span><span class="v">${rbMaybeNum(result.strategicScore)} / ${rbMaybeNum(result.tacticalScore)}</span></div>`
+    + `<div class="rb-stat"><span class="k">模型置信度</span><span class="v">${rbMaybeNum(result.confidence)} / 100</span></div>`
+    + `<div class="rb-stat"><span class="k">正式基础敞口 / Shadow 敞口</span><span class="v">${rbMaybePct(result.baseExposure)} / ${rbMaybePct(result.shadowTargetExposure)}</span></div>`
+    + `<div class="rb-stat"><span class="k">完整 / 新鲜 / regime 样本</span><span class="v">${rbMaybeNum(components.completeness)} / ${rbMaybeNum(components.freshness)} / ${rbMaybeNum(components.regimeSample)}</span></div>`
+    + `<div class="rb-stat"><span class="k">主要因子 / Raw-Smooth</span><span class="v">${rbMaybeNum(components.majorFactorAgreement)} / ${rbMaybeNum(components.rawSmoothAgreement)}</span></div>`
+    + `<p class="rb-note">假设性微调，不是正式建议；${rbEsc(reason)}</p>`;
+}
+
+async function fetchDualHorizonShadow() {
+  const card = document.getElementById('dual-horizon-card');
+  const body = document.getElementById('dual-horizon-body');
+  if (!card || !body) return;
+  try {
+    const result = await fetch('/api/v1/challengers/dual-horizon').then(response => response.json());
+    body.innerHTML = renderDualHorizonShadow(result);
+  } catch {
+    body.innerHTML = '<p class="rb-note">双周期 Shadow 加载失败，稍后重试</p>';
   }
   card.style.display = '';
 }
