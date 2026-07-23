@@ -1,5 +1,5 @@
 import { SCORING_FACTOR_KEYS, WEIGHTS } from './config';
-import { clamp } from './metrics';
+import { clamp, scoreNetliqTrend } from './metrics';
 
 export const DUAL_HORIZON_PROTOCOL = Object.freeze({
   protocol: 'DUAL_HORIZON_CONFIDENCE_SHADOW_V1' as const,
@@ -53,10 +53,28 @@ export function scoreTacticalCohort(
   return { status: 'OK' as const, score: clamp(score), factors };
 }
 
+export function scoreFourWeekTacticalCohort(
+  formalFactors: Record<string, number | undefined>,
+  rawLevels: number[],
+) {
+  if (rawLevels.length < 5 || rawLevels.some(value => !Number.isFinite(value))) {
+    return { status: 'DATA_INCOMPLETE' as const, reason: 'MISSING_TACTICAL_HISTORY' as const };
+  }
+  return scoreTacticalCohort(formalFactors, scoreNetliqTrend(rawLevels, 4 as never));
+}
+
 const FRESHNESS_SCORE: Record<DualFactorStatus, number> = {
   OK: 100, PARTIAL: 50, STALE: 0, MISSING: 0,
 };
 const MAJOR_FACTORS = ['netliqTrend', 'dollar', 'reserveAdequacy', 'curve'] as const;
+
+function isDualFactorStatus(value: unknown): value is DualFactorStatus {
+  return value === 'OK' || value === 'PARTIAL' || value === 'STALE' || value === 'MISSING';
+}
+
+function isRawSmoothAgreement(value: unknown): value is RawSmoothAgreement {
+  return value === 'HIGH' || value === 'LOW' || value === 'TRANSITION';
+}
 
 export function computeDualHorizonConfidence(input: {
   factorStatuses: Record<string, DualFactorStatus | undefined>;
@@ -66,7 +84,7 @@ export function computeDualHorizonConfidence(input: {
 }) {
   const factors = completeFactors(input.tacticalFactors);
   const statuses = SCORING_FACTOR_KEYS.map(key => input.factorStatuses[key]);
-  if (!factors || statuses.some(status => status == null) || input.rawSmooth == null
+  if (!factors || statuses.some(status => !isDualFactorStatus(status)) || !isRawSmoothAgreement(input.rawSmooth)
     || !Number.isSafeInteger(input.sameRegimeSampleCount) || input.sameRegimeSampleCount < 0) {
     return { status: 'DATA_INCOMPLETE' as const, reason: 'CONFIDENCE_INPUT_INCOMPLETE' as const };
   }

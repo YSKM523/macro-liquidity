@@ -3,7 +3,10 @@ import { WEIGHTS } from '../src/config';
 import {
   computeDualHorizonConfidence,
   mapShadowExposure,
+  scoreFourWeekTacticalCohort,
   scoreTacticalCohort,
+  type DualFactorStatus,
+  type RawSmoothAgreement,
 } from '../src/dual-horizon-confidence';
 
 const factors = {
@@ -33,6 +36,22 @@ describe('dual-horizon frozen arithmetic', () => {
     });
   });
 
+  it('derives the tactical cohort net-liquidity score from five raw weekly levels using four weeks', () => {
+    const rawLevels = [1000, 1100, 1200, 1300, 1400];
+    expect(scoreFourWeekTacticalCohort(factors, rawLevels)).toEqual(
+      scoreTacticalCohort(factors, 80),
+    );
+  });
+
+  it('fails closed when tactical raw history is short or non-finite', () => {
+    expect(scoreFourWeekTacticalCohort(factors, [1000, 1100, 1200, 1300])).toEqual({
+      status: 'DATA_INCOMPLETE', reason: 'MISSING_TACTICAL_HISTORY',
+    });
+    expect(scoreFourWeekTacticalCohort(factors, [1000, 1100, Number.NaN, 1300, 1400])).toEqual({
+      status: 'DATA_INCOMPLETE', reason: 'MISSING_TACTICAL_HISTORY',
+    });
+  });
+
   it('calculates the five equal confidence components exactly', () => {
     expect(computeDualHorizonConfidence({
       factorStatuses: {
@@ -55,6 +74,34 @@ describe('dual-horizon frozen arithmetic', () => {
         rawSmoothAgreement: 100,
       },
       confidence: 78.75,
+    });
+  });
+
+  it('fails closed for an unknown factor status at runtime', () => {
+    expect(computeDualHorizonConfidence({
+      factorStatuses: {
+        netliqTrend: 'UNKNOWN' as unknown as DualFactorStatus, impulse: 'OK', credit: 'OK', funding: 'OK',
+        rates: 'OK', dollar: 'OK', reserveAdequacy: 'OK', curve: 'OK',
+      },
+      tacticalFactors: factors,
+      sameRegimeSampleCount: 26,
+      rawSmooth: 'HIGH',
+    })).toEqual({
+      status: 'DATA_INCOMPLETE', reason: 'CONFIDENCE_INPUT_INCOMPLETE',
+    });
+  });
+
+  it('fails closed for an unknown raw/smooth agreement at runtime', () => {
+    expect(computeDualHorizonConfidence({
+      factorStatuses: {
+        netliqTrend: 'OK', impulse: 'OK', credit: 'OK', funding: 'OK',
+        rates: 'OK', dollar: 'OK', reserveAdequacy: 'OK', curve: 'OK',
+      },
+      tacticalFactors: factors,
+      sameRegimeSampleCount: 26,
+      rawSmooth: 'UNKNOWN' as unknown as RawSmoothAgreement,
+    })).toEqual({
+      status: 'DATA_INCOMPLETE', reason: 'CONFIDENCE_INPUT_INCOMPLETE',
     });
   });
 
