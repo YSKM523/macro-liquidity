@@ -1,4 +1,4 @@
-import type { Obs, SeriesMap, Snapshot, Verdict } from './metrics';
+import type { Impulse, Obs, SeriesMap, Snapshot, Verdict } from './metrics';
 import { SERIES_IDS } from './config';
 import type { PitDecisionEvent, PitObservation, ReleaseOverride, ReleaseRule, SnapshotInput } from './pit';
 import { compareIsoTimestamps, isoTimestampMs, validateReleaseOverride } from './pit';
@@ -1295,7 +1295,7 @@ export interface DualHorizonSnapshotRow {
   verdict: string;
   netliqDir: string;
   snapshotVixEod: number | null;
-  qeQtRegime: string;
+  qeQtRegime: Impulse;
   factors: Record<string, unknown>;
   factorResults: Record<string, unknown>;
   modelVersion: string;
@@ -1342,7 +1342,14 @@ function parseObjectJson(value: unknown, field: string): Record<string, unknown>
   return parsed as Record<string, unknown>;
 }
 
-function parseDualHorizonSnapshotRow(row: Record<string, unknown>): DualHorizonSnapshotRow {
+function isBalanceSheetImpulse(value: unknown): value is Impulse {
+  return value === 'EXPANDING' || value === 'CONTRACTING' || value === 'FLAT';
+}
+
+function parseDualHorizonSnapshotRow(
+  row: Record<string, unknown>,
+  asOfCutoff: string,
+): DualHorizonSnapshotRow {
   if (typeof row.date !== 'string') throw new Error('dual-horizon snapshot date missing');
   requirePolicyDate(row.date, 'dual-horizon snapshot date');
   for (const field of ['decision_at', 'recorded_at', 'data_cutoff', 'created_at'] as const) {
@@ -1358,8 +1365,8 @@ function parseDualHorizonSnapshotRow(row: Record<string, unknown>): DualHorizonS
     snapshotVixEod: row.vix_eod,
   });
   if (fieldIssue) throw new Error(fieldIssue);
-  if (typeof row.qe_qt_regime !== 'string' || row.qe_qt_regime.length === 0) {
-    throw new Error('dual-horizon qe_qt_regime missing');
+  if (!isBalanceSheetImpulse(row.qe_qt_regime)) {
+    throw new Error('dual-horizon qe_qt_regime invalid');
   }
   if (typeof row.model_version !== 'string' || row.model_version === 'LEGACY_UNVERSIONED') {
     throw new Error('dual-horizon model version invalid');
@@ -1374,10 +1381,21 @@ function parseDualHorizonSnapshotRow(row: Record<string, unknown>): DualHorizonS
   if (typeof row.data_run_id !== 'string' || row.data_run_id.length === 0) {
     throw new Error('dual-horizon data run id missing');
   }
+  const decisionAt = row.decision_at as string;
+  const recordedAt = row.recorded_at as string;
+  const dataCutoff = row.data_cutoff as string;
+  const createdAt = row.created_at as string;
+  if (compareIsoTimestamps(dataCutoff, decisionAt) >= 0
+    || compareIsoTimestamps(decisionAt, recordedAt) > 0
+    || compareIsoTimestamps(recordedAt, createdAt) > 0
+    || [decisionAt, recordedAt, dataCutoff, createdAt]
+      .some(timestamp => compareIsoTimestamps(timestamp, asOfCutoff) >= 0)) {
+    throw new Error('dual-horizon snapshot timestamp ordering invalid');
+  }
   return {
     date: row.date,
-    decisionAt: row.decision_at as string,
-    recordedAt: row.recorded_at as string,
+    decisionAt,
+    recordedAt,
     score: row.score,
     verdict: row.verdict as string,
     netliqDir: row.netliq_dir as string,
@@ -1389,8 +1407,8 @@ function parseDualHorizonSnapshotRow(row: Record<string, unknown>): DualHorizonS
     configHash: row.config_hash,
     codeCommitSha: row.code_commit_sha,
     dataRunId: row.data_run_id,
-    dataCutoff: row.data_cutoff as string,
-    createdAt: row.created_at as string,
+    dataCutoff,
+    createdAt,
   };
 }
 
@@ -1429,7 +1447,7 @@ export async function loadDualHorizonSnapshotInputs(
 
   let snapshots: DualHorizonSnapshotRow[];
   try {
-    snapshots = (rows.results ?? []).map(row => parseDualHorizonSnapshotRow(row));
+    snapshots = (rows.results ?? []).map(row => parseDualHorizonSnapshotRow(row, clock.cutoff));
   } catch {
     throw new DualHorizonDomainError('FORMAL_SNAPSHOT_INVALID', clock.cutoff);
   }

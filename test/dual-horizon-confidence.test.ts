@@ -14,6 +14,7 @@ import {
   type RawSmoothAgreement,
 } from '../src/dual-horizon-confidence';
 import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
+import { mapPortfolioPolicy, snapshotVixStressStatus } from '../src/portfolio-policy';
 import type {
   DualHorizonSnapshotInputs,
   LiquidityStructureSeriesInputs,
@@ -71,7 +72,7 @@ function snapshotsAt(decisionDate: string): DualHorizonSnapshotInputs {
     verdict: 'NEUTRAL',
     netliqDir: 'FLAT',
     snapshotVixEod: 20,
-    qeQtRegime: 'QT',
+    qeQtRegime: 'FLAT' as const,
     factors: snapshotFactors,
     factorResults,
     modelVersion: 'champion-v1.0.0',
@@ -425,6 +426,52 @@ describe('dual-horizon Shadow composition', () => {
     expect(CHAMPION_MODEL_VERSION).toBe('champion-v1.0.0');
     expect(result.championChanged).toBe(false);
     expect(formalSnapshotAfterShadowRead).toEqual(formalSnapshotBeforeShadowRead);
+  });
+
+  it('maps baseExposure through the unchanged formal portfolio policy', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    const selected = input.snapshots.snapshots.at(-1)!;
+    const result = buildDualHorizonShadow(input.snapshots, input.liquidity);
+    expect(result.status).toBe('OK');
+    if (result.status !== 'OK') return;
+    expect(result.baseExposure).toBe(mapPortfolioPolicy({
+      score: selected.score,
+      verdict: selected.verdict as 'BULLISH' | 'NEUTRAL' | 'BEARISH',
+      netliqDir: selected.netliqDir as 'UP' | 'DOWN' | 'FLAT',
+      stressStatus: snapshotVixStressStatus(selected.snapshotVixEod),
+    }).targetExposure);
+  });
+
+  it('counts only the same regime and governed revision cohort, never dataRunId', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    const selected = input.snapshots.snapshots.at(-1)!;
+    const eligibleDifferentRun = {
+      ...selected,
+      date: isoDate(Date.parse(`${selected.date}T00:00:00Z`) - 7 * DAY_MS),
+      dataRunId: 'different-formal-run',
+    };
+    input.snapshots.snapshots = [
+      eligibleDifferentRun,
+      { ...eligibleDifferentRun, dataRunId: 'wrong-regime', qeQtRegime: 'EXPANDING' },
+      { ...eligibleDifferentRun, dataRunId: 'wrong-model', modelVersion: 'champion-v0.9.0' },
+      { ...eligibleDifferentRun, dataRunId: 'wrong-config', configHash: 'c'.repeat(64) },
+      { ...eligibleDifferentRun, dataRunId: 'wrong-code', codeCommitSha: 'd'.repeat(40) },
+      selected,
+    ];
+    input.snapshots.provenance.rowCount = input.snapshots.snapshots.length;
+
+    const result = buildDualHorizonShadow(input.snapshots, input.liquidity);
+    expect(result.status).toBe('OK');
+    if (result.status !== 'OK') return;
+    expect(result.confidenceEvidence.regimeSample).toMatchObject({
+      uncappedCount: 1,
+      selectedRegime: 'FLAT',
+      governedRevisionCohort: {
+        modelVersion: selected.modelVersion,
+        configHash: selected.configHash,
+        codeCommitSha: selected.codeCommitSha,
+      },
+    });
   });
 
   it('matches the frozen PR-11 Raw/Smooth direction from the same synthetic history', () => {

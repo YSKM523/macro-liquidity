@@ -155,7 +155,7 @@ function completeDualHorizonInputs() {
     verdict: 'BULLISH',
     netliqDir: 'UP',
     snapshotVixEod: 20,
-    qeQtRegime: 'QT',
+    qeQtRegime: 'FLAT',
     factors,
     factorResults,
     modelVersion: CHAMPION_MODEL_VERSION,

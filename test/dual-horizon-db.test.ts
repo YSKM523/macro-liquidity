@@ -54,7 +54,11 @@ async function seedOfficialSnapshot(db: D1Database, input: {
   configHash: string;
   regime: string;
 }) {
-  const decisionWeek = input.date === '2024-01-03' ? '2024-01-01' : '2024-01-08';
+  const dateEpoch = Date.parse(`${input.date}T00:00:00Z`);
+  const weekday = new Date(dateEpoch).getUTCDay();
+  const decisionWeek = new Date(
+    dateEpoch - ((weekday + 6) % 7) * 86_400_000,
+  ).toISOString().slice(0, 10);
   await db.prepare(
     `INSERT INTO model_snapshot_weekly
       (date,decision_week,score,verdict,netliq_dir,vix_eod,qe_qt_regime,
@@ -128,6 +132,41 @@ describe('dual-horizon PIT inputs', () => {
     expect(JSON.stringify(after)).not.toContain('2024-01-11');
     expect(await db.prepare('SELECT COUNT(*) AS n FROM nowcast_snapshot_daily').first())
       .toEqual({ n: 1 });
+    await mf.dispose();
+  });
+
+  it('keeps provisional, legacy, and post-cutoff snapshots outside the formal loader cohort', async () => {
+    const { mf, db } = await migratedDb();
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-03', recordedAt: '2024-01-05T00:00:00Z',
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), regime: 'FLAT',
+    });
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-10', recordedAt: '2024-01-12T00:00:00Z',
+      modelVersion: 'champion-v0.9.0', configHash: 'c'.repeat(64), regime: 'EXPANDING',
+    });
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-17', recordedAt: '2024-01-18T00:00:00Z',
+      modelVersion: 'LEGACY_UNVERSIONED', configHash: 'a'.repeat(64), regime: 'FLAT',
+    });
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-24', recordedAt: '2024-01-25T00:00:00Z',
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), regime: 'FLAT',
+    });
+    await seedProvisionalSnapshot(db, '2024-01-11');
+
+    const result = await loadDualHorizonSnapshotInputs(db, '2024-01-20T00:00:00Z');
+    expect(result.snapshots.map(row => ({
+      date: row.date,
+      modelVersion: row.modelVersion,
+      regime: row.qeQtRegime,
+    }))).toEqual([
+      { date: '2024-01-03', modelVersion: 'champion-v1.0.0', regime: 'FLAT' },
+      { date: '2024-01-10', modelVersion: 'champion-v0.9.0', regime: 'EXPANDING' },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('2024-01-11');
+    expect(JSON.stringify(result)).not.toContain('2024-01-17');
+    expect(JSON.stringify(result)).not.toContain('2024-01-24');
     await mf.dispose();
   });
 
@@ -215,6 +254,43 @@ describe('dual-horizon PIT inputs', () => {
     await db.prepare(
       `UPDATE model_snapshot_weekly
        SET factors_json='{"netliqTrend":'
+       WHERE date='2024-01-03'`,
+    ).run();
+
+    await expect(loadDualHorizonSnapshotInputs(db, '2024-01-06T00:00:00Z'))
+      .rejects.toMatchObject({
+        name: DualHorizonDomainError.name,
+        reason: 'FORMAL_SNAPSHOT_INVALID',
+        asOf: '2024-01-06T00:00:00Z',
+      });
+    await mf.dispose();
+  });
+
+  it('returns an invalid persisted balance-sheet regime as a typed domain failure', async () => {
+    const { mf, db } = await migratedDb();
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-03', recordedAt: '2024-01-05T00:00:00Z',
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), regime: 'QT',
+    });
+
+    await expect(loadDualHorizonSnapshotInputs(db, '2024-01-06T00:00:00Z'))
+      .rejects.toMatchObject({
+        name: DualHorizonDomainError.name,
+        reason: 'FORMAL_SNAPSHOT_INVALID',
+        asOf: '2024-01-06T00:00:00Z',
+      });
+    await mf.dispose();
+  });
+
+  it('returns invalid snapshot timestamp ordering as a typed domain failure', async () => {
+    const { mf, db } = await migratedDb();
+    await seedOfficialSnapshot(db, {
+      date: '2024-01-03', recordedAt: '2024-01-05T00:00:00Z',
+      modelVersion: 'champion-v1.0.0', configHash: 'a'.repeat(64), regime: 'FLAT',
+    });
+    await db.prepare(
+      `UPDATE model_snapshot_weekly
+       SET created_at='2024-01-04T00:00:00Z'
        WHERE date='2024-01-03'`,
     ).run();
 
