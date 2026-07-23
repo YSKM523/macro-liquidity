@@ -159,24 +159,61 @@ describe('dual-horizon frozen arithmetic', () => {
     const result = scoreTacticalCohort(factors, 80);
     const expected = Object.entries({ ...factors, netliqTrend: 80 })
       .reduce((sum, [key, value]) => sum + value * WEIGHTS[key as keyof typeof WEIGHTS], 0);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: 'OK', score: expected, factors: { ...factors, netliqTrend: 80 },
+      completenessEvidence: {
+        validCount: 8,
+        expectedCount: 8,
+        invalidOrMissingKeys: [],
+        score: 100,
+        reason: 'FORMAL_FACTOR_COHORT_COMPLETE',
+      },
     });
     expect(Object.values(WEIGHTS).reduce<number>((sum, weight) => sum + weight, 0)).toBe(1);
   });
 
   it('fails closed when any positive-weight factor is absent', () => {
     const { funding: _funding, ...incomplete } = factors;
-    expect(scoreTacticalCohort(incomplete, 80)).toEqual({
-      status: 'DATA_INCOMPLETE', reason: 'MISSING_FORMAL_FACTOR_COHORT',
+    expect(scoreTacticalCohort(incomplete, 80)).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'MISSING_FORMAL_FACTOR_COHORT',
+      completenessEvidence: {
+        validCount: 7,
+        expectedCount: 8,
+        validKeys: expect.not.arrayContaining(['funding']),
+        invalidOrMissingKeys: ['funding'],
+        score: 87.5,
+        reason: 'FORMAL_FACTOR_COHORT_INCOMPLETE',
+      },
+    });
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['non-finite', Number.NaN],
+    ['below range', -1],
+    ['above range', 101],
+  ])('fails closed before replacement when persisted netliqTrend is %s', (_label, value) => {
+    expect(scoreTacticalCohort({ ...factors, netliqTrend: value }, 80)).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'MISSING_FORMAL_FACTOR_COHORT',
+      completenessEvidence: {
+        validCount: 7,
+        expectedCount: 8,
+        invalidOrMissingKeys: ['netliqTrend'],
+        score: 87.5,
+      },
     });
   });
 
   it('derives the tactical cohort net-liquidity score from five raw weekly levels using four weeks', () => {
     const rawLevels = [1000, 1100, 1200, 1300, 1400];
-    expect(scoreFourWeekTacticalCohort(factors, rawLevels)).toEqual(
-      scoreTacticalCohort(factors, 80),
-    );
+    expect(scoreFourWeekTacticalCohort(factors, rawLevels)).toMatchObject({
+      status: 'OK',
+      score: scoreTacticalCohort(factors, 80).status === 'OK'
+        ? scoreTacticalCohort(factors, 80).score
+        : Number.NaN,
+    });
   });
 
   it('fails closed when tactical raw history is short or non-finite', () => {
@@ -190,6 +227,7 @@ describe('dual-horizon frozen arithmetic', () => {
 
   it('calculates the five equal confidence components exactly', () => {
     expect(computeDualHorizonConfidence({
+      formalFactors: factors,
       factorStatuses: {
         netliqTrend: 'OK', impulse: 'PARTIAL', credit: 'OK', funding: 'OK',
         rates: 'STALE', dollar: 'OK', reserveAdequacy: 'OK', curve: 'MISSING',
@@ -198,8 +236,19 @@ describe('dual-horizon frozen arithmetic', () => {
         netliqTrend: 70, impulse: 60, credit: 20, funding: 40,
         rates: 50, dollar: 70, reserveAdequacy: 60, curve: 40,
       },
-      sameRegimeSampleCount: 26,
-      rawSmooth: 'HIGH',
+      regimeSample: {
+        count: 26,
+        selectedRegime: 'FLAT',
+        modelVersion: 'champion-v1.0.0',
+        configHash: 'a'.repeat(64),
+        codeCommitSha: 'b'.repeat(40),
+      },
+      rawSmooth: {
+        agreement: 'HIGH',
+        sampleCount: 170,
+        observationDate: '2024-01-03',
+        availableDate: '2024-01-10',
+      },
     })).toMatchObject({
       status: 'OK',
       components: {
@@ -210,33 +259,97 @@ describe('dual-horizon frozen arithmetic', () => {
         rawSmoothAgreement: 100,
       },
       confidence: 78.75,
+      evidence: {
+        completeness: {
+          validCount: 8,
+          expectedCount: 8,
+          validKeys: Object.keys(factors),
+          invalidOrMissingKeys: [],
+          score: 100,
+          reason: 'FORMAL_FACTOR_COHORT_COMPLETE',
+        },
+        freshness: {
+          statuses: {
+            netliqTrend: 'OK', impulse: 'PARTIAL', credit: 'OK', funding: 'OK',
+            rates: 'STALE', dollar: 'OK', reserveAdequacy: 'OK', curve: 'MISSING',
+          },
+          counts: { OK: 5, PARTIAL: 1, STALE: 1, MISSING: 1 },
+          score: 68.75,
+          reason: 'PERSISTED_FACTOR_FRESHNESS',
+        },
+        regimeSample: {
+          uncappedCount: 26,
+          cap: 52,
+          selectedRegime: 'FLAT',
+          governedRevisionCohort: {
+            modelVersion: 'champion-v1.0.0',
+            configHash: 'a'.repeat(64),
+            codeCommitSha: 'b'.repeat(40),
+          },
+          score: 50,
+          reason: 'SAME_REGIME_GOVERNED_REVISION_SAMPLE',
+        },
+        majorFactorAgreement: {
+          directions: {
+            netliqTrend: 'UP',
+            dollar: 'UP',
+            reserveAdequacy: 'UP',
+            curve: 'DOWN',
+          },
+          counts: { up: 3, down: 1, neutral: 0 },
+          score: 75,
+          reason: 'MAJOR_FACTOR_DIRECTION_AGREEMENT',
+        },
+        rawSmooth: {
+          agreement: 'HIGH',
+          sampleCount: 170,
+          observationDate: '2024-01-03',
+          availableDate: '2024-01-10',
+          score: 100,
+          reason: 'RAW_SMOOTH_HIGH',
+        },
+      },
     });
   });
 
   it('fails closed for an unknown factor status at runtime', () => {
     expect(computeDualHorizonConfidence({
+      formalFactors: factors,
       factorStatuses: {
         netliqTrend: 'UNKNOWN' as unknown as DualFactorStatus, impulse: 'OK', credit: 'OK', funding: 'OK',
         rates: 'OK', dollar: 'OK', reserveAdequacy: 'OK', curve: 'OK',
       },
       tacticalFactors: factors,
-      sameRegimeSampleCount: 26,
-      rawSmooth: 'HIGH',
-    })).toEqual({
+      regimeSample: {
+        count: 26, selectedRegime: 'FLAT', modelVersion: 'champion-v1.0.0',
+        configHash: 'a'.repeat(64), codeCommitSha: 'b'.repeat(40),
+      },
+      rawSmooth: {
+        agreement: 'HIGH', sampleCount: 170,
+        observationDate: '2024-01-03', availableDate: '2024-01-10',
+      },
+    })).toMatchObject({
       status: 'DATA_INCOMPLETE', reason: 'CONFIDENCE_INPUT_INCOMPLETE',
     });
   });
 
   it('fails closed for an unknown raw/smooth agreement at runtime', () => {
     expect(computeDualHorizonConfidence({
+      formalFactors: factors,
       factorStatuses: {
         netliqTrend: 'OK', impulse: 'OK', credit: 'OK', funding: 'OK',
         rates: 'OK', dollar: 'OK', reserveAdequacy: 'OK', curve: 'OK',
       },
       tacticalFactors: factors,
-      sameRegimeSampleCount: 26,
-      rawSmooth: 'UNKNOWN' as unknown as RawSmoothAgreement,
-    })).toEqual({
+      regimeSample: {
+        count: 26, selectedRegime: 'FLAT', modelVersion: 'champion-v1.0.0',
+        configHash: 'a'.repeat(64), codeCommitSha: 'b'.repeat(40),
+      },
+      rawSmooth: {
+        agreement: 'UNKNOWN' as unknown as RawSmoothAgreement,
+        sampleCount: 170, observationDate: '2024-01-03', availableDate: '2024-01-10',
+      },
+    })).toMatchObject({
       status: 'DATA_INCOMPLETE', reason: 'CONFIDENCE_INPUT_INCOMPLETE',
     });
   });
@@ -356,6 +469,29 @@ describe('dual-horizon Shadow composition', () => {
     expect(buildDualHorizonShadow(input.snapshots, input.liquidity)).toMatchObject({
       status: 'DATA_INCOMPLETE',
       reasons: expect.arrayContaining(['MISSING_RAW_SMOOTH_HISTORY']),
+      championChanged: false,
+    });
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['non-finite', Number.NaN],
+    ['out of range', 101],
+  ])('fails closed with 7/8 diagnostics when persisted netliqTrend is %s', (_label, value) => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    input.snapshots.snapshots.at(-1)!.factors.netliqTrend = value;
+    expect(buildDualHorizonShadow(input.snapshots, input.liquidity)).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reasons: ['MISSING_FORMAL_FACTOR_COHORT'],
+      availableDiagnostics: {
+        completeness: {
+          validCount: 7,
+          expectedCount: 8,
+          invalidOrMissingKeys: ['netliqTrend'],
+          score: 87.5,
+          reason: 'FORMAL_FACTOR_COHORT_INCOMPLETE',
+        },
+      },
       championChanged: false,
     });
   });

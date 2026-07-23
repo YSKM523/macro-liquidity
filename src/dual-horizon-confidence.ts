@@ -27,6 +27,50 @@ export const DUAL_HORIZON_PROTOCOL = Object.freeze({
 
 export type DualFactorStatus = 'OK' | 'PARTIAL' | 'STALE' | 'MISSING';
 export type RawSmoothAgreement = 'HIGH' | 'LOW' | 'TRANSITION';
+export type MajorFactorDirection = 'UP' | 'DOWN' | 'NEUTRAL';
+export interface CompletenessEvidence {
+  validCount: number;
+  expectedCount: number;
+  validKeys: string[];
+  invalidOrMissingKeys: string[];
+  score: number;
+  reason: 'FORMAL_FACTOR_COHORT_COMPLETE' | 'FORMAL_FACTOR_COHORT_INCOMPLETE';
+}
+export interface ConfidenceEvidence {
+  completeness: CompletenessEvidence;
+  freshness: {
+    statuses: Record<string, DualFactorStatus>;
+    counts: Record<DualFactorStatus, number>;
+    score: number;
+    reason: 'PERSISTED_FACTOR_FRESHNESS';
+  };
+  regimeSample: {
+    uncappedCount: number;
+    cap: 52;
+    selectedRegime: string;
+    governedRevisionCohort: {
+      modelVersion: string;
+      configHash: string;
+      codeCommitSha: string;
+    };
+    score: number;
+    reason: 'SAME_REGIME_GOVERNED_REVISION_SAMPLE';
+  };
+  majorFactorAgreement: {
+    directions: Record<string, MajorFactorDirection>;
+    counts: { up: number; down: number; neutral: number };
+    score: number;
+    reason: 'MAJOR_FACTOR_DIRECTION_AGREEMENT';
+  };
+  rawSmooth: {
+    agreement: RawSmoothAgreement;
+    sampleCount: number;
+    observationDate: string;
+    availableDate: string;
+    score: number;
+    reason: 'RAW_SMOOTH_HIGH' | 'RAW_SMOOTH_LOW' | 'RAW_SMOOTH_TRANSITION';
+  };
+}
 export type DualHorizonIncompleteReason =
   | 'AS_OF_CUTOFF_MISMATCH'
   | 'NO_GOVERNED_FORMAL_SNAPSHOT'
@@ -57,6 +101,7 @@ export type DualHorizonShadowResult =
         majorFactorAgreement: number;
         rawSmoothAgreement: number;
       };
+      confidenceEvidence: ConfidenceEvidence;
       baseExposure: number;
       shadowAdjustment: number;
       shadowTargetExposure: number;
@@ -80,7 +125,7 @@ export type DualHorizonShadowResult =
       championChanged: false;
     };
 
-function completeFactors(input: Record<string, number | undefined>) {
+function completeFactors(input: Record<string, unknown>) {
   const output: Record<string, number> = {};
   for (const key of SCORING_FACTOR_KEYS) {
     const value = input[key];
@@ -90,19 +135,58 @@ function completeFactors(input: Record<string, number | undefined>) {
   return output;
 }
 
+export function formalFactorCompleteness(
+  formalFactors: Record<string, unknown>,
+): CompletenessEvidence {
+  const validKeys = SCORING_FACTOR_KEYS.filter(key => {
+    const value = formalFactors[key];
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
+  });
+  const invalidOrMissingKeys = SCORING_FACTOR_KEYS.filter(key => !validKeys.includes(key));
+  const expectedCount = SCORING_FACTOR_KEYS.length;
+  const score = validKeys.length / expectedCount * 100;
+  return {
+    validCount: validKeys.length,
+    expectedCount,
+    validKeys: [...validKeys],
+    invalidOrMissingKeys: [...invalidOrMissingKeys],
+    score,
+    reason: invalidOrMissingKeys.length === 0
+      ? 'FORMAL_FACTOR_COHORT_COMPLETE'
+      : 'FORMAL_FACTOR_COHORT_INCOMPLETE',
+  };
+}
+
 export function scoreTacticalCohort(
   formalFactors: Record<string, number | undefined>,
   tacticalNetliqTrend: number,
 ) {
-  const factors = completeFactors({ ...formalFactors, netliqTrend: tacticalNetliqTrend });
-  if (!factors) {
-    return { status: 'DATA_INCOMPLETE' as const, reason: 'MISSING_FORMAL_FACTOR_COHORT' as const };
+  const completenessEvidence = formalFactorCompleteness(formalFactors);
+  const completeFormalFactors = completeFactors(formalFactors);
+  if (!completeFormalFactors) {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'MISSING_FORMAL_FACTOR_COHORT' as const,
+      completenessEvidence,
+    };
   }
+  if (!Number.isFinite(tacticalNetliqTrend)
+    || tacticalNetliqTrend < 0 || tacticalNetliqTrend > 100) {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'MISSING_TACTICAL_HISTORY' as const,
+      completenessEvidence,
+    };
+  }
+  const factors: Record<string, number> = {
+    ...completeFormalFactors,
+    netliqTrend: tacticalNetliqTrend,
+  };
   const score = SCORING_FACTOR_KEYS.reduce(
     (sum, key) => sum + factors[key] * WEIGHTS[key as keyof typeof WEIGHTS],
     0,
   );
-  return { status: 'OK' as const, score: clamp(score), factors };
+  return { status: 'OK' as const, score: clamp(score), factors, completenessEvidence };
 }
 
 export function scoreFourWeekTacticalCohort(
@@ -112,7 +196,7 @@ export function scoreFourWeekTacticalCohort(
   if (rawLevels.length < 5 || rawLevels.some(value => !Number.isFinite(value))) {
     return { status: 'DATA_INCOMPLETE' as const, reason: 'MISSING_TACTICAL_HISTORY' as const };
   }
-  return scoreTacticalCohort(formalFactors, scoreNetliqTrend(rawLevels, 4 as never));
+  return scoreTacticalCohort(formalFactors, scoreNetliqTrend(rawLevels, 4));
 }
 
 const FRESHNESS_SCORE: Record<DualFactorStatus, number> = {
@@ -141,30 +225,111 @@ function statusesFromPersistedFactorResults(
 }
 
 export function computeDualHorizonConfidence(input: {
+  formalFactors: Record<string, unknown>;
   factorStatuses: Record<string, DualFactorStatus | undefined>;
   tacticalFactors: Record<string, number | undefined>;
-  sameRegimeSampleCount: number;
-  rawSmooth: RawSmoothAgreement | null;
+  regimeSample: {
+    count: number;
+    selectedRegime: string;
+    modelVersion: string;
+    configHash: string;
+    codeCommitSha: string;
+  };
+  rawSmooth: {
+    agreement: RawSmoothAgreement;
+    sampleCount: number;
+    observationDate: string;
+    availableDate: string;
+  } | null;
 }) {
+  const completeness = formalFactorCompleteness(input.formalFactors);
   const factors = completeFactors(input.tacticalFactors);
   const statuses = SCORING_FACTOR_KEYS.map(key => input.factorStatuses[key]);
-  if (!factors || statuses.some(status => !isDualFactorStatus(status)) || !isRawSmoothAgreement(input.rawSmooth)
-    || !Number.isSafeInteger(input.sameRegimeSampleCount) || input.sameRegimeSampleCount < 0) {
-    return { status: 'DATA_INCOMPLETE' as const, reason: 'CONFIDENCE_INPUT_INCOMPLETE' as const };
+  if (completeness.validCount !== completeness.expectedCount
+    || !factors
+    || statuses.some(status => !isDualFactorStatus(status))
+    || input.rawSmooth == null
+    || !isRawSmoothAgreement(input.rawSmooth.agreement)
+    || !Number.isSafeInteger(input.rawSmooth.sampleCount)
+    || input.rawSmooth.sampleCount < 0
+    || typeof input.rawSmooth.observationDate !== 'string'
+    || typeof input.rawSmooth.availableDate !== 'string'
+    || !Number.isSafeInteger(input.regimeSample.count)
+    || input.regimeSample.count < 0
+    || typeof input.regimeSample.selectedRegime !== 'string'
+    || typeof input.regimeSample.modelVersion !== 'string'
+    || typeof input.regimeSample.configHash !== 'string'
+    || typeof input.regimeSample.codeCommitSha !== 'string') {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'CONFIDENCE_INPUT_INCOMPLETE' as const,
+      availableDiagnostics: { completeness },
+    };
   }
-  const completeness = 100;
   const freshness = statuses.reduce((sum, status) => sum + FRESHNESS_SCORE[status!], 0)
     / SCORING_FACTOR_KEYS.length;
-  const regimeSample = Math.min(100, input.sameRegimeSampleCount / 52 * 100);
-  const directions = MAJOR_FACTORS.map(key => factors[key] > 55 ? 'UP' : factors[key] < 45 ? 'DOWN' : 'NEUTRAL');
-  const up = directions.filter(value => value === 'UP').length;
-  const down = directions.filter(value => value === 'DOWN').length;
-  const neutral = directions.length - up - down;
+  const regimeSample = Math.min(100, input.regimeSample.count / 52 * 100);
+  const directions = Object.fromEntries(MAJOR_FACTORS.map(key => [
+    key,
+    factors[key] > 55 ? 'UP' : factors[key] < 45 ? 'DOWN' : 'NEUTRAL',
+  ])) as Record<(typeof MAJOR_FACTORS)[number], MajorFactorDirection>;
+  const directionValues = Object.values(directions);
+  const up = directionValues.filter(value => value === 'UP').length;
+  const down = directionValues.filter(value => value === 'DOWN').length;
+  const neutral = directionValues.length - up - down;
   const majorFactorAgreement = 100 * Math.max(up + 0.5 * neutral, down + 0.5 * neutral) / 4;
-  const rawSmoothAgreement = input.rawSmooth === 'HIGH' ? 100 : input.rawSmooth === 'LOW' ? 0 : 50;
-  const components = { completeness, freshness, regimeSample, majorFactorAgreement, rawSmoothAgreement };
+  const rawSmoothAgreement = input.rawSmooth.agreement === 'HIGH'
+    ? 100
+    : input.rawSmooth.agreement === 'LOW' ? 0 : 50;
+  const components = {
+    completeness: completeness.score,
+    freshness,
+    regimeSample,
+    majorFactorAgreement,
+    rawSmoothAgreement,
+  };
   const confidence = Object.values(components).reduce((sum, value) => sum + value, 0) / 5;
-  return { status: 'OK' as const, confidence, components };
+  const statusEntries = SCORING_FACTOR_KEYS.map(
+    (key, index) => [key, statuses[index]!] as const,
+  );
+  const persistedStatuses = Object.fromEntries(statusEntries);
+  const statusCounts: Record<DualFactorStatus, number> = {
+    OK: 0, PARTIAL: 0, STALE: 0, MISSING: 0,
+  };
+  for (const status of statuses) statusCounts[status!]++;
+  const evidence: ConfidenceEvidence = {
+    completeness,
+    freshness: {
+      statuses: persistedStatuses,
+      counts: statusCounts,
+      score: freshness,
+      reason: 'PERSISTED_FACTOR_FRESHNESS',
+    },
+    regimeSample: {
+      uncappedCount: input.regimeSample.count,
+      cap: 52,
+      selectedRegime: input.regimeSample.selectedRegime,
+      governedRevisionCohort: {
+        modelVersion: input.regimeSample.modelVersion,
+        configHash: input.regimeSample.configHash,
+        codeCommitSha: input.regimeSample.codeCommitSha,
+      },
+      score: regimeSample,
+      reason: 'SAME_REGIME_GOVERNED_REVISION_SAMPLE',
+    },
+    majorFactorAgreement: {
+      directions,
+      counts: { up, down, neutral },
+      score: majorFactorAgreement,
+      reason: 'MAJOR_FACTOR_DIRECTION_AGREEMENT',
+    },
+    rawSmooth: {
+      ...input.rawSmooth,
+      score: rawSmoothAgreement,
+      reason: `RAW_SMOOTH_${input.rawSmooth.agreement}`,
+    },
+  };
+  return { status: 'OK' as const, confidence, components, evidence };
 }
 
 export function mapShadowExposure(baseExposure: number, tacticalScore: number, confidence: number) {
@@ -277,6 +442,14 @@ export function buildDualHorizonShadow(
   if (!isPortfolioVerdict(selected.verdict) || !isPortfolioDirection(selected.netliqDir)) {
     return incomplete(snapshotsInput.asOfCutoff, 'FORMAL_SNAPSHOT_INVALID');
   }
+  const completeness = formalFactorCompleteness(selected.factors);
+  if (completeness.validCount !== completeness.expectedCount) {
+    return incomplete(
+      snapshotsInput.asOfCutoff,
+      'MISSING_FORMAL_FACTOR_COHORT',
+      { completeness },
+    );
+  }
 
   const rawSmooth = rawSmoothAtDecision(liquidityInput.seriesMap, liquidityInput.decisionDate);
   if (rawSmooth.status !== 'OK') {
@@ -298,15 +471,32 @@ export function buildDualHorizonShadow(
   const sameRegimeSampleCount = snapshotsInput.snapshots.slice(0, -1).filter(row =>
     row.qeQtRegime === selected.qeQtRegime
     && row.modelVersion === selected.modelVersion
-    && row.configHash === selected.configHash).length;
+    && row.configHash === selected.configHash
+    && row.codeCommitSha === selected.codeCommitSha).length;
   const confidence = computeDualHorizonConfidence({
+    formalFactors: selected.factors,
     factorStatuses,
     tacticalFactors: tactical.factors,
-    sameRegimeSampleCount,
-    rawSmooth: rawSmooth.agreement,
+    regimeSample: {
+      count: sameRegimeSampleCount,
+      selectedRegime: selected.qeQtRegime,
+      modelVersion: selected.modelVersion,
+      configHash: selected.configHash,
+      codeCommitSha: selected.codeCommitSha,
+    },
+    rawSmooth: {
+      agreement: rawSmooth.agreement,
+      sampleCount: rawSmooth.sampleCount,
+      observationDate: rawSmooth.observationDate,
+      availableDate: rawSmooth.availableDate,
+    },
   });
   if (confidence.status !== 'OK') {
-    return incomplete(snapshotsInput.asOfCutoff, confidence.reason);
+    return incomplete(
+      snapshotsInput.asOfCutoff,
+      confidence.reason,
+      confidence.availableDiagnostics,
+    );
   }
 
   const formalPolicy = mapPortfolioPolicy({
@@ -339,6 +529,7 @@ export function buildDualHorizonShadow(
     tacticalFactors: tactical.factors,
     confidence: confidence.confidence,
     confidenceComponents: confidence.components,
+    confidenceEvidence: confidence.evidence,
     baseExposure: formalPolicy.targetExposure,
     shadowAdjustment: shadow.shadowAdjustment,
     shadowTargetExposure: shadow.shadowTargetExposure,

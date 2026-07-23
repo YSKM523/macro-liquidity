@@ -296,10 +296,23 @@ describe('static UI assets', () => {
     const malicious = '<img src=x onerror=globalThis.pwned=true>';
     const rendered = render({
       status: 'DATA_INCOMPLETE', reason: malicious,
-      result: { status: 'DATA_INCOMPLETE', reasons: [malicious] },
+      result: {
+        status: 'DATA_INCOMPLETE',
+        reasons: [malicious],
+        availableDiagnostics: {
+          completeness: {
+            validCount: 7,
+            expectedCount: 8,
+            score: 87.5,
+            invalidOrMissingKeys: [malicious],
+          },
+        },
+      },
     });
     expect(rendered).not.toContain('<img');
     expect(rendered).toContain('&lt;img');
+    expect(rendered).toContain('7 / 8');
+    expect(rendered).toContain('87.5');
   });
 
   it('renders adversarial validation status and all-null metrics without unsafe HTML or exceptions', () => {

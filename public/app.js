@@ -828,7 +828,16 @@ function renderDualHorizonShadow(payload) {
   const header = `<div class="rb-concl">${status} · Shadow only · Champion unchanged</div>`;
   if (!result || result.status !== 'OK') {
     const reasons = Array.isArray(result?.reasons) ? result.reasons.join(' · ') : payload?.reason;
-    return header + `<p class="rb-note">数据不完整：${rbEsc(reasons || 'INPUT_UNAVAILABLE')}</p>`;
+    const completeness = result?.availableDiagnostics?.completeness;
+    const completenessNote = completeness
+      ? `<div class="rb-stat"><span class="k">正式因子完整度</span><span class="v">${rbCount(completeness.validCount)} / ${rbCount(completeness.expectedCount)} · ${rbMaybeNum(completeness.score)}</span></div>`
+      : '';
+    const invalidKeys = Array.isArray(completeness?.invalidOrMissingKeys)
+      && completeness.invalidOrMissingKeys.length > 0
+      ? `<p class="rb-note">缺失/无效：${rbEsc(completeness.invalidOrMissingKeys.join(' · '))}</p>`
+      : '';
+    return header + completenessNote + invalidKeys
+      + `<p class="rb-note">数据不完整：${rbEsc(reasons || 'INPUT_UNAVAILABLE')}</p>`;
   }
   const components = result.confidenceComponents || {};
   const reason = Array.isArray(result.reasons) ? result.reasons.join(' · ') : '—';

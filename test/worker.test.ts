@@ -345,6 +345,39 @@ describe('/api/v1 governance routes', () => {
         asOf: complete.snapshots.asOfCutoff,
         championChanged: false,
         strategicScore: 61,
+        confidenceEvidence: {
+          completeness: {
+            validCount: 8,
+            expectedCount: 8,
+            invalidOrMissingKeys: [],
+            score: 100,
+          },
+          freshness: {
+            counts: { OK: 8, PARTIAL: 0, STALE: 0, MISSING: 0 },
+            score: 100,
+          },
+          regimeSample: {
+            uncappedCount: 52,
+            cap: 52,
+            governedRevisionCohort: {
+              modelVersion: CHAMPION_MODEL_VERSION,
+              configHash: championConfigDigest(),
+              codeCommitSha: 'b'.repeat(40),
+            },
+            score: 100,
+          },
+          majorFactorAgreement: {
+            counts: { up: expect.any(Number), down: expect.any(Number), neutral: expect.any(Number) },
+            score: expect.any(Number),
+          },
+          rawSmooth: {
+            agreement: expect.stringMatching(/^(?:HIGH|LOW|TRANSITION)$/),
+            sampleCount: expect.any(Number),
+            observationDate: expect.any(String),
+            availableDate: expect.any(String),
+            score: expect.any(Number),
+          },
+        },
       },
     });
 
@@ -409,6 +442,35 @@ describe('/api/v1 governance routes', () => {
         asOf: dbState.dualHorizonSnapshotInputs.asOfCutoff,
         reasons: ['NO_GOVERNED_FORMAL_SNAPSHOT'],
         championChanged: false,
+      },
+    });
+  });
+
+  it('returns safe 7/8 completeness evidence in the endpoint schema', async () => {
+    const complete = completeDualHorizonInputs();
+    complete.snapshots.snapshots.at(-1)!.factors.netliqTrend = Number.NaN;
+    dbState.dualHorizonSnapshotInputs = complete.snapshots;
+    dbState.liquidityStructureInputs = complete.liquidity;
+
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+    ), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'MISSING_FORMAL_FACTOR_COHORT',
+      result: {
+        status: 'DATA_INCOMPLETE',
+        availableDiagnostics: {
+          completeness: {
+            validCount: 7,
+            expectedCount: 8,
+            invalidOrMissingKeys: ['netliqTrend'],
+            score: 87.5,
+            reason: 'FORMAL_FACTOR_COHORT_INCOMPLETE',
+          },
+        },
       },
     });
   });
