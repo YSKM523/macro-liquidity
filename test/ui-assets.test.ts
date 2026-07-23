@@ -218,10 +218,27 @@ describe('static UI assets', () => {
     const end = js.indexOf('async function fetchEventBacktest');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const render = new Function(`const rbEsc=${JSON.stringify(undefined)};`) as unknown;
     expect(js.slice(start, end)).toContain('rbEsc(');
     expect(js.slice(start, end)).toContain("== null ? '—'");
-    expect(String(render)).toBeTruthy();
+    const helpersStart = js.indexOf('function rbFinite');
+    const renderFactory = new Function(`${js.slice(helpersStart, end)}; return renderScoreStressDiagnostics;`);
+    const render: (value: unknown) => string = renderFactory();
+    const malicious = '<img src=x onerror=globalThis.pwned=true>';
+    const rendered = render({
+      status: malicious, reason: malicious, detail: malicious, as_of_cutoff: malicious,
+      protocol: { protocol: malicious }, provenance: { methodology: malicious },
+      score_buckets: [{ from: malicious, to: 20, horizonWeeks: malicious, mean: null, median: null,
+        negativeProbability: null, q10: null, worstEpisodeDrawdown: null, n: null, independentN: null,
+        status: malicious, probabilityStatus: malicious }],
+      multiple_testing: { status: malicious, candidateCount: null, totalTrialCount: null,
+        dsr: { status: malicious, value: null, reason: malicious } },
+      stress_events: [{ id: malicious, from: malicious, to: malicious, status: malicious,
+        spxDrawdown: null, horizons: [{ n: null }] }],
+      candidate_comparison: { status: malicious },
+    });
+    expect(rendered).not.toContain('<img');
+    expect(rendered).toContain('&lt;img');
+    expect(rendered).toContain('—');
   });
 
   it('renders adversarial validation status and all-null metrics without unsafe HTML or exceptions', () => {

@@ -152,6 +152,11 @@ export interface HypothesisLedgerEntry {
   family: string;
   direction: string;
   windows: string[];
+  trialDimensions: {
+    directionCount: number;
+    windowCount: number;
+    parameterSpecificationCount: number;
+  };
   canonicalParameters: Record<string, unknown>;
   parameterHash: string;
   primaryMetric: string;
@@ -161,6 +166,9 @@ export interface HypothesisLedgerEntry {
   preregisteredThreshold: Record<string, unknown>;
   registeredAt: string;
   registrationCommit: string;
+  registrationClass: 'PREREGISTERED' | 'RETROSPECTIVE_REVIEW_AMENDMENT';
+  resultsVisibleAtRegistration: boolean;
+  originalPreregistrationCommit: string | null;
   status: string;
   supersedes: string | null;
 }
@@ -206,11 +214,19 @@ export function validateHypothesisLedger(value: unknown): HypothesisLedger {
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`invalid hypothesis entry ${index}`);
     const entry = raw as Record<string, unknown>;
     for (const field of ['hypothesisId', 'candidateId', 'evidenceClass', 'family', 'direction', 'parameterHash',
-      'primaryMetric', 'pValueSource', 'registeredAt', 'registrationCommit', 'status']) requiredString(entry[field], field);
+      'primaryMetric', 'pValueSource', 'registeredAt', 'registrationCommit', 'registrationClass', 'status']) requiredString(entry[field], field);
     if (ids.has(entry.hypothesisId as string)) throw new Error(`duplicate hypothesis id: ${entry.hypothesisId}`);
     ids.add(entry.hypothesisId as string);
     if (!Array.isArray(entry.windows) || entry.windows.length === 0
       || entry.windows.some(window => typeof window !== 'string' || window.length === 0)) throw new Error('invalid hypothesis windows');
+    if (entry.trialDimensions == null || typeof entry.trialDimensions !== 'object'
+      || Array.isArray(entry.trialDimensions)) throw new Error('invalid trial dimensions');
+    const dimensions = entry.trialDimensions as Record<string, unknown>;
+    for (const field of ['directionCount', 'windowCount', 'parameterSpecificationCount']) {
+      if (!Number.isInteger(dimensions[field]) || (dimensions[field] as number) < 1) {
+        throw new Error(`invalid trial dimension ${field}`);
+      }
+    }
     if (entry.canonicalParameters == null || typeof entry.canonicalParameters !== 'object'
       || Array.isArray(entry.canonicalParameters)) throw new Error('invalid canonical parameters');
     if (canonicalParameterHash(entry.canonicalParameters) !== entry.parameterHash) {
@@ -228,12 +244,56 @@ export function validateHypothesisLedger(value: unknown): HypothesisLedger {
       || Array.isArray(entry.preregisteredThreshold)) throw new Error('invalid preregistered threshold');
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(entry.registeredAt as string)
       || !/^[a-f0-9]{40}$/.test(entry.registrationCommit as string)) throw new Error('invalid hypothesis registration');
+    if (entry.registrationClass !== 'PREREGISTERED'
+      && entry.registrationClass !== 'RETROSPECTIVE_REVIEW_AMENDMENT') throw new Error('invalid registration class');
+    if (typeof entry.resultsVisibleAtRegistration !== 'boolean') throw new Error('invalid result visibility');
+    if ((entry.registrationClass === 'PREREGISTERED') === entry.resultsVisibleAtRegistration) {
+      throw new Error('inconsistent result visibility chronology');
+    }
+    if (entry.originalPreregistrationCommit != null
+      && (typeof entry.originalPreregistrationCommit !== 'string'
+        || !/^[a-f0-9]{40}$/.test(entry.originalPreregistrationCommit))) {
+      throw new Error('invalid original preregistration commit');
+    }
+    if (entry.registrationClass === 'RETROSPECTIVE_REVIEW_AMENDMENT'
+      && entry.originalPreregistrationCommit == null) throw new Error('retrospective amendment requires original preregistration');
     if (entry.supersedes != null && typeof entry.supersedes !== 'string') throw new Error('invalid supersedes');
     if (entry.supersedes != null && !ids.has(entry.supersedes)) throw new Error(`supersedes unknown or later hypothesis: ${entry.supersedes}`);
     return entry as unknown as HypothesisLedgerEntry;
   });
   return { schemaVersion: 'HYPOTHESIS_LEDGER_V1', appendOnly: true,
     registeredAt: ledger.registeredAt, registrationCommit: ledger.registrationCommit, entries };
+}
+
+export function summarizeHypothesisLedger(ledger: HypothesisLedger) {
+  const candidates = new Set(ledger.entries.map(entry => entry.candidateId));
+  const dimensions = ledger.entries.map(entry => ({
+    entry,
+    trials: entry.trialDimensions.directionCount * entry.trialDimensions.windowCount
+      * entry.trialDimensions.parameterSpecificationCount,
+  }));
+  const families = [...new Set(ledger.entries.map(entry => entry.family))].sort().map(family => {
+    const rows = dimensions.filter(row => row.entry.family === family);
+    const trialCount = rows.reduce((sum, row) => sum + row.trials, 0);
+    // These historical artifacts have no primary-metric p-value. Every enumerated
+    // trial therefore enters the retrospective family conservatively as p=1.
+    return { family, trialCount, rejectedCount: 0, effectiveMissingPValue: 1, minimumAdjustedP: 1 };
+  });
+  return {
+    status: 'RETROSPECTIVE_MULTIPLICITY_AUDIT' as const,
+    prospectiveGateApplied: false,
+    candidateCount: candidates.size,
+    directionSpecificationCount: ledger.entries.reduce((sum, entry) => sum + entry.trialDimensions.directionCount, 0),
+    windowSpecificationCount: ledger.entries.reduce((sum, entry) => sum + entry.trialDimensions.windowCount, 0),
+    parameterSpecificationCount: ledger.entries.reduce((sum, entry) => sum + entry.trialDimensions.parameterSpecificationCount, 0),
+    totalTrialCount: dimensions.reduce((sum, row) => sum + row.trials, 0),
+    families,
+    dsr: {
+      status: 'NOT_APPLICABLE_CURRENT_VINTAGE_RESEARCH' as const,
+      value: null,
+      reason: 'NO_FORMAL_EVENT_TIME_DAILY_NAV_FOR_REGISTERED_PR11_PR12_TRIALS',
+    },
+  };
 }
 
 export function benjaminiHochberg(entries: BhInput[]) {

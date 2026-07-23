@@ -314,6 +314,8 @@ body{margin:0;background:var(--surface);color:var(--ink);
   #robust-card{order:6}
   #global-card{order:7}
   #provenance-card{order:8}
+  #score-stress-card{order:9}
+  #event-backtest-card{order:10}
   .chart-panel{min-height:0}
   #chart{height:340px;min-height:300px;max-width:100%}
   .factor-table,.rb-table{display:block;max-width:100%;overflow-x:auto}

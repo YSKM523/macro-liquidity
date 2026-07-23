@@ -67,6 +67,7 @@ async function main() {
   setupExplain();
   fetchExplain('1w');
   fetchRobust();
+  fetchScoreStressDiagnostics();
   fetchEventBacktest();
   let snapRes, histRes;
   try {
@@ -703,6 +704,65 @@ function robustConclusion(r) {
   const best = Object.entries(bs).sort((a, x) => x[1].ic_spearman - a[1].ic_spearman)[0];
   const bestTxt = best ? `资产负债表 ${REGIME_BUCKET_LABEL[best[0]] || best[0]} 期最强(IC=${best[1].ic_spearman.toFixed(2)})` : '';
   return `${edge};非重叠独立样本仅 n=${no.n}(IC=${no.ic_spearman.toFixed(3)})——重叠版显著性被高估。${bestTxt}。定位:弱信号宏观风控仪表盘,非择时工具。`;
+}
+
+function renderScoreStressDiagnostics(result) {
+  if (!result) return '<p class="rb-note">诊断数据不可用</p>';
+  const nullable = (value, digits = 2) => value == null ? '—' : rbMaybeNum(value, digits);
+  const status = rbEsc(result.status || 'DATA_INCOMPLETE');
+  const protocol = rbEsc(result.protocol?.protocol || 'SCORE_STRESS_DIAGNOSTICS_V1');
+  const provenance = result.provenance || {};
+  const header = `<div class="rb-sub">${protocol}</div>`
+    + `<p class="rb-note">状态 ${status} · as_of ${rbEsc(result.as_of_cutoff || '—')}`
+    + ` · ${rbEsc(provenance.methodology || '—')}</p>`;
+  const reason = result.reason
+    ? `<p class="rb-note">${rbEsc(result.reason)}${result.detail ? ` · ${rbEsc(result.detail)}` : ''}</p>` : '';
+
+  const buckets = Array.isArray(result.score_buckets) ? result.score_buckets : [];
+  const bucketTable = buckets.length === 0 ? '<p class="rb-note">分数桶：—</p>'
+    : `<div class="rb-sub">分数桶（重叠 n / 区间非重叠 n）</div><table class="rb-table"><thead><tr>`
+      + '<th>分数</th><th>周</th><th class="num">均值</th><th class="num">中位</th><th class="num">负收益概率</th><th class="num">q10</th><th class="num">最差回撤</th><th class="num">n / 独立n</th><th>状态</th></tr></thead><tbody>'
+      + buckets.map(row => `<tr><td>${rbEsc(`${row.from ?? '—'}–${row.to ?? '—'}`)}</td>`
+        + `<td>${rbEsc(row.horizonWeeks)}</td><td class="num">${rbMaybePct(row.mean)}</td>`
+        + `<td class="num">${rbMaybePct(row.median)}</td><td class="num">${rbMaybePct(row.negativeProbability)}</td>`
+        + `<td class="num">${rbMaybePct(row.q10)}</td><td class="num">${rbMaybePct(row.worstEpisodeDrawdown)}</td>`
+        + `<td class="num">${rbCount(row.n)} / ${rbCount(row.independentN)}</td>`
+        + `<td>${rbEsc(row.status || '—')} · ${rbEsc(row.probabilityStatus || '—')}</td></tr>`).join('')
+      + '</tbody></table>';
+
+  const multiple = result.multiple_testing || {};
+  const dsr = result.formal_dsr || multiple.dsr || {};
+  const multipleBlock = `<div class="rb-sub">多重检验与 DSR</div>`
+    + `<div class="rb-stat"><span class="k">审计状态</span><span class="v">${rbEsc(multiple.status || '—')}</span></div>`
+    + `<div class="rb-stat"><span class="k">候选 / 总 trial</span><span class="v">${rbCount(multiple.candidateCount)} / ${rbCount(multiple.totalTrialCount)}</span></div>`
+    + `<div class="rb-stat"><span class="k">Deflated Sharpe</span><span class="v">${rbEsc(dsr.status || '—')} · ${nullable(dsr.value, 3)}</span></div>`
+    + `<p class="rb-note">${rbEsc(dsr.reason || '没有完整正式日频 trial universe，不计算数值。')}</p>`;
+
+  const events = Array.isArray(result.stress_events) ? result.stress_events : [];
+  const eventTable = events.length === 0 ? '<p class="rb-note">压力事件：—</p>'
+    : `<div class="rb-sub">固定压力事件库</div><table class="rb-table"><thead><tr><th>事件</th><th>覆盖</th><th class="num">SPX 回撤</th><th class="num">4/8/13 周 n</th></tr></thead><tbody>`
+      + events.map(event => {
+        const counts = Array.isArray(event.horizons) ? event.horizons.map(row => rbCount(row.n)).join('/') : '—';
+        return `<tr><td>${rbEsc(event.id)}<br><small>${rbEsc(event.from)}–${rbEsc(event.to)}</small></td>`
+          + `<td>${rbEsc(event.status || '—')}</td><td class="num">${rbMaybePct(event.spxDrawdown)}</td>`
+          + `<td class="num">${rbEsc(counts)}</td></tr>`;
+      }).join('') + '</tbody></table>';
+  const candidate = result.candidate_comparison || {};
+  const candidateNote = `<p class="rb-note">候选对比：${rbEsc(candidate.status || 'CANDIDATE_NOT_PROVIDED')}；未提供独立 versioned PIT artifact 时不伪造比较。</p>`;
+  return header + reason + bucketTable + multipleBlock + eventTable + candidateNote;
+}
+
+async function fetchScoreStressDiagnostics() {
+  const card = document.getElementById('score-stress-card');
+  const body = document.getElementById('score-stress-body');
+  if (!card || !body) return;
+  try {
+    const result = await fetch('/api/v1/diagnostics').then(response => response.json());
+    body.innerHTML = renderScoreStressDiagnostics(result);
+  } catch (error) {
+    body.innerHTML = '<p class="rb-note">分数与压力诊断加载失败，稍后重试</p>';
+  }
+  card.style.display = '';
 }
 
 async function fetchEventBacktest() {

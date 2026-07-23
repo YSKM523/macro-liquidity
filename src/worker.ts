@@ -32,6 +32,15 @@ import { runEventTimeBacktest } from './event-backtest';
 import { runWalkForward } from './walkforward';
 import { runRobustness } from './robustness';
 import { formalValidationUnavailable, runFormalValidation } from './evaluation-protocol';
+import {
+  SCORE_STRESS_PROTOCOL,
+  buildFormalOutcomes,
+  buildScoreBuckets,
+  evaluateStressEvents,
+  summarizeHypothesisLedger,
+  validateHypothesisLedger,
+} from './score-stress-diagnostics';
+import scoreStressLedgerArtifact from '../docs/research/SCORE_STRESS_HYPOTHESIS_LEDGER.json';
 import { globalLiquiditySeries, globalLiquidityLatest } from './global';
 import type { DecisionStatus } from './metrics';
 import {
@@ -343,6 +352,62 @@ export default {
     if (p === '/api/prices') {
       const liveData = await loadLive(env, ctx);
       return json({ ...liveData.live, cache_status: liveData.cache.prices });
+    }
+    if (p === '/api/v1/diagnostics') {
+      const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
+      const multipleTesting = summarizeHypothesisLedger(validateHypothesisLedger(scoreStressLedgerArtifact));
+      const unavailable = (reason: string, detail: string | null = null) => json({
+        api_version: 'v1', status: 'DATA_INCOMPLETE', reason, detail,
+        as_of_cutoff: requestedAsOf ?? null, protocol: SCORE_STRESS_PROTOCOL,
+        score_buckets: [], stress_events: [], multiple_testing: multipleTesting,
+        formal_dsr: {
+          status: 'TRIAL_UNIVERSE_INCOMPLETE', value: null,
+          reason: 'NO_COMPLETE_FORMAL_DAILY_NET_RETURN_TRIAL_VECTOR',
+        },
+        candidate_comparison: { status: 'CANDIDATE_NOT_PROVIDED', candidate: null },
+      });
+      let eventInputs: Awaited<ReturnType<typeof loadEventBacktestInputs>>;
+      try {
+        eventInputs = await loadEventBacktestInputs(env.DB, requestedAsOf);
+      } catch (error) {
+        const message = String((error as Error)?.message ?? error);
+        if (/^(?:invalid|future) backtest as_of$/i.test(message)) {
+          return errorJson(requestId, 'invalid_as_of', 'INVALID_AS_OF', 400);
+        }
+        return unavailable('EVENT_INPUT_LOAD_FAILED', message);
+      }
+      try {
+        const outcomes = buildFormalOutcomes(eventInputs);
+        const asOfCutoff = eventInputs.asOfCutoff;
+        if (!asOfCutoff) throw new Error('formal diagnostics require an explicit as-of cutoff');
+        const missingCoverage = outcomes.some(row => row.status === 'MISSING_PRICE_COVERAGE' || row.status === 'UNEXECUTED');
+        const pending = outcomes.some(row => row.status === 'PENDING_OUTCOME');
+        const stressEvents = evaluateStressEvents(outcomes, asOfCutoff.slice(0, 10), eventInputs.prices);
+        return json({
+          api_version: 'v1',
+          status: missingCoverage ? 'DATA_INCOMPLETE' : pending ? 'PENDING_OUTCOMES' : 'OK',
+          reason: missingCoverage ? 'FORMAL_PRICE_COVERAGE_INCOMPLETE' : pending ? 'OUTCOMES_NOT_YET_MATURE' : null,
+          as_of_cutoff: asOfCutoff,
+          protocol: SCORE_STRESS_PROTOCOL,
+          provenance: {
+            methodology: 'APPEND_ONLY_AS_OF_PIT_RAW',
+            signal_count: eventInputs.signals.length,
+            price_count: eventInputs.prices.length,
+            model_versions: [...new Set(eventInputs.signals.map(signal => signal.modelVersion))].sort(),
+            config_hashes: [...new Set(eventInputs.signals.map(signal => signal.configHash))].sort(),
+          },
+          score_buckets: buildScoreBuckets(outcomes),
+          stress_events: stressEvents,
+          multiple_testing: multipleTesting,
+          formal_dsr: {
+            status: 'TRIAL_UNIVERSE_INCOMPLETE', value: null,
+            reason: 'NO_COMPLETE_FORMAL_DAILY_NET_RETURN_TRIAL_VECTOR',
+          },
+          candidate_comparison: { status: 'CANDIDATE_NOT_PROVIDED', candidate: null },
+        });
+      } catch (error) {
+        return unavailable('FORMAL_INPUT_INVALID', String((error as Error)?.message ?? error));
+      }
     }
     if (p === '/api/backtest' || p === '/api/v1/backtest') {
       const v1 = p === '/api/v1/backtest';
