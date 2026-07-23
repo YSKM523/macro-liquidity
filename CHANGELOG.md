@@ -4,6 +4,18 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### PR-17 — Governed liquidity-structure challenger
+
+- Preregistered `LIQUIDITY_STRUCTURE_CHALLENGER_V1` before implementation, with raw artifact SHA-256 `946b95679e2bbacb618251969ebb7967d8a82541d277c72297b6b0a5023cbfa0` and canonical digest `b9560fe595969a7f6f8420d48cdaf8f2cfd3ad45f616974469d59115ea234c38`. The protocol is shadow-only and has no promotion threshold.
+- Added prior-only TGA/RRP structure diagnostics: the latest valid weekly TGA change is multiplied by a Type-7 q20/q50 RRP buffer state estimated from 52–156 strictly prior alignments. Missing history, missing alignment, or invalid cadence returns a typed unavailable result.
+- Added append-only migration 0011 for revisioned policy-regime events, with update/delete guards, revision lineage, half-open effective intervals, strict `created_at < as_of` ledger visibility, decision-time source publication, and overlap fail-closed behavior. The migration deliberately contains no guessed policy dates or seed rows.
+- Added the frozen policy-aware WALCL matrix, including separate crisis/unknown null states, without changing the Champion balance-sheet factor.
+- Added formal governed-PIT Credit/Funding ablation across four preregistered arms. Every arm uses the identical complete eight-factor cohort, renormalizes remaining positive weights, runs its own sequential hysteresis pass, and reports 4/8/13-week overlapping/non-overlapping IC, Type-7 q10 tail loss, event-time Beta-matched Sharpe difference, and maximum drawdown.
+- Added exact eight-factor equal/current/50-50 blended score benchmarks while keeping legacy zero-weight `vol` outside every base score.
+- Added `GET /api/v1/challengers/liquidity-structure?as_of=` and a safely escaped dashboard card. Invalid clocks are HTTP 400; absent policy evidence, legacy/mixed cohorts, incomplete PIT inputs, and overlap errors are typed and fail closed.
+- Advanced restore/governance checks through migration 0011. The superseded `--schema-confirmed=0010` token is rejected before Wrangler can run.
+- Changed no Champion formula, weight, threshold, hysteresis, stress rule, portfolio target, or official snapshot. No policy seed, push, deployment, remote database access, or production write was performed.
+
 ### PR-16 — Score monotonicity, multiplicity, and registered stress diagnostics
 
 - Added one shared formal event-time outcome builder for 4/8/13-week horizons. PR-15's 13-week path delegates to it and retains exact entry/exit/return semantics; persisted Champion signals, PIT daily prices, clocks, model/config cohort, policy fields, and provenance all fail closed through the same gate.

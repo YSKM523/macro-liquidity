@@ -26,6 +26,7 @@
 | PR-14 | 已完成（本地） | `3638c55`–`780e125` | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，双重复审 Ready；Champion 不变，未部署 |
 | PR-15 | 已完成（本地） | `710bb30`–`b79aab3` | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 759 tests、focused 103、双重复审 Ready；未部署、未修改远程数据库 |
 | PR-16 | 已完成（本地） | `d7aba3c`–`d0f59cd` | 共享正式 4/8/13 周 outcome、七个分数桶、冻结 ledger 与前序绑定修订、BH-FDR/DSR fail-closed、八个压力事件及固定形状 v1 API/UI；58 files / 777 tests、TypeScript、lint、迁移幂等与 dry-run 通过，双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion、PR-11/12 决策及数据库均不变，未部署 |
+| PR-17 | 实现完成，待独立审查（本地） | `74620fd`–`53994c7` | 冻结 TGA/RRP、政策事件、WALCL 阶段矩阵、四臂 Credit/Funding 消融和精确 8 因子基准；新增无 seed 的 append-only 0011、strict as-of API 与 Shadow UI；Champion 不变，未部署 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -1910,6 +1911,29 @@ feat: model versioning, CI, staging, observability and backup
 - logs
 - alert
 - backup
+
+---
+
+## PR-17
+
+```text
+feat: governed liquidity-structure challenger
+```
+
+内容：
+
+- [x] 预注册 `LIQUIDITY_STRUCTURE_CHALLENGER_V1` 原始与 canonical digest，固定 shadow-only、无 promotion threshold
+- [x] ALG-04：TGA 周频冲击、严格 prior-only RRP Type-7 q20/q50 与 52–156 周阈值窗
+- [x] ALG-06：append-only 政策事件、修订 lineage、双时钟可见性、半开区间和 overlap fail closed；不猜测/seed 历史日期
+- [x] ALG-07：按冻结政策矩阵解释 WALCL；crisis/unknown 返回 typed null
+- [x] ALG-08：同一完整 governed PIT cohort、每 arm 一次顺序 hysteresis、4/8/13 周 overlapping/non-overlapping IC、Beta 匹配 Sharpe 差、q10 尾部损失和最大回撤
+- [x] ALG-09：精确 8 因子 equal/current/50-50 blend；`vol` 继续留在基础分外
+- [x] versioned `as_of` API、固定失败形状、安全转义 Shadow 卡；不写正式快照或政策事件
+- [x] 0011 恢复演练与生产 schema confirmation gate；未执行远程 migration/deploy
+
+PR-17 已知限制：0011 刻意不含未核验政策日期，未追加经 primary-source 审批的事件前，政策阶段会诚实返回 unavailable。正式消融要求整段 cohort 均为 governed PIT、8/8 因子完整且日频价格/现金/冻结 VIX provenance 完整；历史 migration-backfill 或覆盖不足会保持 typed `DATA_INCOMPLETE`。该 endpoint 按请求计算 shadow diagnostics，未做生产 shadow runtime、缓存或性能压测；没有 promotion gate，不能自动替换 Champion。
+
+PR-17 回滚：回退 base `52d1276` 后的 PR-17 commits。0011 仅在本地临时 D1 验证且没有 seed；若未来已应用到共享数据库，不删除表、不修改/删除 append-only rows，以应用回滚或 forward migration 停用 reader。
 
 ---
 

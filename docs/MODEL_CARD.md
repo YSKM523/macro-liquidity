@@ -9,6 +9,7 @@ The Champion is a weak-signal US macro-liquidity and risk-regime dashboard for r
 - No promise of alpha, direction accuracy, capital preservation, or suitability for an investor.
 - No intraday execution model, derivatives sizing, leverage recommendation, tax model, or personalized portfolio advice.
 - PR-11 continuous net liquidity and PR-12 dynamic reserve adequacy are not production inputs.
+- PR-17 TGA/RRP, policy-aware WALCL, Credit/Funding ablation, and eight-factor benchmarks are shadow diagnostics, not production inputs.
 - Current-vintage challenger research is not treated as point-in-time evidence.
 
 ## Assets and horizon
@@ -49,6 +50,8 @@ PR-15 adds `PURGED_VALIDATION_V1` without altering the Champion. Formal thirteen
 
 PR-16 adds `SCORE_STRESS_DIAGNOSTICS_V1` as a diagnostic layer only. It reuses the same governed event-time/PIT gate for 4/8/13-week outcomes, reports seven fixed score buckets, keeps overlapping and interval-non-overlapping counts separate, and replays eight preregistered stress windows. Its original append-only PR-11/PR-12 ledger is preserved byte-for-byte; a separate predecessor-bound amendment records chronology and candidate identities. Because the historical dimension declarations do not enumerate trial IDs, 48 is exposed only as a conservative declared upper bound, while the exact trial count and BH result remain null. A Deflated Sharpe value is not published without a complete formal daily net-return trial vector. No diagnostic result is a promotion gate and no candidate artifact is inferred from Champion rows.
 
+PR-17 adds `LIQUIDITY_STRUCTURE_CHALLENGER_V1` without altering the Champion. TGA shocks use a prior-only RRP buffer; WALCL expansion is interpreted through an append-only, source-documented policy ledger; Credit/Funding ablations use one complete governed PIT cohort and one sequential hysteresis path per arm; equal/current/blended benchmarks use exactly the eight positive-weight factors and exclude `vol`. Formal arm reports include 4/8/13-week overlapping and interval-non-overlapping IC, q10 tail loss, event-time Beta-matched Sharpe difference, and maximum drawdown. The protocol has no promotion threshold and `champion_change=false`.
+
 ## Failed regimes and monitoring
 
 Known weak areas include market drift overwhelming direction accuracy, publication-calendar approximations, crisis source disruption, and limited non-overlapping samples. Health/SLO responses expose ingest and snapshot outcomes. Critical snapshot failure alerting is mandatory, but delivery depends on configured provider secrets and must be monitored through structured `alert_delivery` events and the audit table.
@@ -61,6 +64,7 @@ Known weak areas include market drift overwhelming direction accuracy, publicati
 - Historical rows backfilled by migration 0010 are explicitly `LEGACY_UNVERSIONED`. Versioned APIs report the governed/legacy union without inventing identity. PR-15 retrospective validation labels this cohort `PARTIAL_LEGACY`; legacy q10 calibration remains null as `PARTIAL_LEGACY_CALIBRATION`. Malformed/non-PIT inputs, incomplete daily price provenance, mixed governed model/config cohorts, and legacy post-holdout signals fail closed.
 - The local restore fixture proves the mechanism and invariants, not restoration of a real production backup.
 - Current formal storage may not cover every registered stress window with governed PIT signals and raw daily prices. Such windows remain `NO_FORMAL_SIGNAL_COVERAGE`, `NON_PIT_PRICE_COVERAGE`, `PARTIAL_COVERAGE`, or `PENDING_OUTCOME`; legacy weekly/current-vintage rows are never substituted.
+- Migration 0011 intentionally seeds no policy dates. Until reviewed primary-source events are appended, PR-17 policy-aware output remains `POLICY_REGIME_UNAVAILABLE`; overlapping events fail closed. Formal ablation also remains incomplete if any selected signal is legacy, lacks one of the exact eight factors, or lacks governed daily-price/portfolio provenance. These states are evidence gaps, not neutral signals.
 
 ## Governance and promotion
 
@@ -68,4 +72,4 @@ A challenger must be preregistered, point-in-time, no-lookahead, positive in mos
 
 ## Rollback
 
-Revert the PR-16 commit range after base `b79aab3` to remove the additive score/stress diagnostics, then revert PR-15 after base `780e125` only if its validation layer must also be removed. PR-15/PR-16 add no migration and write no database data, so no data rollback is required. Migration 0010 from PR-13 remains additive and must not be dropped on a remote database. Snapshot scores, formulas, weights, thresholds, hysteresis, and portfolio policy were not changed.
+Revert the PR-17 commit range after base `52d1276` to remove the additive liquidity-structure reader, endpoint, and UI. Migration 0011 is additive and intentionally empty; if it has reached a shared database, do not drop the table or mutate/delete append-only policy rows. Disable readers with a forward migration or application rollback. Revert PR-16 after base `b79aab3` only if its diagnostics must also be removed. Snapshot scores, formulas, weights, thresholds, hysteresis, and portfolio policy were not changed.
