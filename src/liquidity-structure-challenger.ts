@@ -1,6 +1,15 @@
 import { SCORING_FACTOR_KEYS, WEIGHTS } from './config';
-import type { Impulse, SeriesMap } from './metrics';
+import { spearman } from './backtest';
+import type { EventBacktestInputs, EventSignal } from './event-backtest';
+import { runEventTimeBacktest } from './event-backtest';
+import { assertFormalEventInputs, formalProvenance, greedyIndependentPairs } from './evaluation-protocol';
+import type { ForwardPair } from './evaluation-protocol';
+import { buildFormalEventOutcomes } from './formal-event-outcomes';
+import { verdictFromScore } from './metrics';
+import type { Impulse, SeriesMap, Verdict } from './metrics';
 import { sha256Hex } from './model-version';
+import { isPortfolioDirection, mapPortfolioPolicy, snapshotVixStressStatus } from './portfolio-policy';
+import { quantile } from './validation-metrics';
 import protocolArtifact from '../docs/research/LIQUIDITY_STRUCTURE_CHALLENGER_PROTOCOL.json';
 
 function canonicalize(value: unknown): unknown {
@@ -192,5 +201,115 @@ export function buildFundingCreditAblations(input: FactorInput) {
       D_WITHOUT_CREDIT_FUNDING: arm(['credit', 'funding']),
     },
     fragilitySidecar: { credit: factors.credit, funding: factors.funding },
+  };
+}
+
+const ABLATION_ARMS = Object.freeze({
+  A_CURRENT_8: Object.freeze([] as string[]),
+  B_WITHOUT_CREDIT: Object.freeze(['credit']),
+  C_WITHOUT_FUNDING: Object.freeze(['funding']),
+  D_WITHOUT_CREDIT_FUNDING: Object.freeze(['credit', 'funding']),
+});
+
+type AblationArmKey = keyof typeof ABLATION_ARMS;
+type AblationHorizon = 4 | 8 | 13;
+
+function icEstimate(pairs: ForwardPair[]) {
+  if (pairs.length < 3) return { value: null, n: pairs.length, status: 'INSUFFICIENT_SAMPLE' as const };
+  if (new Set(pairs.map(pair => pair.score)).size < 2 || new Set(pairs.map(pair => pair.fwd)).size < 2) {
+    return { value: null, n: pairs.length, status: 'ZERO_VARIANCE' as const };
+  }
+  return {
+    value: spearman(pairs.map(pair => pair.score), pairs.map(pair => pair.fwd)),
+    n: pairs.length,
+    status: 'OK' as const,
+  };
+}
+
+function buildArmSignals(input: EventBacktestInputs, removed: ReadonlySet<string>): EventSignal[] | null {
+  let previous: Verdict | undefined;
+  const output: EventSignal[] = [];
+  for (const signal of [...input.signals].sort((left, right) => left.decisionAt.localeCompare(right.decisionAt))) {
+    const factors = completeFactors(signal.factors ?? {});
+    if (!factors || !isPortfolioDirection(signal.netliqDir)) return null;
+    const score = weightedScore(factors, removed);
+    const verdict = verdictFromScore(score, previous);
+    previous = verdict;
+    const policy = mapPortfolioPolicy({
+      score, verdict, netliqDir: signal.netliqDir,
+      stressStatus: snapshotVixStressStatus(signal.snapshotVixEod ?? null),
+    });
+    output.push({
+      ...signal, score, verdict, targetExposure: policy.targetExposure, portfolioTier: policy.tier,
+      portfolioMethodology: policy.methodology, stressMethodology: 'PIT_SNAPSHOT_VIX_PROXY',
+    });
+  }
+  return output;
+}
+
+function horizonMetrics(signals: EventSignal[], input: EventBacktestInputs, horizonWeeks: AblationHorizon) {
+  const formal = buildFormalEventOutcomes({ ...input, signals }, [horizonWeeks]);
+  const pairs: ForwardPair[] = formal.outcomes.filter(outcome => outcome.status === 'OK').map((outcome, index) => ({
+    startIdx: index,
+    endIdx: input.prices.findIndex(price => price.date === outcome.exitDate),
+    signalDate: outcome.entryDate!, outcomeDate: outcome.exitDate!,
+    score: outcome.score, fwd: outcome.totalReturn!, verdict: outcome.verdict,
+    targetExposure: outcome.targetExposure, factors: {}, pitStatus: 'PIT', provenanceStatus: 'GOVERNED',
+  }));
+  const independent = greedyIndependentPairs(pairs);
+  return {
+    overlapping: icEstimate(pairs),
+    independent: icEstimate(independent),
+    tailLossQ10: quantile(pairs.map(pair => pair.fwd), .1),
+    pendingCount: formal.outcomes.filter(outcome => outcome.status === 'PENDING_OUTCOME').length,
+    missingCount: formal.outcomes.filter(outcome => outcome.status !== 'OK' && outcome.status !== 'PENDING_OUTCOME').length,
+  };
+}
+
+export function evaluateFundingCreditAblation(input: EventBacktestInputs) {
+  assertFormalEventInputs(input);
+  const completeFactorCount = input.signals.filter(signal => completeFactors(signal.factors ?? {}) != null).length;
+  const cohort = { signalCount: input.signals.length, completeFactorCount, provenance: 'GOVERNED_PIT' as const };
+  if (completeFactorCount !== input.signals.length) {
+    return { status: 'DATA_INCOMPLETE' as const, reason: 'INCOMPLETE_FACTOR_COHORT' as const, cohort, arms: {} };
+  }
+  if (input.signals.some(signal => formalProvenance(signal) !== 'GOVERNED')) {
+    return { status: 'DATA_INCOMPLETE' as const, reason: 'NON_GOVERNED_SIGNAL_COHORT' as const, cohort, arms: {} };
+  }
+
+  const evaluateArm = (key: AblationArmKey) => {
+    const signals = buildArmSignals(input, new Set(ABLATION_ARMS[key]));
+    if (!signals) throw new Error('formal ablation requires complete portfolio policy inputs');
+    const eventTime = runEventTimeBacktest({ ...input, signals });
+    const horizons = Object.fromEntries(([4, 8, 13] as AblationHorizon[])
+      .map(horizon => [horizon, horizonMetrics(signals, input, horizon)])) as Record<AblationHorizon, ReturnType<typeof horizonMetrics>>;
+    const strategySharpe = eventTime.portfolio?.strategy.metrics.sharpe ?? null;
+    const betaMatchedSharpe = eventTime.portfolio?.benchmarks.betaMatchedStatic.metrics.sharpe ?? null;
+    return {
+      status: eventTime.status,
+      reason: eventTime.reason,
+      removedFactors: [...ABLATION_ARMS[key]],
+      verdictTrace: signals.map(signal => signal.verdict as Verdict),
+      horizons,
+      portfolio: {
+        strategySharpe,
+        betaMatchedSharpe,
+        betaMatchedSharpeDelta: strategySharpe == null || betaMatchedSharpe == null
+          ? null : strategySharpe - betaMatchedSharpe,
+        maxDrawdown: eventTime.portfolio?.strategy.metrics.maxDrawdown ?? null,
+      },
+    };
+  };
+  const arms = {} as Record<AblationArmKey, ReturnType<typeof evaluateArm>>;
+  for (const key of Object.keys(ABLATION_ARMS) as AblationArmKey[]) arms[key] = evaluateArm(key);
+  const incomplete = Object.values(arms).find(arm => arm.status !== 'OK');
+  return {
+    status: incomplete ? 'DATA_INCOMPLETE' as const : 'OK' as const,
+    reason: incomplete?.reason ?? null,
+    cohort,
+    primaryHorizonWeeks: 13 as const,
+    secondaryHorizonWeeks: [4, 8] as const,
+    championChange: false as const,
+    arms,
   };
 }
