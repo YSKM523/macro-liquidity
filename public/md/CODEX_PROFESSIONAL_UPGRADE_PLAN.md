@@ -1926,12 +1926,13 @@ feat: governed liquidity-structure challenger
 - [x] ALG-04：TGA 周频冲击、严格 prior-only RRP Type-7 q20/q50 与 52–156 周阈值窗
 - [x] ALG-06：append-only 政策事件、修订 lineage、双时钟可见性、半开区间和 overlap fail closed；不猜测/seed 历史日期
 - [x] ALG-07：按冻结政策矩阵解释 WALCL；crisis/unknown 返回 typed null
-- [x] ALG-08：同一完整 governed PIT cohort、每 arm 一次顺序 hysteresis、4/8/13 周 overlapping/non-overlapping IC、Beta 匹配 Sharpe 差、q10 尾部损失和最大回撤
+- [x] ALG-08 回溯实现：同一完整 governed PIT cohort、每 arm 一次顺序 hysteresis、4/8/13 周 overlapping/non-overlapping IC、Beta 匹配 Sharpe 差、q10 尾部损失和最大回撤
+- [ ] ALG-08 OOS 证据：原冻结协议未定义 unseen holdout，当前结果仅为 `RETROSPECTIVE_PIT_EVENT_TIME`；需另行预注册 prospective holdout 并等待成熟
 - [x] ALG-09：精确 8 因子 equal/current/50-50 blend；`vol` 继续留在基础分外
 - [x] versioned `as_of` API、固定失败形状、安全转义 Shadow 卡；不写正式快照或政策事件
 - [x] 0011 恢复演练与生产 schema confirmation gate；未执行远程 migration/deploy
 
-PR-17 已知限制：0011 刻意不含未核验政策日期，未追加经 primary-source 审批的事件前，政策阶段会诚实返回 unavailable。正式消融要求整段 cohort 均为 governed PIT、8/8 因子完整且日频价格/现金/冻结 VIX provenance 完整；历史 migration-backfill 或覆盖不足会保持 typed `DATA_INCOMPLETE`。该 endpoint 按请求计算 shadow diagnostics，未做生产 shadow runtime、缓存或性能压测；没有 promotion gate，不能自动替换 Champion。
+PR-17 已知限制：0011 刻意不含未核验政策日期，未追加经 primary-source 审批的事件前，政策阶段会诚实返回 unavailable。正式消融要求整段 cohort 均为 governed PIT、8/8 因子完整且日频价格/现金/冻结 VIX provenance 完整；13 周 pending/missing/null 指标、历史 migration-backfill 或覆盖不足会保持 typed `DATA_INCOMPLETE`。原协议没有 unseen holdout，因此当前只能称为回溯 PIT event-time，不能称为 OOS。endpoint 每 arm 只构建一次 4/8/13 周 outcomes，并以 600 signals、各 4,000 行 prices/VIX/cash 的硬上限 fail closed；仍未做生产 shadow runtime、缓存或性能压测。没有 promotion gate，不能自动替换 Champion。
 
 PR-17 回滚：回退 base `52d1276` 后的 PR-17 commits。0011 仅在本地临时 D1 验证且没有 seed；若未来已应用到共享数据库，不删除表、不修改/删除 append-only rows，以应用回滚或 forward migration 停用 reader。
 

@@ -14,6 +14,13 @@ snapshot, verdict, threshold, live stress policy, or production exposure. No
 policy dates are seeded without primary-source evidence; an empty policy ledger
 must return typed unavailable output.
 
+The registered artifact did not define an unseen holdout boundary. Consequently,
+all currently available event-time results are labeled
+`RETROSPECTIVE_PIT_EVENT_TIME`, with OOS status
+`NOT_ESTABLISHED_NO_UNSEEN_HOLDOUT`. They must not be described as OOS evidence;
+the ALG-08 OOS gate remains pending until a separately preregistered prospective
+holdout matures.
+
 Raw artifact SHA-256:
 `946b95679e2bbacb618251969ebb7967d8a82541d277c72297b6b0a5023cbfa0`.
 Key-sorted canonical JSON digest:

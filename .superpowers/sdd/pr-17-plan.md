@@ -33,9 +33,11 @@ hysteresis, official snapshots and production portfolio policy remain unchanged.
 3. RED benchmark tests: exact eight keys, vol exclusion, renormalized ablations.
 4. RED API tests: explicit `as_of`, fixed typed failures, no legacy fallback.
 5. Implement only enough to turn each group green.
-6. Run focused tests, full Vitest, TypeScript, lint, correctness/no-lookahead,
+6. Bound the public evaluator, reuse one 4/8/13-week outcome build per arm,
+   and label retrospective PIT evidence honestly; no unseen-holdout OOS claim.
+7. Run focused tests, full Vitest, TypeScript, lint, correctness/no-lookahead,
    migration-twice verification and Wrangler staging dry-run.
-7. Independent spec and whole-branch review before local integration.
+8. Independent spec and whole-branch review before local integration.
 
 ## Rollback
 
