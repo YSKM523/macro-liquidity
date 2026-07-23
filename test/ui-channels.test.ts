@@ -19,6 +19,7 @@ function createMainHarness(official: any, nowcast: any) {
     setupExplain = () => {};
     fetchExplain = () => {};
     fetchRobust = () => {};
+    fetchScoreStressDiagnostics = () => {};
     fetchEventBacktest = () => {};
     renderSnapshotChannels = value => { channels = value; };
     renderVerdict = value => { primary = value.snapshot; };
