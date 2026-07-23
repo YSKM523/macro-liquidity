@@ -4,6 +4,13 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 
 ## Unreleased
 
+### Release tooling
+
+- Upgraded the production deployment CLI to `wrangler@4.114.0` and aligned
+  `@cloudflare/workers-types` to `5.20260723.1`, removing the known Wrangler
+  3.x deployment-tool vulnerabilities while preserving Node 22 CI and the
+  existing fail-closed production release gates.
+
 ### PR-17 — Governed liquidity-structure challenger
 
 - Preregistered `LIQUIDITY_STRUCTURE_CHALLENGER_V1` before implementation, with raw artifact SHA-256 `946b95679e2bbacb618251969ebb7967d8a82541d277c72297b6b0a5023cbfa0` and canonical digest `b9560fe595969a7f6f8420d48cdaf8f2cfd3ad45f616974469d59115ea234c38`. The protocol is shadow-only and has no promotion threshold.
