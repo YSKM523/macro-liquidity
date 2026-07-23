@@ -75,6 +75,11 @@ describe('factor scores', () => {
     expect(r).toBeGreaterThan(f);
     for (const s of [r, f]) { expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100); }
   });
+  it('accepts an explicit four-week tactical horizon without changing the default', () => {
+    const levels = [1000, 1100, 1200, 1300, 1400];
+    expect(scoreNetliqTrend(levels, 4)).toBe(80);
+    expect(scoreNetliqTrend(levels)).toBe(50);
+  });
   it('EXPANDING scores higher than CONTRACTING', () => {
     expect(scoreImpulse('EXPANDING')).toBeGreaterThan(scoreImpulse('CONTRACTING'));
   });

@@ -211,7 +211,10 @@ export function percentileRank(value: number, history: number[]): number {
   return below / history.length;
 }
 
-export function scoreNetliqTrend(netliqWeekly: number[], n = NETLIQ_TREND_WEEKS): number {
+export function scoreNetliqTrend(
+  netliqWeekly: number[],
+  n: number = NETLIQ_TREND_WEEKS,
+): number {
   const config = SCORING.netLiquidityTrend;
   if (netliqWeekly.length < n + 1) return SCORING.scoreRange.neutral;
   const latest = netliqWeekly[netliqWeekly.length - 1];
