@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 const args = new Set(process.argv.slice(2));
 const execute = args.has('--execute');
 const confirmed = args.has('--confirm-production=DEPLOY_PRODUCTION');
-const schemaConfirmed = args.has('--schema-confirmed=0010');
+const schemaConfirmed = args.has('--schema-confirmed=0011');
 const commitSha = process.env.CODE_COMMIT_SHA?.trim().toLowerCase() ?? '';
 const immutableCommit = /^[a-f0-9]{40}$/.test(commitSha);
 const credentialsPresent = Boolean(

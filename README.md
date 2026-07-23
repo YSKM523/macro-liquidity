@@ -202,7 +202,7 @@ printf 'FRED_API_KEY=你的key\nADMIN_TOKEN=随便一个长随机串\n' > .dev.v
 npm test            # Vitest
 npm run typecheck
 npm run lint
-npm run migrate:verify   # 临时本地 D1：0010 前向应用 + 第二次 no-op
+npm run migrate:verify   # 临时本地 D1：0011 前向应用 + 第二次 no-op
 npm run restore:drill    # 完全本地临时恢复演练
 npm run deploy:dry       # staging bundle dry-run；不是 staging 已部署证明
 npx wrangler dev    # 本地起 Worker
