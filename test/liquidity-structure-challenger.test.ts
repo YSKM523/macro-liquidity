@@ -244,6 +244,52 @@ describe('formal funding/credit ablation evaluation', () => {
     expect(Object.values(result.arms).some(arm => arm.horizons[13].missingCount > 0)).toBe(true);
   });
 
+  it('fails closed when same-close supersession removes a signal from the evaluated cohort', () => {
+    const superseded = formalAblationInputs();
+    superseded.signals[1] = {
+      ...superseded.signals[1],
+      decisionAt: '2023-01-02T12:30:00Z', tradableAt: '2023-01-02T12:30:00Z',
+      dataCutoff: '2023-01-02T12:29:59Z', recordedAt: '2023-01-02T12:30:01Z',
+      createdAt: '2023-01-02T12:30:01Z',
+    };
+    const result = evaluateFundingCreditAblation(superseded);
+    expect(result).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'EXECUTION_COHORT_INCOMPLETE',
+    });
+    for (const arm of Object.values(result.arms)) {
+      expect(arm.executionCoverage).toMatchObject({
+        signalCount: 40, executionCount: 39, supersededCount: 1, unexecutedCount: 0,
+      });
+    }
+  });
+
+  it('fails closed when zero-volatility portfolio data leaves declared Sharpe metrics null', () => {
+    const zeroVolatility = formalAblationInputs();
+    const factors = Object.fromEntries(
+      ['netliqTrend', 'impulse', 'credit', 'funding', 'rates', 'dollar', 'reserveAdequacy', 'curve']
+        .map(key => [key, 50]),
+    );
+    zeroVolatility.signals = [{
+      ...zeroVolatility.signals[0], factors, netliqDir: 'UP', snapshotVixEod: 20,
+    }];
+    zeroVolatility.prices = zeroVolatility.prices.slice(0, 2)
+      .map(price => ({ ...price, adjustedClose: 100 }));
+    zeroVolatility.vix = zeroVolatility.vix.slice(0, 2);
+    zeroVolatility.cashRates = zeroVolatility.cashRates.slice(0, 2)
+      .map(rate => ({ ...rate, rate: -32.4 }));
+    const result = evaluateFundingCreditAblation(zeroVolatility);
+    expect(result).toMatchObject({
+      status: 'DATA_INCOMPLETE', reason: 'PORTFOLIO_METRICS_INCOMPLETE',
+    });
+    for (const arm of Object.values(result.arms)) {
+      expect(arm.status).toBe('OK');
+      expect(arm.portfolio).toMatchObject({
+        strategySharpe: null, betaMatchedSharpe: null, betaMatchedSharpeDelta: null,
+        maxDrawdown: expect.any(Number),
+      });
+    }
+  });
+
   it('returns a typed result before formal validation when request work exceeds the hard bound', () => {
     const oversized = formalAblationInputs();
     oversized.signals = Array.from(
