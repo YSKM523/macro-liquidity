@@ -124,7 +124,7 @@ The frozen major-factor set is:
 netliqTrend, dollar, reserveAdequacy, curve
 ```
 
-Each score is classified as `UP` above 55, `DOWN` below 45, and `NEUTRAL` otherwise. The component is:
+`netliqTrend` uses the recalculated tactical value; the other three values come from the selected formal factor cohort. Each score is classified as `UP` above 55, `DOWN` below 45, and `NEUTRAL` otherwise. The component is:
 
 ```text
 100 * max(up + 0.5 * neutral, down + 0.5 * neutral) / 4
