@@ -24,7 +24,12 @@ function productionTypeScriptFiles(directory = 'src'): string[] {
   });
 }
 
-type ShadowViolationKind = 'NAMESPACE_IMPORT' | 'DEFAULT_IMPORT' | 'DYNAMIC_IMPORT' | 'RE_EXPORT';
+type ShadowViolationKind =
+  | 'NAMESPACE_IMPORT'
+  | 'DEFAULT_IMPORT'
+  | 'DYNAMIC_IMPORT'
+  | 'UNRESOLVED_DYNAMIC_IMPORT'
+  | 'RE_EXPORT';
 
 interface ShadowUsageAnalysis {
   imports: Array<{ file: string; localName: string }>;
@@ -47,6 +52,25 @@ function isDualHorizonRouteCondition(condition: ts.Expression): boolean {
   }
   return [condition.left, condition.right].some(operand =>
     ts.isStringLiteral(operand) && operand.text === '/api/v1/challengers/dual-horizon');
+}
+
+function staticStringExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.Symbol>(),
+): string | null {
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return expression.text;
+  }
+  if (!ts.isIdentifier(expression)) return null;
+  const symbol = checker.getSymbolAtLocation(expression);
+  if (!symbol || seen.has(symbol)) return null;
+  seen.add(symbol);
+  const declarations = symbol.getDeclarations() ?? [];
+  const declaration = declarations.find(ts.isVariableDeclaration);
+  if (!declaration?.initializer || !ts.isVariableDeclarationList(declaration.parent)
+    || (declaration.parent.flags & ts.NodeFlags.Const) === 0) return null;
+  return staticStringExpression(declaration.initializer, checker, seen);
 }
 
 function analyzeDualHorizonShadowUsage(files: Map<string, string>): ShadowUsageAnalysis {
@@ -117,8 +141,12 @@ function analyzeDualHorizonShadowUsage(files: Map<string, string>): ShadowUsageA
       if (ts.isCallExpression(node)) {
         if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
           const [moduleSpecifier] = node.arguments;
-          if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)
-            && isDualHorizonModule(file, moduleSpecifier.text)) {
+          const resolvedSpecifier = moduleSpecifier == null
+            ? null
+            : staticStringExpression(moduleSpecifier, checker);
+          if (resolvedSpecifier == null) {
+            violations.push({ file, kind: 'UNRESOLVED_DYNAMIC_IMPORT' });
+          } else if (isDualHorizonModule(file, resolvedSpecifier)) {
             violations.push({ file, kind: 'DYNAMIC_IMPORT' });
           }
         } else if (ts.isIdentifier(node.expression)) {
@@ -309,8 +337,25 @@ describe('production governance configuration', () => {
         shadow.buildDualHorizonShadow();
       `],
       ['/virtual/src/rogue-dynamic.ts', 'void import("./dual-horizon-confidence");'],
+      ['/virtual/src/rogue-computed-dynamic.ts', `
+        const p = './dual-horizon-confidence';
+        await import(p);
+      `],
       ['/virtual/src/lazy-feature.ts', 'export const lazy = true;'],
       ['/virtual/src/allowed-dynamic.ts', 'void import("./lazy-feature");'],
+      ['/virtual/src/allowed-const-dynamic.ts', `
+        const lazyPath = './lazy-feature';
+        void import(lazyPath);
+      `],
+      ['/virtual/src/unknown-dynamic.ts', `
+        declare const runtimeTarget: string;
+        void import(runtimeTarget);
+      `],
+      ['/virtual/src/cyclic-dynamic.ts', `
+        const first = second;
+        const second = first;
+        void import(first);
+      `],
       ['/virtual/src/shadow-forward.ts', `
         export { buildDualHorizonShadow } from './dual-horizon-confidence';
       `],
@@ -346,12 +391,21 @@ describe('production governance configuration', () => {
     expect(analysis.violations).toEqual(expect.arrayContaining([
       { file: '/virtual/src/rogue-namespace.ts', kind: 'NAMESPACE_IMPORT' },
       { file: '/virtual/src/rogue-dynamic.ts', kind: 'DYNAMIC_IMPORT' },
+      { file: '/virtual/src/rogue-computed-dynamic.ts', kind: 'DYNAMIC_IMPORT' },
+      { file: '/virtual/src/unknown-dynamic.ts', kind: 'UNRESOLVED_DYNAMIC_IMPORT' },
+      { file: '/virtual/src/cyclic-dynamic.ts', kind: 'UNRESOLVED_DYNAMIC_IMPORT' },
       { file: '/virtual/src/shadow-forward.ts', kind: 'RE_EXPORT' },
       { file: '/virtual/src/shadow-forward-star.ts', kind: 'RE_EXPORT' },
       { file: '/virtual/src/shadow-forward-default.ts', kind: 'RE_EXPORT' },
     ]));
     expect(analysis.violations).not.toContainEqual({
       file: '/virtual/src/allowed-dynamic.ts', kind: 'DYNAMIC_IMPORT',
+    });
+    expect(analysis.violations).not.toContainEqual({
+      file: '/virtual/src/allowed-const-dynamic.ts', kind: 'DYNAMIC_IMPORT',
+    });
+    expect(analysis.violations).not.toContainEqual({
+      file: '/virtual/src/allowed-const-dynamic.ts', kind: 'UNRESOLVED_DYNAMIC_IMPORT',
     });
   });
 
