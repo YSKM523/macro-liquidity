@@ -114,7 +114,10 @@ describe('liquidity-structure PIT input loader', () => {
     await add('WALCL', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 7_000);
 
     const old = await loadLiquidityStructureSeries(db, '2024-01-10T00:00:00Z');
-    expect(old).toMatchObject({ asOfCutoff: '2024-01-10T00:00:00Z', decisionDate: '2024-01-09' });
+    expect(old).toMatchObject({
+      asOfCutoff: '2024-01-10T00:00:00Z', decisionDate: '2024-01-09',
+      decisionAt: '2024-01-09T23:59:59.999Z',
+    });
     expect(old.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 100 }]);
     const revised = await loadLiquidityStructureSeries(db, '2024-01-12T00:00:00Z');
     expect(revised.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 110 }]);

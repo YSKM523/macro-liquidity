@@ -43,6 +43,7 @@ const dbState = vi.hoisted(() => ({
   backtestRows: [] as any[],
   liquidityStructureInputs: {
     asOfCutoff: '2030-01-01T00:00:00Z', decisionDate: '2029-12-31',
+    decisionAt: '2029-12-31T23:59:59.999Z',
     seriesMap: { WDTGAL: [], RRPONTSYD: [], WALCL: [] },
     provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 0, dataRunCount: 0 },
   } as any,
@@ -154,6 +155,7 @@ beforeEach(() => {
   dbState.backtestRows = [];
   dbState.liquidityStructureInputs = {
     asOfCutoff: '2030-01-01T00:00:00Z', decisionDate: '2029-12-31',
+    decisionAt: '2029-12-31T23:59:59.999Z',
     seriesMap: { WDTGAL: [], RRPONTSYD: [], WALCL: [] },
     provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 0, dataRunCount: 0 },
   };
@@ -222,6 +224,7 @@ describe('/api/v1 governance routes', () => {
     const date = (index: number) => new Date(Date.UTC(2020, 0, 1 + index * 7)).toISOString().slice(0, 10);
     dbState.liquidityStructureInputs = {
       asOfCutoff: '2030-01-01T00:00:00Z', decisionDate: '2029-12-31',
+      decisionAt: '2029-12-31T23:59:59.999Z',
       seriesMap: {
         WDTGAL: Array.from({ length: 60 }, (_, index) => ({ date: date(index), value: 1_000 + index * 10 })),
         RRPONTSYD: Array.from({ length: 60 }, (_, index) => ({ date: date(index), value: 100 + index })),
@@ -256,6 +259,22 @@ describe('/api/v1 governance routes', () => {
       funding_credit_ablation: { status: 'OK' },
       formal_ablation_evaluation: { status: 'DATA_INCOMPLETE' },
     });
+    expect(vi.mocked(resolvePolicyRegime)).toHaveBeenCalledWith(env.DB, {
+      decisionDate: '2029-12-31', decisionAt: '2029-12-31T23:59:59.999Z',
+      asOfCutoff: '2030-01-01T00:00:00Z',
+    });
+  });
+
+  it('pins both challenger input loaders to one database-resolved cutoff when as_of is omitted', async () => {
+    dbState.eventInputs = formalEventInputs(4);
+    dbState.liquidityStructureInputs = {
+      ...dbState.liquidityStructureInputs,
+      asOfCutoff: dbState.eventInputs.asOfCutoff,
+      decisionDate: '2029-12-31', decisionAt: '2029-12-31T23:59:59.999Z',
+    };
+    await worker.fetch(new Request('https://example.test/api/v1/challengers/liquidity-structure'), env);
+    expect(vi.mocked(loadEventBacktestInputs)).toHaveBeenCalledWith(env.DB, undefined);
+    expect(vi.mocked(loadLiquidityStructureSeries)).toHaveBeenCalledWith(env.DB, dbState.eventInputs.asOfCutoff);
   });
 
   it('validates challenger as_of and returns a fixed redacted policy-ledger failure', async () => {
