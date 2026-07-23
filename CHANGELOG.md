@@ -14,6 +14,7 @@ All notable changes to Macro Liquidity Dashboard are documented here.
 - Added exact eight-factor equal/current/50-50 blended score benchmarks while keeping legacy zero-weight `vol` outside every base score.
 - Added `GET /api/v1/challengers/liquidity-structure?as_of=` and a safely escaped dashboard card. Inputs share one database-resolved cutoff and honor release-calendar overrides before selecting the latest visible vintage. Invalid clocks are HTTP 400; absent policy evidence, legacy/mixed cohorts, incomplete PIT inputs, primary 13-week gaps, and overlap errors are typed and fail closed.
 - The four arms now reuse one 4/8/13-week outcome build per arm (four builds total) and requests fail typed before formal validation when bounded signal/price/VIX/cash-rate limits are exceeded. Results are explicitly `RETROSPECTIVE_PIT_EVENT_TIME`; no unseen holdout was registered, so OOS is not established and ALG-08's OOS evidence gate remains pending.
+- Same-close supersession, unexecuted signals, incomplete 13-week outcomes, null IC/tail values, and non-finite or null strategy/Beta-matched Sharpe, Sharpe delta, or maximum drawdown now make the formal evaluation typed `DATA_INCOMPLETE`.
 - Advanced restore/governance checks through migration 0011. The superseded `--schema-confirmed=0010` token is rejected before Wrangler can run.
 - Changed no Champion formula, weight, threshold, hysteresis, stress rule, portfolio target, or official snapshot. No policy seed, push, deployment, remote database access, or production write was performed.
 
