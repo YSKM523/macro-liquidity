@@ -96,6 +96,7 @@ import {
   loadLiquidityStructureSeries,
   resolvePolicyRegime,
 } from '../src/db';
+import { DUAL_HORIZON_PROTOCOL } from '../src/dual-horizon-confidence';
 import { championConfigDigest, CHAMPION_MODEL_VERSION } from '../src/model-version';
 
 const env = {
@@ -332,8 +333,16 @@ describe('/api/v1 governance routes', () => {
       mode: 'SHADOW_ONLY',
       champion_change: false,
       status: 'OK',
+      as_of_cutoff: complete.snapshots.asOfCutoff,
+      protocol: DUAL_HORIZON_PROTOCOL,
+      provenance: {
+        snapshots: complete.snapshots.provenance,
+        liquidity: complete.liquidity.provenance,
+      },
       result: {
         status: 'OK',
+        protocol: DUAL_HORIZON_PROTOCOL.protocol,
+        asOf: complete.snapshots.asOfCutoff,
         championChanged: false,
         strategicScore: 61,
       },
@@ -351,6 +360,27 @@ describe('/api/v1 governance routes', () => {
     );
   });
 
+  it.each(['POST', 'PUT', 'DELETE'])(
+    'rejects %s without executing either dual-horizon loader',
+    async method => {
+      const requestId = `dual-horizon-${method.toLowerCase()}`;
+      const response = await worker.fetch(new Request(
+        'https://example.test/api/v1/challengers/dual-horizon',
+        { method, headers: { 'x-request-id': requestId } },
+      ), env);
+
+      expect(response.status).toBe(405);
+      expect(response.headers.get('allow')).toBe('GET');
+      await expect(response.json()).resolves.toEqual({
+        error: 'method_not_allowed',
+        error_code: 'METHOD_NOT_ALLOWED',
+        request_id: requestId,
+      });
+      expect(vi.mocked(loadDualHorizonSnapshotInputs)).not.toHaveBeenCalled();
+      expect(vi.mocked(loadLiquidityStructureSeries)).not.toHaveBeenCalled();
+    },
+  );
+
   it('returns the typed dual-horizon DATA_INCOMPLETE result in the v1 envelope', async () => {
     dbState.dualHorizonSnapshotInputs = {
       ...dbState.dualHorizonSnapshotInputs,
@@ -367,11 +397,79 @@ describe('/api/v1 governance routes', () => {
       champion_change: false,
       status: 'DATA_INCOMPLETE',
       reason: 'NO_GOVERNED_FORMAL_SNAPSHOT',
+      as_of_cutoff: dbState.dualHorizonSnapshotInputs.asOfCutoff,
+      protocol: DUAL_HORIZON_PROTOCOL,
+      provenance: {
+        snapshots: dbState.dualHorizonSnapshotInputs.provenance,
+        liquidity: dbState.liquidityStructureInputs.provenance,
+      },
       result: {
         status: 'DATA_INCOMPLETE',
+        protocol: DUAL_HORIZON_PROTOCOL.protocol,
+        asOf: dbState.dualHorizonSnapshotInputs.asOfCutoff,
         reasons: ['NO_GOVERNED_FORMAL_SNAPSHOT'],
         championChanged: false,
       },
+    });
+  });
+
+  it('preserves a typed cutoff-mismatch result from the dual-horizon composer', async () => {
+    dbState.liquidityStructureInputs = {
+      ...dbState.liquidityStructureInputs,
+      asOfCutoff: '2030-01-01T00:00:00.001Z',
+    };
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+    ), env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      api_version: 'v1',
+      challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
+      mode: DUAL_HORIZON_PROTOCOL.mode,
+      champion_change: false,
+      status: 'DATA_INCOMPLETE',
+      reason: 'AS_OF_CUTOFF_MISMATCH',
+      as_of_cutoff: dbState.dualHorizonSnapshotInputs.asOfCutoff,
+      protocol: DUAL_HORIZON_PROTOCOL,
+      provenance: {
+        snapshots: dbState.dualHorizonSnapshotInputs.provenance,
+        liquidity: dbState.liquidityStructureInputs.provenance,
+      },
+      result: {
+        status: 'DATA_INCOMPLETE',
+        protocol: DUAL_HORIZON_PROTOCOL.protocol,
+        asOf: dbState.dualHorizonSnapshotInputs.asOfCutoff,
+        reasons: ['AS_OF_CUTOFF_MISMATCH'],
+        championChanged: false,
+      },
+    });
+  });
+
+  it('maps invalid and future liquidity-structure cutoffs to INVALID_AS_OF', async () => {
+    vi.mocked(loadLiquidityStructureSeries)
+      .mockRejectedValueOnce(new Error('invalid liquidity-structure as_of'));
+    const invalid = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+      { headers: { 'x-request-id': 'dual-horizon-invalid-liquidity' } },
+    ), env);
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toEqual({
+      error: 'invalid_as_of',
+      error_code: 'INVALID_AS_OF',
+      request_id: 'dual-horizon-invalid-liquidity',
+    });
+
+    vi.mocked(loadLiquidityStructureSeries)
+      .mockRejectedValueOnce(new Error('future liquidity-structure as_of'));
+    const future = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+      { headers: { 'x-request-id': 'dual-horizon-future-liquidity' } },
+    ), env);
+    expect(future.status).toBe(400);
+    await expect(future.json()).resolves.toEqual({
+      error: 'invalid_as_of',
+      error_code: 'INVALID_AS_OF',
+      request_id: 'dual-horizon-future-liquidity',
     });
   });
 
@@ -398,9 +496,21 @@ describe('/api/v1 governance routes', () => {
     const unavailable = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon',
     ), env);
-    expect(await unavailable.json()).toMatchObject({
-      status: 'DATA_INCOMPLETE', reason: 'INPUT_LOAD_FAILED', champion_change: false,
+    expect(unavailable.status).toBe(200);
+    const unavailableBody = await unavailable.json();
+    expect(unavailableBody).toEqual({
+      api_version: 'v1',
+      challenger_id: DUAL_HORIZON_PROTOCOL.protocol,
+      mode: DUAL_HORIZON_PROTOCOL.mode,
+      champion_change: false,
+      status: 'DATA_INCOMPLETE',
+      reason: 'INPUT_LOAD_FAILED',
+      as_of_cutoff: null,
+      protocol: DUAL_HORIZON_PROTOCOL,
+      provenance: null,
+      result: null,
     });
+    expect(JSON.stringify(unavailableBody)).not.toContain('super-secret');
     expect(errorSink.mock.calls.at(-1)?.[0]).not.toMatch(/super-secret/);
   });
 

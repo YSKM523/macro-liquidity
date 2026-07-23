@@ -372,6 +372,16 @@ export default {
       return json({ ...liveData.live, cache_status: liveData.cache.prices });
     }
     if (p === '/api/v1/challengers/dual-horizon') {
+      if (req.method !== 'GET') {
+        return new Response(JSON.stringify({
+          error: 'method_not_allowed',
+          error_code: 'METHOD_NOT_ALLOWED',
+          request_id: requestId,
+        }), {
+          status: 405,
+          headers: { 'content-type': 'application/json', allow: 'GET' },
+        });
+      }
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
       try {
         const snapshots = await loadDualHorizonSnapshotInputs(env.DB, requestedAsOf);
