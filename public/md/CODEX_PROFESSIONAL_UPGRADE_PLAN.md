@@ -25,7 +25,7 @@
 | PR-13 | 已完成（本地） | `9f2a4f6`–`2eb70ce` | 模型版本、精确 `as_of` 回放 provenance、完整事件回测配置哈希、严格 clean-HEAD 部署门禁、v1 API、真实 lint/CI/环境、结构化日志、fail-closed 缓存、告警审计、备份/恢复和治理文档已验证；未部署 |
 | PR-14 | 已完成（本地） | `3638c55`–`780e125` | FRED/ALFRED 与 live provider 采用 GET/HEAD-only 有界瞬态重试及独立 attempt timeout；并发 prices/stress 共用 32-attempt budget，丢弃 body 会释放，caller abort 不重试；API/UI 明确 8 个正权重因子、legacy 零权重 `vol` 与独立 live overlay；55 files / 720 tests，双重复审 Ready；Champion 不变，未部署 |
 | PR-15 | 已完成（本地） | `710bb30`–`b79aab3` | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 759 tests、focused 103、双重复审 Ready；未部署、未修改远程数据库 |
-| PR-16 | 本地实现完成，待最终全量门禁与独立复审 | `d7aba3c`–候选 HEAD | 共享正式 4/8/13 周 outcome、七个分数桶、append-only trial ledger、BH-FDR/DSR fail-closed、八个冻结压力事件与 v1 API/UI；Champion、PR-11/12 决策及数据库均不变，未部署 |
+| PR-16 | 已完成（本地） | `d7aba3c`–`d0f59cd` | 共享正式 4/8/13 周 outcome、七个分数桶、冻结 ledger 与前序绑定修订、BH-FDR/DSR fail-closed、八个压力事件及固定形状 v1 API/UI；58 files / 777 tests、TypeScript、lint、迁移幂等与 dry-run 通过，双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion、PR-11/12 决策及数据库均不变，未部署 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
