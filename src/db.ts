@@ -1501,6 +1501,304 @@ export interface LiquidityStructureSeriesInputs {
   };
 }
 
+export const DUAL_HORIZON_LIQUIDITY_LIMITS = Object.freeze({
+  minimumWeeklyPoints: 66,
+  maximumWeeklyPoints: 170,
+  maximumWeeklyGapDays: 10,
+  rrpFivePointWarmupDays: 16,
+  observationLookbackDays: (170 - 1) * 10 + 16,
+  rawRevisionLimit: 12_000,
+  overrideLimit: 2_000,
+  selectedRowLimit: 2_500,
+});
+
+export interface DualHorizonLiquidityLimitOverrides {
+  rawRevisionLimit?: number;
+  overrideLimit?: number;
+  selectedRowLimit?: number;
+}
+
+type DualHorizonSeriesId = 'WALCL' | 'WDTGAL' | 'WTREGEN' | 'RRPONTSYD';
+
+function boundedDualHorizonLimit(
+  requested: number | undefined,
+  maximum: number,
+  field: string,
+): number {
+  if (requested == null) return maximum;
+  if (!Number.isSafeInteger(requested) || requested <= 0 || requested > maximum) {
+    throw new Error(`invalid dual-horizon ${field}`);
+  }
+  return requested;
+}
+
+function dateMinusDays(date: string, days: number): string {
+  const epoch = Date.parse(`${date}T00:00:00Z`);
+  if (!Number.isFinite(epoch) || new Date(epoch).toISOString().slice(0, 10) !== date) {
+    throw new Error('invalid dual-horizon decision date');
+  }
+  return new Date(epoch - days * 86_400_000).toISOString().slice(0, 10);
+}
+
+async function validateDualHorizonOverrideTimings(
+  db: D1Database,
+  cutoff: string,
+  firstObservationDate: string,
+  decisionDate: string,
+  limit: number,
+): Promise<void> {
+  const rows = await db.prepare(
+    `SELECT series_id,vintage_date,created_at,released_at,tradable_at
+     FROM release_calendar_overrides
+     WHERE series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
+       AND vintage_date>=? AND vintage_date<=?
+       AND julianday(created_at)<julianday(?)
+     ORDER BY series_id,vintage_date,julianday(created_at)
+     LIMIT ?`,
+  ).bind(firstObservationDate, decisionDate, cutoff, limit + 1).all<{
+    series_id: string;
+    vintage_date: string;
+    created_at: string;
+    released_at: string;
+    tradable_at: string;
+  }>();
+  const result = rows.results ?? [];
+  if (result.length > limit) {
+    throw new DualHorizonDomainError(
+      'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      cutoff,
+      { work: 'VISIBLE_OVERRIDES', limit, observedAtLeast: limit + 1 },
+    );
+  }
+  const versions = new Set<string>();
+  try {
+    for (const row of result) {
+      const createdAtMs = isoTimestampMs(row.created_at, 'dual-horizon override createdAt');
+      const version = `${row.series_id}|${row.vintage_date}|${createdAtMs}`;
+      if (versions.has(version)) throw new Error('duplicate override createdAt instant');
+      versions.add(version);
+      validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
+    }
+  } catch {
+    throw new DualHorizonDomainError(
+      'LIQUIDITY_INPUT_INVALID',
+      cutoff,
+      { source: 'VISIBLE_OVERRIDE_TIMING' },
+    );
+  }
+}
+
+async function validateDualHorizonStoredPitTimings(
+  db: D1Database,
+  cutoff: string,
+  firstObservationDate: string,
+  decisionDate: string,
+): Promise<void> {
+  const rows = await db.prepare(
+    `SELECT series_id,observation_date,vintage_date,fetched_at,released_at,tradable_at
+     FROM observations_pit
+     WHERE series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
+       AND observation_date>=? AND observation_date<=?
+       AND julianday(fetched_at)<julianday(?)`,
+  ).bind(firstObservationDate, decisionDate, cutoff).all<{
+    series_id: string;
+    observation_date: string;
+    vintage_date: string;
+    fetched_at: string;
+    released_at: string;
+    tradable_at: string;
+  }>();
+  try {
+    for (const row of rows.results ?? []) {
+      requirePolicyDate(row.observation_date, 'dual-horizon observation date');
+      requirePolicyDate(row.vintage_date, 'dual-horizon vintage date');
+      requireIsoTimestamp(row.fetched_at, 'dual-horizon fetchedAt');
+      validateReleaseOverride({ releasedAt: row.released_at, tradableAt: row.tradable_at });
+    }
+  } catch {
+    throw new DualHorizonDomainError(
+      'LIQUIDITY_INPUT_INVALID',
+      cutoff,
+      { source: 'VISIBLE_RAW_TIMING' },
+    );
+  }
+}
+
+export async function loadDualHorizonLiquiditySeries(
+  db: D1Database,
+  requestedAsOf?: string,
+  limitOverrides: DualHorizonLiquidityLimitOverrides = {},
+): Promise<LiquidityStructureSeriesInputs> {
+  const rawRevisionLimit = boundedDualHorizonLimit(
+    limitOverrides.rawRevisionLimit,
+    DUAL_HORIZON_LIQUIDITY_LIMITS.rawRevisionLimit,
+    'raw revision limit',
+  );
+  const overrideLimit = boundedDualHorizonLimit(
+    limitOverrides.overrideLimit,
+    DUAL_HORIZON_LIQUIDITY_LIMITS.overrideLimit,
+    'override limit',
+  );
+  const selectedRowLimit = boundedDualHorizonLimit(
+    limitOverrides.selectedRowLimit,
+    DUAL_HORIZON_LIQUIDITY_LIMITS.selectedRowLimit,
+    'selected row limit',
+  );
+  const clock = await db.prepare(
+    `WITH clock AS (SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now') AS db_now)
+     SELECT db_now,CASE WHEN ? IS NULL THEN db_now ELSE ? END AS cutoff FROM clock`,
+  ).bind(requestedAsOf ?? null, requestedAsOf ?? null)
+    .first<{ db_now: string; cutoff: string }>();
+  if (!clock) throw new Error('dual-horizon liquidity database clock unavailable');
+  requireIsoTimestamp(clock.db_now, 'dual-horizon liquidity database now');
+  try {
+    requireIsoTimestamp(clock.cutoff, 'dual-horizon liquidity as_of');
+  } catch {
+    throw new DualHorizonRequestError('INVALID_AS_OF');
+  }
+  if (compareIsoTimestamps(clock.cutoff, clock.db_now) > 0) {
+    throw new DualHorizonRequestError('INVALID_AS_OF');
+  }
+  const cutoff = clock.cutoff;
+  const decisionClock = new Date(isoTimestampMs(cutoff, 'dual-horizon liquidity cutoff') - 1);
+  const decisionDate = decisionClock.toISOString().slice(0, 10);
+  const decisionAt = decisionClock.toISOString();
+  const firstObservationDate = dateMinusDays(
+    decisionDate,
+    DUAL_HORIZON_LIQUIDITY_LIMITS.observationLookbackDays,
+  );
+
+  const rawWork = await db.prepare(
+    `SELECT 1 AS visible
+     FROM observations_pit
+     WHERE series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
+       AND observation_date>=? AND observation_date<=?
+       AND julianday(fetched_at)<julianday(?)
+     LIMIT ?`,
+  ).bind(firstObservationDate, decisionDate, cutoff, rawRevisionLimit + 1)
+    .all<{ visible: 1 }>();
+  const rawWorkCount = (rawWork.results ?? []).length;
+  if (rawWorkCount > rawRevisionLimit) {
+    throw new DualHorizonDomainError(
+      'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      cutoff,
+      {
+        work: 'RAW_REVISIONS',
+        limit: rawRevisionLimit,
+        observedAtLeast: rawRevisionLimit + 1,
+      },
+    );
+  }
+  await validateDualHorizonOverrideTimings(
+    db,
+    cutoff,
+    firstObservationDate,
+    decisionDate,
+    overrideLimit,
+  );
+  await validateDualHorizonStoredPitTimings(
+    db,
+    cutoff,
+    firstObservationDate,
+    decisionDate,
+  );
+
+  const rows = await db.prepare(
+    `WITH resolved AS (
+       SELECT raw.series_id,raw.observation_date,raw.vintage_date,raw.value,
+              raw.fetched_at,raw.data_run_id,raw.checksum,
+              COALESCE(overrides.released_at,raw.released_at) AS released_at,
+              COALESCE(overrides.tradable_at,raw.tradable_at) AS tradable_at
+       FROM observations_pit raw
+       LEFT JOIN release_calendar_overrides overrides
+         ON overrides.series_id=raw.series_id AND overrides.vintage_date=raw.vintage_date
+        AND overrides.created_at=(
+          SELECT candidate.created_at FROM release_calendar_overrides candidate
+          WHERE candidate.series_id=raw.series_id AND candidate.vintage_date=raw.vintage_date
+            AND julianday(candidate.created_at)<julianday(?)
+          ORDER BY julianday(candidate.created_at) DESC LIMIT 1
+        )
+       WHERE raw.series_id IN ('WALCL','WDTGAL','WTREGEN','RRPONTSYD')
+         AND raw.observation_date>=? AND raw.observation_date<=?
+         AND julianday(raw.fetched_at)<julianday(?)
+     ), eligible AS (
+       SELECT *,
+              ROW_NUMBER() OVER (
+                PARTITION BY series_id,observation_date
+                ORDER BY vintage_date DESC,julianday(fetched_at) DESC,checksum DESC
+              ) AS revision_rank
+       FROM resolved
+       WHERE julianday(released_at)<julianday(?)
+         AND julianday(tradable_at)<julianday(?)
+     )
+     SELECT series_id,observation_date,vintage_date,value,fetched_at,data_run_id
+     FROM eligible WHERE revision_rank=1
+     ORDER BY series_id,observation_date LIMIT ?`,
+  ).bind(
+    cutoff,
+    firstObservationDate,
+    decisionDate,
+    cutoff,
+    cutoff,
+    cutoff,
+    selectedRowLimit + 1,
+  ).all<{
+    series_id: DualHorizonSeriesId;
+    observation_date: string;
+    vintage_date: string;
+    value: number;
+    fetched_at: string;
+    data_run_id: string;
+  }>();
+  const result = rows.results ?? [];
+  if (result.length > selectedRowLimit) {
+    throw new DualHorizonDomainError(
+      'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      cutoff,
+      {
+        work: 'SELECTED_ROWS',
+        limit: selectedRowLimit,
+        observedAtLeast: selectedRowLimit + 1,
+      },
+    );
+  }
+  const seriesMap: SeriesMap = { WALCL: [], WDTGAL: [], WTREGEN: [], RRPONTSYD: [] };
+  const runIds = new Set<string>();
+  let maxFetchedAt: string | null = null;
+  try {
+    for (const row of result) {
+      requirePolicyDate(row.observation_date, 'dual-horizon observation date');
+      requirePolicyDate(row.vintage_date, 'dual-horizon vintage date');
+      requireIsoTimestamp(row.fetched_at, 'dual-horizon fetchedAt');
+      if (!Number.isFinite(row.value)) throw new Error('invalid dual-horizon observation value');
+      seriesMap[row.series_id].push({ date: row.observation_date, value: row.value });
+      runIds.add(row.data_run_id);
+      if (maxFetchedAt == null
+        || compareIsoTimestamps(row.fetched_at, maxFetchedAt) > 0) {
+        maxFetchedAt = row.fetched_at;
+      }
+    }
+  } catch {
+    throw new DualHorizonDomainError(
+      'LIQUIDITY_INPUT_INVALID',
+      cutoff,
+      { source: 'SELECTED_LIQUIDITY_ROW' },
+    );
+  }
+  return {
+    asOfCutoff: cutoff,
+    decisionDate,
+    decisionAt,
+    seriesMap,
+    provenance: {
+      methodology: 'APPEND_ONLY_AS_OF',
+      rowCount: result.length,
+      dataRunCount: runIds.size,
+      maxFetchedAt,
+    },
+  };
+}
+
 export async function loadLiquidityStructureSeries(
   db: D1Database,
   requestedAsOf?: string,

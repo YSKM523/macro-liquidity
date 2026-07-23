@@ -9,6 +9,7 @@ import {
   countOfficialSnapshots,
   officialSnapshotOnOrBefore,
   loadSeriesMap,
+  loadDualHorizonLiquiditySeries,
   loadDualHorizonSnapshotInputs,
   ingestRunSummary,
   loadEventBacktestInputs,
@@ -389,7 +390,7 @@ export default {
       const requestedAsOf = url.searchParams.has('as_of') ? url.searchParams.get('as_of')! : undefined;
       try {
         const snapshots = await loadDualHorizonSnapshotInputs(env.DB, requestedAsOf);
-        const liquidity = await loadLiquidityStructureSeries(env.DB, snapshots.asOfCutoff);
+        const liquidity = await loadDualHorizonLiquiditySeries(env.DB, snapshots.asOfCutoff);
         const result = buildDualHorizonShadow(snapshots, liquidity);
         return json({
           api_version: 'v1',

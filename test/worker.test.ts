@@ -69,6 +69,7 @@ vi.mock('../src/db', () => ({
   loadBacktestRows: vi.fn(async () => dbState.backtestRows),
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
   loadDualHorizonSnapshotInputs: vi.fn(async () => dbState.dualHorizonSnapshotInputs),
+  loadDualHorizonLiquiditySeries: vi.fn(async () => dbState.liquidityStructureInputs),
   loadLiquidityStructureSeries: vi.fn(async () => dbState.liquidityStructureInputs),
   resolvePolicyRegime: vi.fn(async () => dbState.policyRegime),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
@@ -91,6 +92,7 @@ vi.mock('../src/db', () => ({
 import worker from '../src/worker';
 import { runIngest } from '../src/service';
 import {
+  loadDualHorizonLiquiditySeries,
   loadDualHorizonSnapshotInputs,
   loadEventBacktestInputs,
   loadLiquidityStructureSeries,
@@ -392,7 +394,7 @@ describe('/api/v1 governance routes', () => {
   it('pins both dual-horizon loaders to one database-resolved cutoff', async () => {
     await worker.fetch(new Request('https://example.test/api/v1/challengers/dual-horizon'), env);
     expect(vi.mocked(loadDualHorizonSnapshotInputs)).toHaveBeenCalledWith(env.DB, undefined);
-    expect(vi.mocked(loadLiquidityStructureSeries)).toHaveBeenCalledWith(
+    expect(vi.mocked(loadDualHorizonLiquiditySeries)).toHaveBeenCalledWith(
       env.DB, dbState.dualHorizonSnapshotInputs.asOfCutoff,
     );
   });
@@ -414,7 +416,7 @@ describe('/api/v1 governance routes', () => {
         request_id: requestId,
       });
       expect(vi.mocked(loadDualHorizonSnapshotInputs)).not.toHaveBeenCalled();
-      expect(vi.mocked(loadLiquidityStructureSeries)).not.toHaveBeenCalled();
+      expect(vi.mocked(loadDualHorizonLiquiditySeries)).not.toHaveBeenCalled();
     },
   );
 
@@ -512,7 +514,7 @@ describe('/api/v1 governance routes', () => {
   });
 
   it('maps invalid and future liquidity-structure cutoffs to INVALID_AS_OF', async () => {
-    vi.mocked(loadLiquidityStructureSeries)
+    vi.mocked(loadDualHorizonLiquiditySeries)
       .mockRejectedValueOnce(new DualHorizonRequestError('INVALID_AS_OF'));
     const invalid = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon',
@@ -525,7 +527,7 @@ describe('/api/v1 governance routes', () => {
       request_id: 'dual-horizon-invalid-liquidity',
     });
 
-    vi.mocked(loadLiquidityStructureSeries)
+    vi.mocked(loadDualHorizonLiquiditySeries)
       .mockRejectedValueOnce(new DualHorizonRequestError('INVALID_AS_OF'));
     const future = await worker.fetch(new Request(
       'https://example.test/api/v1/challengers/dual-horizon',

@@ -7,6 +7,7 @@ import {
   buildDualHorizonShadow,
   computeDualHorizonConfidence,
   mapShadowExposure,
+  rawSmoothAtDecision,
   scoreFourWeekTacticalCohort,
   scoreTacticalCohort,
   type DualFactorStatus,
@@ -148,6 +149,26 @@ function appendFutureLiquidity(
 
 function divergentFourAndThirteenWeekInput() {
   return dualInputFromRawUnits(syntheticResearchSeries(220));
+}
+
+function rawSmoothDirectionFixture(
+  agreement: 'HIGH' | 'LOW' | 'TRANSITION',
+): ResearchSeries {
+  const fixture = syntheticResearchSeries(170);
+  const lastFlatStart = fixture.WALCL.length - 14;
+  fixture.WALCL.forEach((row, index) => {
+    const oscillation = Math.sin(index * 0.37) * 20_000;
+    row.value = 7_000_000;
+    fixture.WDTGAL[index].value = 1_000_000 - index * 2_000 + oscillation;
+    fixture.WTREGEN[index].value = agreement === 'HIGH'
+      ? 1_000_000 - index * 2_000 + oscillation
+      : agreement === 'LOW'
+        ? 1_000_000 + index * 2_000 - oscillation
+        : index >= lastFlatStart
+          ? 1_000_000
+          : 1_000_000 + oscillation;
+  });
+  return fixture;
 }
 
 describe('dual-horizon frozen arithmetic', () => {
@@ -372,6 +393,26 @@ describe('dual-horizon frozen arithmetic', () => {
 });
 
 describe('dual-horizon Shadow composition', () => {
+  it.each([
+    ['HIGH', 'HIGH'],
+    ['LOW', 'LOW'],
+    ['TRANSITION', 'TRANSITION'],
+  ] as const)('reconstructs a cadence-valid %s Raw/Smooth outcome', (label, expected) => {
+    const input = dualInputFromRawUnits(rawSmoothDirectionFixture(label));
+    const result = rawSmoothAtDecision(
+      input.liquidity.seriesMap,
+      input.liquidity.decisionDate,
+    );
+    expect(result).toMatchObject({
+      status: 'OK',
+      agreement: expected,
+      sampleCount: 170,
+      observationDate: input.liquidity.seriesMap.WALCL.at(-1)!.date,
+      availableDate: input.liquidity.decisionDate,
+      reason: `RAW_SMOOTH_${expected}`,
+    });
+  });
+
   it('keeps the frozen Champion identity and formal snapshot unchanged after a Shadow read', () => {
     const input = dualInputFromRawUnits(syntheticResearchSeries(220));
     const formalSnapshotBeforeShadowRead = structuredClone(input.snapshots.snapshots.at(-1)!);
@@ -397,6 +438,7 @@ describe('dual-horizon Shadow composition', () => {
       agreement: frozen.agreement.confidence,
       rawLatent: frozen.raw.latent,
       smoothLatent: frozen.smooth.latent,
+      sampleCount: 170,
     });
   });
 
@@ -459,7 +501,7 @@ describe('dual-horizon Shadow composition', () => {
       },
     )).toMatchObject({
       status: 'DATA_INCOMPLETE',
-      reasons: ['MISSING_TACTICAL_HISTORY'],
+      reasons: ['MISSING_RAW_SMOOTH_HISTORY'],
       championChanged: false,
     });
   });
@@ -470,6 +512,53 @@ describe('dual-horizon Shadow composition', () => {
       status: 'DATA_INCOMPLETE',
       reasons: expect.arrayContaining(['MISSING_RAW_SMOOTH_HISTORY']),
       championChanged: false,
+    });
+  });
+
+  it('fails closed when historical RRP is stale despite five fresh final anchors', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    const rrp = input.liquidity.seriesMap.RRPONTSYD;
+    input.liquidity.seriesMap.RRPONTSYD = [
+      ...rrp.slice(0, 5),
+      ...rrp.slice(-25),
+    ];
+    expect(rawSmoothAtDecision(
+      input.liquidity.seriesMap,
+      input.liquidity.decisionDate,
+    )).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'MISSING_RAW_SMOOTH_HISTORY',
+    });
+  });
+
+  it('fails closed for an irregular weekly anchor inside the governed window', () => {
+    const input = dualInputFromRawUnits(syntheticResearchSeries(220));
+    input.liquidity.seriesMap.WALCL.splice(-20, 1);
+    expect(rawSmoothAtDecision(
+      input.liquidity.seriesMap,
+      input.liquidity.decisionDate,
+    )).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'MISSING_RAW_SMOOTH_HISTORY',
+    });
+  });
+
+  it('requires 66 aligned weekly points for 13-week features and 52 prior MAD values', () => {
+    const insufficient = dualInputFromRawUnits(syntheticResearchSeries(65));
+    expect(rawSmoothAtDecision(
+      insufficient.liquidity.seriesMap,
+      insufficient.liquidity.decisionDate,
+    )).toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'MISSING_RAW_SMOOTH_HISTORY',
+    });
+    const minimum = dualInputFromRawUnits(syntheticResearchSeries(66));
+    expect(rawSmoothAtDecision(
+      minimum.liquidity.seriesMap,
+      minimum.liquidity.decisionDate,
+    )).toMatchObject({
+      status: 'OK',
+      sampleCount: 66,
     });
   });
 

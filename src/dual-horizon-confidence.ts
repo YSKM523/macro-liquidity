@@ -79,6 +79,8 @@ export type DualHorizonIncompleteReason =
   | 'MISSING_FORMAL_FACTOR_COHORT'
   | 'MISSING_TACTICAL_HISTORY'
   | 'MISSING_RAW_SMOOTH_HISTORY'
+  | 'LIQUIDITY_INPUT_INVALID'
+  | 'LIQUIDITY_WORK_LIMIT_EXCEEDED'
   | 'CONFIDENCE_INPUT_INCOMPLETE';
 
 export type DualHorizonShadowResult =
@@ -107,6 +109,7 @@ export type DualHorizonShadowResult =
       shadowTargetExposure: number;
       rawSmooth: {
         agreement: RawSmoothAgreement;
+        reason: 'RAW_SMOOTH_HIGH' | 'RAW_SMOOTH_LOW' | 'RAW_SMOOTH_TRANSITION';
         rawLatent: number;
         smoothLatent: number;
         observationDate: string;
@@ -354,22 +357,172 @@ function researchRawUnits(
   };
 }
 
+export const DUAL_HORIZON_MIN_WEEKLY_POINTS = 66;
+export const DUAL_HORIZON_MAX_WEEKLY_POINTS = 170;
+const RAW_SMOOTH_AVAILABILITY_LAG_DAYS = 7;
+const DAY_MS = 86_400_000;
+
+function dateEpoch(date: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const epoch = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(epoch) && new Date(epoch).toISOString().slice(0, 10) === date
+    ? epoch
+    : null;
+}
+
+function addDays(date: string, days: number): string | null {
+  const epoch = dateEpoch(date);
+  return epoch == null ? null : new Date(epoch + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+function validSortedSeries(rows: Array<{ date: string; value: number }>): boolean {
+  let previous = '';
+  for (const row of rows) {
+    if (dateEpoch(row.date) == null || !Number.isFinite(row.value) || row.date <= previous) {
+      return false;
+    }
+    previous = row.date;
+  }
+  return true;
+}
+
+function cadenceValid(
+  rows: Array<{ date: string }>,
+  minimumDays: number,
+  maximumDays: number,
+): boolean {
+  return rows.slice(1).every((row, index) => {
+    const previous = dateEpoch(rows[index].date);
+    const current = dateEpoch(row.date);
+    if (previous == null || current == null) return false;
+    const gap = (current - previous) / DAY_MS;
+    return gap >= minimumDays && gap <= maximumDays;
+  });
+}
+
+function cadenceValidRawSmoothInput(
+  seriesMap: Record<string, Array<{ date: string; value: number }>>,
+  decisionDate: string,
+) {
+  const decisionEpoch = dateEpoch(decisionDate);
+  if (decisionEpoch == null) return null;
+  const names = ['WALCL', 'WDTGAL', 'WTREGEN', 'RRPONTSYD'] as const;
+  const visible = Object.fromEntries(names.map(name => [
+    name,
+    (seriesMap[name] ?? []).filter(row => row.date <= decisionDate),
+  ])) as Record<(typeof names)[number], Array<{ date: string; value: number }>>;
+  if (names.some(name => !validSortedSeries(visible[name]))) return null;
+
+  const anchors = visible.WALCL.filter(row => {
+    const availableDate = addDays(row.date, RAW_SMOOTH_AVAILABILITY_LAG_DAYS);
+    return availableDate != null && availableDate <= decisionDate;
+  }).slice(-DUAL_HORIZON_MAX_WEEKLY_POINTS);
+  if (anchors.length < DUAL_HORIZON_MIN_WEEKLY_POINTS
+    || !cadenceValid(anchors, 5, 10)
+    || anchors.some(row => new Date(`${row.date}T00:00:00Z`).getUTCDay() !== 3)) {
+    return null;
+  }
+  const latestWalcl = asOfFresh(visible.WALCL, decisionDate, SERIES.WALCL);
+  if (latestWalcl.value == null || latestWalcl.observationDate !== anchors.at(-1)!.date) {
+    return null;
+  }
+
+  const firstAnchor = anchors[0].date;
+  const firstTgaDate = addDays(firstAnchor, -6);
+  const firstRrpDate = addDays(firstAnchor, -16);
+  if (firstTgaDate == null || firstRrpDate == null) return null;
+  const wdtgalByDate = new Map(visible.WDTGAL.map(row => [row.date, row]));
+  const selectedWdtgal: Array<{ date: string; value: number }> = [];
+  const selectedWtregen = visible.WTREGEN.filter(
+    row => row.date >= firstTgaDate && row.date <= anchors.at(-1)!.date,
+  );
+  const selectedRrp = visible.RRPONTSYD.filter(
+    row => row.date >= firstRrpDate && row.date <= anchors.at(-1)!.date,
+  );
+  const selectedWtregenAnchors: Array<{ date: string; value: number }> = [];
+
+  for (const anchor of anchors) {
+    const wdtgal = wdtgalByDate.get(anchor.date);
+    if (!wdtgal) return null;
+    selectedWdtgal.push(wdtgal);
+
+    const tgaFresh = asOfFresh(selectedWtregen, anchor.date, SERIES.WTREGEN);
+    const tgaWeekStart = addDays(anchor.date, -6);
+    if (tgaFresh.value == null || tgaWeekStart == null) return null;
+    const tgaWeek = selectedWtregen.filter(
+      row => row.date >= tgaWeekStart && row.date <= anchor.date,
+    );
+    if (tgaWeek.length === 0) return null;
+    selectedWtregenAnchors.push(tgaWeek.at(-1)!);
+
+    const rrpVisible = selectedRrp.filter(row => row.date <= anchor.date);
+    const rrpFive = rrpVisible.slice(-5);
+    const rrpFresh = asOfFresh(selectedRrp, anchor.date, SERIES.RRPONTSYD);
+    if (rrpFresh.value == null || rrpFive.length !== 5 || !cadenceValid(rrpFive, 1, 4)) {
+      return null;
+    }
+  }
+  if (!cadenceValid(selectedWtregenAnchors, 5, 10)) return null;
+
+  return {
+    WALCL: anchors,
+    WDTGAL: selectedWdtgal,
+    WTREGEN: selectedWtregen,
+    RRPONTSYD: selectedRrp,
+  };
+}
+
 export function rawSmoothAtDecision(
   seriesMap: Record<string, Array<{ date: string; value: number }>>,
   decisionDate: string,
 ) {
-  const points = buildWeeklyNetLiquidity(researchRawUnits(seriesMap))
-    .filter((point: { availableDate: string }) => point.availableDate <= decisionDate);
-  const latest = buildContinuousChallenger(points).at(-1);
+  const aligned = cadenceValidRawSmoothInput(seriesMap, decisionDate);
+  if (!aligned) {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'MISSING_RAW_SMOOTH_HISTORY' as const,
+    };
+  }
+  let points;
+  let latest;
+  try {
+    points = buildWeeklyNetLiquidity(researchRawUnits(aligned))
+      .filter((point: { availableDate: string }) => point.availableDate <= decisionDate);
+    if (points.length !== aligned.WALCL.length) {
+      return {
+        status: 'DATA_INCOMPLETE' as const,
+        reason: 'MISSING_RAW_SMOOTH_HISTORY' as const,
+      };
+    }
+    latest = buildContinuousChallenger(points).at(-1);
+  } catch {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'MISSING_RAW_SMOOTH_HISTORY' as const,
+    };
+  }
   if (!latest || !Number.isFinite(latest.raw.latent) || !Number.isFinite(latest.smooth.latent)) {
     return {
       status: 'DATA_INCOMPLETE' as const,
       reason: 'MISSING_RAW_SMOOTH_HISTORY' as const,
     };
   }
+  const agreement = latest.agreement.confidence;
+  if (!isRawSmoothAgreement(agreement)) {
+    return {
+      status: 'DATA_INCOMPLETE' as const,
+      reason: 'MISSING_RAW_SMOOTH_HISTORY' as const,
+    };
+  }
+  const reason = agreement === 'HIGH'
+    ? 'RAW_SMOOTH_HIGH' as const
+    : agreement === 'LOW'
+      ? 'RAW_SMOOTH_LOW' as const
+      : 'RAW_SMOOTH_TRANSITION' as const;
   return {
     status: 'OK' as const,
-    agreement: latest.agreement.confidence as RawSmoothAgreement,
+    agreement,
+    reason,
     rawLatent: latest.raw.latent as number,
     smoothLatent: latest.smooth.latent as number,
     observationDate: latest.observationDate as string,

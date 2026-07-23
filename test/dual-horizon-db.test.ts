@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Miniflare } from 'miniflare';
 import {
+  loadDualHorizonLiquiditySeries,
   loadDualHorizonSnapshotInputs,
   loadLiquidityStructureSeries,
 } from '../src/db';
@@ -135,9 +136,34 @@ describe('dual-horizon PIT inputs', () => {
     await seedPitRow(db, 'WTREGEN', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 700);
     await seedPitRow(db, 'WTREGEN', '2024-01-03', '2024-01-11', '2024-01-12T00:00:00Z', 710);
     const old = await loadLiquidityStructureSeries(db, '2024-01-12T00:00:00Z');
+    const bounded = await loadDualHorizonLiquiditySeries(db, '2024-01-12T00:00:00Z');
+    expect(bounded.seriesMap).toEqual(old.seriesMap);
     expect(old.seriesMap.WTREGEN).toEqual([{ date: '2024-01-03', value: 700 }]);
     const revised = await loadLiquidityStructureSeries(db, '2024-01-12T00:00:00.001Z');
     expect(revised.seriesMap.WTREGEN).toEqual([{ date: '2024-01-03', value: 710 }]);
+    await mf.dispose();
+  });
+
+  it('fails closed before dual-horizon raw revision work exceeds its sentinel', async () => {
+    const { mf, db } = await migratedDb();
+    await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 7_000);
+    await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-05', '2024-01-06T00:00:00Z', 7_010);
+    await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-06', '2024-01-07T00:00:00Z', 7_020);
+
+    await expect(loadDualHorizonLiquiditySeries(
+      db,
+      '2024-01-10T00:00:00Z',
+      { rawRevisionLimit: 2, selectedRowLimit: 10 },
+    )).rejects.toMatchObject({
+      name: DualHorizonDomainError.name,
+      reason: 'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      asOf: '2024-01-10T00:00:00Z',
+      availableDiagnostics: {
+        work: 'RAW_REVISIONS',
+        limit: 2,
+        observedAtLeast: 3,
+      },
+    });
     await mf.dispose();
   });
 
