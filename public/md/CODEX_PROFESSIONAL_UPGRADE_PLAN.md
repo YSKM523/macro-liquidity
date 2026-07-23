@@ -27,6 +27,7 @@
 | PR-15 | 已完成（本地） | `710bb30`–`b79aab3` | 正式 event-time 13 周标签、按 outcome purge + 91 日 embargo、literal Champion 治理身份、typed metrics 与真实前瞻 holdout；57 files / 759 tests、focused 103、双重复审 Ready；未部署、未修改远程数据库 |
 | PR-16 | 已完成（本地） | `d7aba3c`–`d0f59cd` | 共享正式 4/8/13 周 outcome、七个分数桶、冻结 ledger 与前序绑定修订、BH-FDR/DSR fail-closed、八个压力事件及固定形状 v1 API/UI；58 files / 777 tests、TypeScript、lint、迁移幂等与 dry-run 通过，双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion、PR-11/12 决策及数据库均不变，未部署 |
 | PR-17 | 已完成（本地；OOS 证据待未来成熟） | `74620fd`–`9415a98` | 冻结 TGA/RRP、数据库时间政策账本、WALCL 阶段矩阵、四臂 Credit/Funding 回溯 PIT 消融和精确 8 因子基准；新增 strict as-of/override/latest-vintage API、执行与指标 fail-closed、四次 outcome build 硬上限及 Shadow UI；60 files / 800 tests、双重复审 Ready（0 Critical / 0 Important / 0 Minor）；Champion 不变，未部署 |
+| PR-18 | 已完成（本地；Shadow-only，非 unseen OOS / 非 promotion） | `05a9aa8`–`PR-18 closure HEAD` | ALG-10 13 周 Strategic / 4 周 Tactical 与 ALG-11 五组件置信度已实现；focused 5 files / 133 tests、full 62 files / 860 tests、correctness 79、no-lookahead 42、rebuild 5、TypeScript 与 lint 均通过；规格复审 Ready（0 Critical / 0 Important / 0 Minor），代码复审 Ready（0 Critical / 0 Important / 1 documented Minor）；Champion 不变，未部署 |
 
 当前状态只代表本地仓库已经实现并验证；尚未推送 GitHub、部署 staging/production，也未修改远程数据库。
 
@@ -1257,6 +1258,11 @@ Strategic Score（13 周）
 战术分决定上下微调
 ```
 
+PR-18 已完成本地 Shadow-only 实现：persisted Champion 13 周分数决定
+Strategic/base risk budget，只有 `netliqTrend` 用 4 周重算 Tactical，并保留
+8 个字面正权重及 40/60 的包含边界。它不改变 Champion、正式 API、快照或
+正式仓位，也不构成 unseen OOS 或 promotion 证据。
+
 ---
 
 ## ALG-11 增加模型置信度
@@ -1280,6 +1286,13 @@ reason
 ```
 
 高分低置信不得给出激进仓位建议。
+
+PR-18 已完成本地 Shadow-only 实现：数据完整度、数据新鲜度、同 regime
+governed 样本量、主要因子一致性、Raw/Smooth 同向五项各占 20%。置信度低于
+60 时阻止正向 Tactical 调整，低于 40 时将 Shadow exposure 上限设为 0.75；
+比较使用未四舍五入的值。Raw/Smooth 由 governed PIT runtime 重建，属于与
+PR-11 current-vintage research artifact 不同的 evidence class，不能恢复其
+`DROP_RESEARCH` 结论，也没有 unseen OOS 或 promotion 证据。
 
 ---
 
