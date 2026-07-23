@@ -620,6 +620,38 @@ describe('/api/v1 governance routes', () => {
     });
   });
 
+  it('serializes a typed work-limit failure with deterministic cutoff evidence', async () => {
+    const complete = completeDualHorizonInputs();
+    dbState.dualHorizonSnapshotInputs = complete.snapshots;
+    vi.mocked(loadDualHorizonLiquiditySeries).mockRejectedValueOnce(
+      new DualHorizonDomainError(
+        'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+        complete.snapshots.asOfCutoff,
+        { work: 'RAW_REVISIONS', limit: 12_000, observedAtLeast: 12_001 },
+      ),
+    );
+
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/dual-horizon',
+    ), env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'DATA_INCOMPLETE',
+      reason: 'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      as_of_cutoff: complete.snapshots.asOfCutoff,
+      result: {
+        status: 'DATA_INCOMPLETE',
+        reasons: ['LIQUIDITY_WORK_LIMIT_EXCEEDED'],
+        availableDiagnostics: {
+          work: 'RAW_REVISIONS',
+          limit: 12_000,
+          observedAtLeast: 12_001,
+        },
+      },
+    });
+  });
+
   it('exposes the liquidity-structure challenger without changing the Champion', async () => {
     const date = (index: number) => new Date(Date.UTC(2020, 0, 1 + index * 7)).toISOString().slice(0, 10);
     dbState.liquidityStructureInputs = {

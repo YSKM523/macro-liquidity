@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Miniflare } from 'miniflare';
 import {
+  DUAL_HORIZON_LIQUIDITY_LIMITS,
   loadDualHorizonLiquiditySeries,
   loadDualHorizonSnapshotInputs,
   loadLiquidityStructureSeries,
@@ -113,6 +114,19 @@ async function seedPitRow(
 }
 
 describe('dual-horizon PIT inputs', () => {
+  it('freezes the dual-horizon observation and row work bounds', () => {
+    expect(DUAL_HORIZON_LIQUIDITY_LIMITS).toEqual({
+      minimumWeeklyPoints: 66,
+      maximumWeeklyPoints: 170,
+      maximumWeeklyGapDays: 10,
+      rrpFivePointWarmupDays: 16,
+      observationLookbackDays: 1706,
+      rawRevisionLimit: 12_000,
+      overrideLimit: 2_000,
+      selectedRowLimit: 2_500,
+    });
+  });
+
   it('selects only governed weekly snapshots strictly visible at one cutoff', async () => {
     const { mf, db } = await migratedDb();
     await seedOfficialSnapshot(db, {
@@ -201,6 +215,28 @@ describe('dual-horizon PIT inputs', () => {
         work: 'RAW_REVISIONS',
         limit: 2,
         observedAtLeast: 3,
+      },
+    });
+    await mf.dispose();
+  });
+
+  it('fails closed before selected dual-horizon rows exceed their sentinel', async () => {
+    const { mf, db } = await migratedDb();
+    await seedPitRow(db, 'WALCL', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 7_000);
+    await seedPitRow(db, 'WDTGAL', '2024-01-03', '2024-01-04', '2024-01-05T00:00:00Z', 500);
+
+    await expect(loadDualHorizonLiquiditySeries(
+      db,
+      '2024-01-10T00:00:00Z',
+      { rawRevisionLimit: 2, selectedRowLimit: 1 },
+    )).rejects.toMatchObject({
+      name: DualHorizonDomainError.name,
+      reason: 'LIQUIDITY_WORK_LIMIT_EXCEEDED',
+      asOf: '2024-01-10T00:00:00Z',
+      availableDiagnostics: {
+        work: 'SELECTED_ROWS',
+        limit: 1,
+        observedAtLeast: 2,
       },
     });
     await mf.dispose();
