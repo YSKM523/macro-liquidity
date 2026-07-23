@@ -41,6 +41,12 @@ const dbState = vi.hoisted(() => ({
   exportRows: [] as any[],
   adminRateAllowed: true,
   backtestRows: [] as any[],
+  liquidityStructureInputs: {
+    asOfCutoff: '2030-01-01T00:00:00Z', decisionDate: '2029-12-31',
+    seriesMap: { WDTGAL: [], RRPONTSYD: [], WALCL: [] },
+    provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 0, dataRunCount: 0 },
+  } as any,
+  policyRegime: { status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' } as any,
 }));
 
 vi.mock('../src/service', () => ({
@@ -56,6 +62,8 @@ vi.mock('../src/db', () => ({
   officialSnapshotHistory: vi.fn(async () => []),
   loadBacktestRows: vi.fn(async () => dbState.backtestRows),
   loadEventBacktestInputs: vi.fn(async () => dbState.eventInputs),
+  loadLiquidityStructureSeries: vi.fn(async () => dbState.liquidityStructureInputs),
+  resolvePolicyRegime: vi.fn(async () => dbState.policyRegime),
   exportOfficialSnapshots: vi.fn(async () => dbState.exportRows),
   recordAdminAudit: vi.fn(async () => undefined),
   reserveAdminRateLimit: vi.fn(async () => dbState.adminRateAllowed),
@@ -144,6 +152,12 @@ beforeEach(() => {
   dbState.exportRows = [];
   dbState.adminRateAllowed = true;
   dbState.backtestRows = [];
+  dbState.liquidityStructureInputs = {
+    asOfCutoff: '2030-01-01T00:00:00Z', decisionDate: '2029-12-31',
+    seriesMap: { WDTGAL: [], RRPONTSYD: [], WALCL: [] },
+    provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 0, dataRunCount: 0 },
+  };
+  dbState.policyRegime = { status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' };
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
 });
 
@@ -204,6 +218,45 @@ describe('public error contract', () => {
 });
 
 describe('/api/v1 governance routes', () => {
+  it('exposes the liquidity-structure challenger without changing the Champion', async () => {
+    const date = (index: number) => new Date(Date.UTC(2020, 0, 1 + index * 7)).toISOString().slice(0, 10);
+    dbState.liquidityStructureInputs = {
+      asOfCutoff: '2030-01-01T00:00:00Z', decisionDate: '2029-12-31',
+      seriesMap: {
+        WDTGAL: Array.from({ length: 60 }, (_, index) => ({ date: date(index), value: 1_000 + index * 10 })),
+        RRPONTSYD: Array.from({ length: 60 }, (_, index) => ({ date: date(index), value: 100 + index })),
+        WALCL: Array.from({ length: 20 }, (_, index) => ({ date: date(index), value: 7_000 + index * 10 })),
+      },
+      provenance: { methodology: 'APPEND_ONLY_AS_OF', rowCount: 140, dataRunCount: 1 },
+    };
+    dbState.policyRegime = {
+      status: 'OK', regime: 'QE', eventId: 'qe-v1', eventKey: 'qe-cycle', revision: 1,
+      effectiveFrom: '2020-01-01', effectiveTo: null,
+      sourceDocument: 'https://www.federalreserve.gov/example.htm',
+      sourcePublishedAt: '2019-12-01T00:00:00Z', approvedBy: 'governance', createdAt: '2019-12-02T00:00:00Z',
+    };
+    dbState.eventInputs = formalEventInputs(4);
+    const complete = {
+      netliqTrend: 80, impulse: 60, credit: 20, funding: 40,
+      rates: 50, dollar: 70, reserveAdequacy: 60, curve: 90,
+    };
+    dbState.eventInputs.signals = dbState.eventInputs.signals.map((signal: any) => ({ ...signal, factors: complete }));
+    const response = await worker.fetch(new Request(
+      'https://example.test/api/v1/challengers/liquidity-structure?as_of=2030-01-01T00%3A00%3A00Z',
+    ), env);
+    const body = await response.json() as any;
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      api_version: 'v1', challenger_id: 'LIQUIDITY_STRUCTURE_CHALLENGER_V1',
+      mode: 'SHADOW_ONLY', champion_change: false,
+      tga_buffer: { status: 'OK', bufferState: 'SUFFICIENT' },
+      policy_regime: { status: 'OK', regime: 'QE' },
+      walcl_policy: { status: 'OK', score: 80 },
+      weight_benchmarks: { status: 'OK', factorCount: 8 },
+      funding_credit_ablation: { status: 'OK' },
+    });
+  });
+
   it('returns strict PIT score buckets, multiplicity status, and all registered stress events', async () => {
     dbState.eventInputs = formalEventInputs(80);
     const cutoff = '2030-01-01T00:00:00Z';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-ignore Node-only migration fixture.
 import { readFileSync } from 'node:fs';
 import { Miniflare } from 'miniflare';
-import { resolvePolicyRegime } from '../src/db';
+import { loadLiquidityStructureSeries, resolvePolicyRegime } from '../src/db';
 
 const MIGRATIONS = [
   '0001_init.sql', '0002_add_coverage.sql', '0003_meta.sql', '0004_snapshot_quality.sql',
@@ -83,5 +83,30 @@ describe('append-only policy regime events', () => {
     })).resolves.toEqual({ status: 'POLICY_REGIME_UNAVAILABLE', reason: 'NO_VISIBLE_ACTIVE_EVENT' });
     await mf.dispose();
     await mf2.dispose();
+  }, 30_000);
+});
+
+describe('liquidity-structure PIT input loader', () => {
+  it('selects the latest vintage strictly visible at the requested cutoff', async () => {
+    const { mf, db } = await migratedDb();
+    await db.prepare("INSERT INTO ingest_runs (run_id,state,mode,started_at) VALUES ('pit-source','ACTIVE','FULL','2024-01-01T00:00:00Z')").run();
+    const add = (series: string, observation: string, vintage: string, fetched: string, value: number) => db.prepare(`
+      INSERT INTO observations_pit
+        (series_id,observation_date,vintage_date,released_at,fetched_at,tradable_at,source,checksum,
+         data_run_id,release_time_status,value)
+      VALUES (?,?,?, ?,?,?,'ALFRED',?,'pit-source','OBSERVED_AT_FETCH',?)
+    `).bind(series, observation, vintage, fetched, fetched, fetched, `${series}-${vintage}`, value).run();
+    await add('WDTGAL', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 100);
+    await add('WDTGAL', '2024-01-03', '2024-01-11', '2024-01-11T20:00:00Z', 110);
+    await add('RRPONTSYD', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 500);
+    await add('WALCL', '2024-01-03', '2024-01-04', '2024-01-04T20:00:00Z', 7_000);
+
+    const old = await loadLiquidityStructureSeries(db, '2024-01-10T00:00:00Z');
+    expect(old).toMatchObject({ asOfCutoff: '2024-01-10T00:00:00Z', decisionDate: '2024-01-09' });
+    expect(old.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 100 }]);
+    const revised = await loadLiquidityStructureSeries(db, '2024-01-12T00:00:00Z');
+    expect(revised.seriesMap.WDTGAL).toEqual([{ date: '2024-01-03', value: 110 }]);
+    await expect(loadLiquidityStructureSeries(db, 'bad')).rejects.toThrow(/invalid liquidity-structure as_of/i);
+    await mf.dispose();
   }, 30_000);
 });
